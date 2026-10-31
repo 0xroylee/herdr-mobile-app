@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The app runs this package too, so Node's types stay out.
+    "types": []
+  },
+  "include": ["src"]
+}

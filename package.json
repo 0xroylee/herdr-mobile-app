@@ -1,0 +1,24 @@
+{
+  "name": "herdr-mobile",
+  "private": true,
+  "description": "Phone and web client for herdr-core agents, reached over Tailscale",
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun test",
+    "lint": "biome check .",
+    "format": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@types/bun": "^1.4.4",
+    "typescript": "~6.0.3"
+  }
+}

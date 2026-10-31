@@ -1,0 +1,4 @@
+[install]
+# Hoisted node_modules, like npm. Expo supports isolated installs, but some React Native libraries
+# fail to build or resolve under them. Tamagui runs Expo SDK 58 on Bun 1.4 with this setting.
+linker = "hoisted"
