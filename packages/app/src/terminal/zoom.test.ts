@@ -4,6 +4,7 @@ import {
   cellSizeForZoom,
   clampZoom,
   DEFAULT_ZOOM,
+  gridThatFits,
   MAX_ZOOM,
   MIN_ZOOM,
   resetZoom,
@@ -30,6 +31,15 @@ test("uses the kit's default terminal cell size and resets to its default zoom",
     height: 16.4,
   });
   expect(resetZoom()).toBe(DEFAULT_ZOOM);
+});
+
+test("fits the grid to the viewport at the displayed zoom", () => {
+  const viewport = { width: 366, height: 480 };
+
+  expect(gridThatFits(viewport, DEFAULT_ZOOM)).toEqual({ cols: 57, rows: 29 });
+  expect(gridThatFits(viewport, 16)).toEqual({ cols: 38, rows: 19 });
+  expect(gridThatFits(viewport, 8)).toEqual({ cols: 76, rows: 38 });
+  expect(gridThatFits({ width: 0, height: 0 }, DEFAULT_ZOOM)).toEqual({ cols: 0, rows: 0 });
 });
 
 test("calculates the vertical offset that aligns content to the bottom", () => {

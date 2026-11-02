@@ -13,6 +13,7 @@ export const REQUIRED_HC_METHODS = [
   "terminal.attach",
   "terminal.send",
   "terminal.keys",
+  "terminal.kill",
   "terminal.run",
   "events.subscribe",
   "doc.get",

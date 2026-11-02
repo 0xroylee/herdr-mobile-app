@@ -11,6 +11,7 @@ export const attach: HcParams<"terminal.attach"> = {
   observe: true,
 };
 export const keys: HcParams<"terminal.keys"> = { terminal: "t1", keys: ["esc", "ctrl+c"] };
+export const kill: HcParams<"terminal.kill"> = { terminal: "t1" };
 export const send: HcParams<"terminal.send"> = { terminal: "t1", text: "hi", if: "idle" };
 export const subscribe: HcParams<"events.subscribe"> = { labels: { "herdr.space": "sp1" } };
 export const stop: HcParams<"server.stop"> = {};
