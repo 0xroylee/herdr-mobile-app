@@ -2,46 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { JsonRpcNotification } from "@herdr-mobile/protocol";
 import { createClient, type HcClient } from "./client.ts";
 import { HcRpcError, ProtocolError, TransportClosedError } from "./errors.ts";
-import { utf8Decode, utf8Encode } from "./utf8.ts";
-
-type Message = Record<string, unknown>;
-
-const line = (message: unknown) => utf8Encode(`${JSON.stringify(message)}\n`);
-const lines = (...messages: unknown[]) =>
-  utf8Encode(messages.map((m) => `${JSON.stringify(m)}\n`).join(""));
-const decode = (bytes: Uint8Array) => JSON.parse(utf8Decode(bytes)) as Message;
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-function deferred<T = void>() {
-  let resolve: (value: T) => void = () => {};
-  let reject: (error: unknown) => void = () => {};
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Records how a promise settles without awaiting it. */
-function track<T>(promise: Promise<T>) {
-  const state: { settled: boolean; value?: T; error?: unknown } = { settled: false };
-  promise.then(
-    (value) => Object.assign(state, { settled: true, value }),
-    (error) => Object.assign(state, { settled: true, error }),
-  );
-  return state;
-}
-
-/** A client whose writes are captured. */
-function capture() {
-  const writes: Uint8Array[] = [];
-  const client = createClient({
-    write: (bytes) => {
-      writes.push(bytes);
-    },
-  });
-  return { client, writes, requests: () => writes.map(decode) };
-}
+import { capture, decode, deferred, flush, line, lines, type Message, track } from "./testing.ts";
+import { utf8Encode } from "./utf8.ts";
 
 describe("plain requests", () => {
   test("writes one LF-terminated JSON-RPC line through the injected writer", () => {
