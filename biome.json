@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/schema/*.openrpc.json", "!packages/app/assets"]
+    "includes": ["**", "!**/schema/*.openrpc.json", "!packages/app/assets", "!docs/reference"]
   },
   "formatter": {
     "indentStyle": "space",
