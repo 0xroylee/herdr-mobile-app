@@ -1,8 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The app runs this package too, so Node's types stay out.
+    // The app runs this package too, so runtime code gets no Node or Bun types.
     "types": []
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
