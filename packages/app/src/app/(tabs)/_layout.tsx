@@ -1,10 +1,14 @@
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { Icon } from "@/ui/icon.tsx";
+import { routes } from "../../routes.ts";
+import { shouldRedirectToPair } from "../../screens/pair/pair-fragment.ts";
+import { machinesStore } from "../../store/platform.ts";
 
 export default function TabsLayout() {
+  const hasMachine = machinesStore((state) => Object.keys(state.machines).length > 0);
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
   const tabBarHeight = Math.ceil(49 + 13 * (Math.max(1, fontScale) - 1)) + insets.bottom;
@@ -14,6 +18,8 @@ export default function TabsLayout() {
     "--color-dim",
     "--color-border",
   ] as const);
+
+  if (shouldRedirectToPair(hasMachine)) return <Redirect href={routes.pair} />;
 
   return (
     <Tabs
