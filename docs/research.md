@@ -177,7 +177,7 @@ herdr-mobile-app/
 
 ## Order of work
 
-1. **Prototype script.** Install herdr-app and run Claude Code and Codex in it. Write a small script that connects to core, logs status changes, and renders one agent's terminal in watch mode with `@xterm/headless`. Confirm Claude Code's status reports arrive. Claude Code only reports after the terminal answers a startup query, and [herdr discussion #5106](https://github.com/herdrdev/herdr/discussions/5106) shows that failing.
+1. **Prototype script.** Install herdr-app and run Claude Code and Codex in it. Write a small script that connects to core, logs status changes, and renders one agent's terminal in watch mode with `@xterm/headless`. Confirm Claude Code's status reports arrive. Claude Code only reports after the terminal answers a startup query, and [herdr discussion #5106](https://github.com/herdrdev/herdr/discussions/5106) shows that failing. Since 2026-11-02, `bun run prototype:hc` does this against a scratch core with a shell fixture that reports through OSC 7501; see [prototype.md](prototype.md). Checking Claude Code's and Codex's own reports in a herdr-app terminal is still open.
 2. **First app over Tailscale.** Bridge on `127.0.0.1` behind `tailscale serve`, with the identity header check and a pairing token. App with an agent list sorted blocked, done, working, idle, which matches the desktop app. Add a watch-mode terminal, a text box that uses `terminal.send`, a key bar that uses `terminal.keys`, and push on blocked, done and error.
 3. **Web build.** The bridge serves the Expo web build on the same hostname, so any browser on the tailnet works.
 4. **Extras.** Spaces and tabs, starting agents from the phone with `terminal.run` and the space and tab labels, more machines, a chat view built from transcripts, prompts as buttons.
@@ -292,6 +292,13 @@ From [schema/README.md](https://github.com/herdrdev/herdr-core/blob/master/schem
 - A 7501 status record has `state`, `kind`, `progress`, `app`, `title` and `msg`. `kind` is permission, question or auth, and only appears on blocked records. The `Terminal` record carries `status`, `status_ms`, `turn`, `title`, `labels`, `foreground`, `parent`, `state` and exit details.
 - `doc.get {name}` and `doc.set {name, value, version}` store opaque JSON with version checks, up to 1 MiB per value. herdr-app keeps its layout in the document named `herdr-app`. Doc events carry only the name and version.
 - On Unix the socket is `<session>.sock` under `$XDG_RUNTIME_DIR/herdr-core/` when that is set, then `/run/user/<uid>/herdr-core/` if it exists, then the session's state directory `~/.local/state/herdr-core/<session>/`. `HC_SOCKET` overrides it. Prefer `hc connect` over hard-coded paths.
+
+Seen on hc 0.1.16 in scratch sessions, 2026-11-02:
+
+- `hc connect` in a new `HC_SESSION` starts that session's core. A holder socket, `<session>.holder.<id>.sock`, sits beside the core's.
+- A program reports status by printing `ESC ] 7501 ; state=working ESC \`. With no record id it sets the root status, and subscribers get `status` events with `{"status":{"state":"working"},"records":{},"reported":true}`, then `turn` when the state leaves `working`.
+- The first paint reached the client before the code awaiting `terminal.attach` ran, so a client has to keep stream frames until it knows their channel.
+- `server.stop` answers `{"stopped": true}`. Terminals finish with reason `server_stop`, `hc connect` exits 0, and both sockets are gone within a second.
 
 ### herdr 0.9 TUI API, for comparison
 

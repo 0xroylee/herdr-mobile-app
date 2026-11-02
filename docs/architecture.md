@@ -71,6 +71,8 @@ flowchart TB
   client -. "later, over the bridge WebSocket" .-> screens
 ```
 
+`bun run prototype:hc` runs the whole stack once against a scratch core. [prototype.md](prototype.md) covers its isolation, deadlines, interruption and cleanup.
+
 ## Dependencies
 
 | Package           | Used by              | Version    | Why                                                                                                                     |

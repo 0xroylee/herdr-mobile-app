@@ -140,7 +140,12 @@ describe("portability", () => {
       expect(files).toContain(`packages/hc-client/src/${file}`);
     }
     expect(files).toContain("packages/protocol/src/wire.ts");
+    // Tests, test helpers and build tooling never reach the runtime graph.
     expect(files.some((file) => file.endsWith(".test.ts"))).toBe(false);
+    expect(files).not.toContain("packages/hc-client/src/testing.ts");
+    expect(files.some((file) => file.includes("/scripts/") || file.includes("fixtures"))).toBe(
+      false,
+    );
   });
 
   test("the checker names each kind of problem", () => {

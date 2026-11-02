@@ -33,6 +33,21 @@ export const tripleCell: HcParams<"terminal.attach">["display"] = { cell: [8, 16
 // @ts-expect-error server.stop takes no params
 export const stopWithParams: HcParams<"server.stop"> = { force: true };
 
+/** True only when A and B are the same type. */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+// The result fields hc-client routes and checks by.
+export const attachChannel: Equals<HcResult<"terminal.attach">["channel"], number> = true;
+export const subscribeChannel: Equals<
+  HcResult<"events.subscribe">["channel"],
+  number | null | undefined
+> = true;
+export const subscribeSeq: Equals<HcResult<"events.subscribe">["seq"], number> = true;
+export const helloGeneration: Equals<HcResult<"hello">["generation"], number> = true;
+export const runAddress: Equals<HcResult<"terminal.run">["address"], string> = true;
+export const stopped: Equals<HcResult<"server.stop">["stopped"], boolean> = true;
+
 /** Every required method has an entry in the generated map. */
 export const covered: (typeof REQUIRED_HC_METHODS)[number] extends keyof HcMethodMap
   ? true

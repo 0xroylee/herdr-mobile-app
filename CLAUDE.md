@@ -21,6 +21,8 @@ bun run typecheck   # every workspace
 bun test            # Bun's test runner
 bun run lint        # Biome
 bun run format      # Biome, writes fixes, Markdown included
+bun run protocol:check   # generated hc types match schema/hc.openrpc.json
+bun run prototype:hc     # one checked run against a scratch core, see docs/prototype.md
 ```
 
 ## Rules
