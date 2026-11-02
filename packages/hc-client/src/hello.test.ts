@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   type Frame,
   FrameKind,
-  type HelloResult,
   INITIAL_STREAM_CREDIT,
   type JsonRpcNotification,
   type ListResult,
@@ -18,20 +17,12 @@ import {
   deferred,
   flush,
   frame,
+  HC_0_1_16,
   line,
   track,
 } from "./testing.ts";
 import { utf8Encode } from "./utf8.ts";
 
-/** hc 0.1.16's hello reply as research.md records it, with the method list cut short. */
-const HC_0_1_16: HelloResult = {
-  generation: 1,
-  version: "0.1.16",
-  core: { id: "0f3c9a2e", name: "agent-mac" },
-  framed: true,
-  methods: ["hello", "terminal.list", "terminal.attach", "events.subscribe", "doc.get"],
-  features: ["framed", "attach", "events", "status", "shell"],
-};
 const LIST: ListResult = { terminals: [], hidden_finished: 0, machines: [] };
 const IN_PROGRESS = "hello negotiation in progress";
 

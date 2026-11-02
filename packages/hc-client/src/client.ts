@@ -1,8 +1,8 @@
 // A herdr-core connection: the caller feeds bytes in and runs the writes out. Requests register
 // before they are written and settle by id, following json-rpc-2.0's JSONRPCClient. Writes run one
 // at a time, in order. hello() moves the connection to framed mode behind an admission barrier;
-// then channel 0 carries JSON-RPC and every other channel's frames go to its routed handler.
-// end() settles everything still open.
+// then channel 0 carries JSON-RPC and every other channel's frames go to its routed handler, such
+// as an attachment. end() settles everything still open.
 
 import {
   type Frame,
@@ -14,7 +14,14 @@ import {
   INITIAL_STREAM_CREDIT,
   type JsonRpcNotification,
 } from "@herdr-mobile/protocol";
-import { HcRpcError, ProtocolError, type RpcErrorObject, TransportClosedError } from "./errors.ts";
+import { type AttachHandle, Attachment, type AttachOptions } from "./attach.ts";
+import {
+  HcRpcError,
+  ProtocolError,
+  type RpcErrorObject,
+  StreamClosedError,
+  TransportClosedError,
+} from "./errors.ts";
 import { encodeFrame, FrameDecoder } from "./frame.ts";
 import { LineDecoder } from "./lines.ts";
 import { utf8Decode, utf8Encode } from "./utf8.ts";
@@ -50,6 +57,8 @@ interface WriteJob {
   reject(error: unknown): void;
   /** Runs synchronously when this write fails, before the connection ends. */
   onError: ((error: unknown) => void) | undefined;
+  /** A stream frame's check, made again when its turn comes: false drops it unwritten. */
+  valid: (() => boolean) | undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,6 +91,9 @@ export class HcClient {
   private readonly pending = new Map<number, PendingCall>();
   private readonly listeners = new Set<NotificationListener>();
   private readonly channels = new Map<number, ChannelHandler>();
+  private readonly attachments = new Map<number, Attachment>();
+  /** Channels whose stream is over. The core never reuses one, so their late frames are dropped. */
+  private readonly closedChannels = new Set<number>();
   private readonly stashed = new Map<number, { frames: Frame[]; bytes: number }>();
   private mode: Mode = "plain";
   private nextId = 1;
@@ -114,7 +126,35 @@ export class HcClient {
 
   call<M extends HcMethod>(method: M, params: HcParams<M>): Promise<HcResult<M>> {
     if (method === "hello") return Promise.reject(new Error("negotiate with hello(), not call()"));
+    if (method === "terminal.attach") {
+      return Promise.reject(new Error("open attachments with attach(), not call()"));
+    }
     return this.request(method, params) as Promise<HcResult<M>>;
+  }
+
+  /**
+   * Attaches to a terminal over a framed connection. The first paint can arrive before the reply;
+   * it is kept and given to `onData` first. See AttachHandle for input, credit and detach.
+   */
+  async attach(params: HcParams<"terminal.attach">, options: AttachOptions): Promise<AttachHandle> {
+    if (this.ended) throw new TransportClosedError(this.endCause);
+    if (!this.isFramed) throw new Error("attach needs a framed connection: call hello() first");
+    const result = (await this.request("terminal.attach", params)) as HcResult<"terminal.attach">;
+    if (this.ended) throw new TransportClosedError(this.endCause);
+    const { channel } = result;
+    const attachment = new Attachment(
+      {
+        send: (kind, payload, valid) => this.enqueueFrame({ channel, kind, payload }, valid),
+        release: () => this.releaseChannel(channel),
+      },
+      channel,
+      result.terminal,
+      params.observe === true,
+      options,
+    );
+    this.attachments.set(channel, attachment);
+    this.routeChannel(channel, (frame) => attachment.receive(frame));
+    return attachment;
   }
 
   /**
@@ -168,7 +208,7 @@ export class HcClient {
     this.stashed.delete(channel);
     for (const frame of early?.frames ?? []) handler(frame);
     return () => {
-      if (this.channels.get(channel) === handler) this.channels.delete(channel);
+      if (this.channels.get(channel) === handler) this.releaseChannel(channel);
     };
   }
 
@@ -206,6 +246,8 @@ export class HcClient {
     this.active = undefined;
     this.queue = [];
     for (const job of jobs) job.reject(new TransportClosedError(cause));
+    for (const attachment of this.attachments.values()) attachment.transportEnded(cause);
+    this.attachments.clear();
     this.listeners.clear();
     this.channels.clear();
     this.stashed.clear();
@@ -292,12 +334,33 @@ export class HcClient {
     for (const waiter of waiters) waiter();
   }
 
-  private enqueue(bytes: Uint8Array, onError?: (error: unknown) => void): Promise<void> {
+  private enqueue(
+    bytes: Uint8Array,
+    onError?: (error: unknown) => void,
+    valid?: () => boolean,
+  ): Promise<void> {
     if (this.ended) return Promise.reject(new TransportClosedError(this.endCause));
     return new Promise((resolve, reject) => {
-      this.queue.push({ bytes, epoch: this.epoch, resolve, reject, onError });
+      this.queue.push({ bytes, epoch: this.epoch, resolve, reject, onError, valid });
       this.pump();
     });
+  }
+
+  private enqueueFrame(frame: Frame, valid: () => boolean): Promise<void> {
+    let bytes: Uint8Array;
+    try {
+      bytes = encodeFrame(frame);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.enqueue(bytes, undefined, valid);
+  }
+
+  private releaseChannel(channel: number): void {
+    this.channels.delete(channel);
+    this.attachments.delete(channel);
+    this.stashed.delete(channel);
+    this.closedChannels.add(channel);
   }
 
   private pump(): void {
@@ -308,6 +371,10 @@ export class HcClient {
         const job = this.queue.shift() as WriteJob;
         if (job.epoch !== this.epoch) {
           job.reject(new TransportClosedError(this.endCause));
+          continue;
+        }
+        if (job.valid && !job.valid()) {
+          job.reject(new StreamClosedError());
           continue;
         }
         this.active = job;
@@ -395,6 +462,7 @@ export class HcClient {
   }
 
   private route(frame: Frame): unknown {
+    if (this.closedChannels.has(frame.channel)) return undefined;
     const handler = this.channels.get(frame.channel);
     if (handler) {
       try {
