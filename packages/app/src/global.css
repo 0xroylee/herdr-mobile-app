@@ -40,6 +40,7 @@
       --color-done: #3fb68b;
       --color-idle: #8b8f95;
       --color-danger: #ef6f6c;
+      --color-danger-fg: #ffffff;
       --color-focus: #a7b4c6;
       --color-blocked-tint: #e2a03f29;
       --color-prompt-bg: #27241f;
@@ -67,6 +68,7 @@
       --color-done: #39a380;
       --color-idle: #99a0ad;
       --color-danger: #d14b45;
+      --color-danger-fg: #ffffff;
       --color-focus: #5b6b82;
       --color-blocked-tint: #d7903229;
       --color-prompt-bg: #fcf6ef;

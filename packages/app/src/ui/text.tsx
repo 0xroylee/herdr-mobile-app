@@ -10,6 +10,7 @@ export const textTones = {
   blocked: "text-blocked",
   done: "text-done",
   danger: "text-danger",
+  "danger-fg": "text-danger-fg",
 } as const;
 
 export type TextTone = keyof typeof textTones;
@@ -30,6 +31,9 @@ export const textVariants = {
   tabLabel: "font-sans-medium text-[10.5px] leading-[13px]",
   terminal: "font-mono text-[10.6px] leading-[16.4px]",
   mono: "font-mono text-[11.5px] leading-[16px]",
+  markCompact: "font-sans-semibold text-[11px] leading-[16px]",
+  sectionCount: "font-sans text-[13px] leading-[16px]",
+  buttonLarge: "font-sans-semibold text-[16px] leading-[20px]",
 } as const;
 
 export type TextVariant = keyof typeof textVariants;
@@ -50,6 +54,9 @@ const defaultTextTones: Record<TextVariant, TextTone> = {
   tabLabel: "fg",
   terminal: "term-fg",
   mono: "dim",
+  markCompact: "blocked",
+  sectionCount: "dim",
+  buttonLarge: "solid-fg",
 };
 
 export type TextProps = Omit<NativeTextProps, "className"> & {
