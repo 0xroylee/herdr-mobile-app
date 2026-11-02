@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>herdr mobile: design kit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="kit.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute">
+      <defs>
+        <!-- Program icons from herdr-app's defaults/icons (LobeHub icons, MIT), and glyphs
+             from Lucide (ISC), as herdr-app uses them. -->
+        <symbol id="claude" viewBox="0 0 24 24">
+          <path
+            fill="#D97757"
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+          />
+        </symbol>
+        <linearGradient id="codex-g" gradientUnits="userSpaceOnUse" x1="12" x2="12" y1="3" y2="21">
+          <stop stop-color="#B1A7FF" />
+          <stop offset=".5" stop-color="#7A9DFF" />
+          <stop offset="1" stop-color="#3941FF" />
+        </linearGradient>
+        <symbol id="codex" viewBox="0 0 24 24">
+          <path
+            fill="#fff"
+            d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z"
+          />
+          <path
+            fill="url(#codex-g)"
+            d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z"
+          />
+        </symbol>
+        <symbol id="bot" viewBox="0 0 24 24">
+          <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" />
+          <path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" />
+        </symbol>
+        <symbol id="spinner" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9.4" fill="none" stroke="currentColor" stroke-width="3.2" stroke-opacity="0.24" />
+          <path d="M12 2.6a9.4 9.4 0 0 1 9.4 9.4" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" />
+        </symbol>
+        <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5" /><path d="m21 21-4.3-4.3" /></symbol>
+        <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></symbol>
+        <symbol id="layers" viewBox="0 0 24 24">
+          <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
+          <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
+          <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
+        </symbol>
+        <symbol id="settings" viewBox="0 0 24 24">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+          <circle cx="12" cy="12" r="3" />
+        </symbol>
+        <symbol id="chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+        <symbol id="chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+        <symbol id="chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+        <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14" /><path d="M12 5v14" /></symbol>
+        <symbol id="more" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
+        </symbol>
+        <symbol id="eye" viewBox="0 0 24 24">
+          <path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" />
+          <circle cx="12" cy="12" r="3" />
+        </symbol>
+        <symbol id="arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></symbol>
+        <symbol id="branch" viewBox="0 0 24 24">
+          <line x1="6" x2="6" y1="3" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+        </symbol>
+        <symbol id="copy" viewBox="0 0 24 24">
+          <rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </symbol>
+        <symbol id="laptop" viewBox="0 0 24 24">
+          <path d="M18 5a2 2 0 0 1 2 2v8.53a2 2 0 0 0 .21.9l1.07 2.12a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.07-2.12A2 2 0 0 0 4 15.53V7a2 2 0 0 1 2-2z" />
+          <path d="M20.05 16H3.95" />
+        </symbol>
+        <symbol id="phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" /><path d="M12 18h.01" /></symbol>
+        <symbol id="scan" viewBox="0 0 24 24">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2" /><path d="M17 3h2a2 2 0 0 1 2 2v2" /><path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+          <path d="M7 21H5a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" />
+        </symbol>
+        <symbol id="terminal" viewBox="0 0 24 24"><path d="M12 19h8" /><path d="m4 17 6-6-6-6" /></symbol>
+      </defs>
+    </svg>
+
+    <header class="page">
+      <h1>herdr mobile design kit</h1>
+      <p>
+        The tokens and components the app is built from, in graphite and paper. The written spec,
+        with every value and rule, is design-kit.md; the screens are in mockups.html. Status marks
+        and list rules follow herdr-app 0.1.10.
+      </p>
+    </header>
+
+    <!-- Color -->
+    <section class="kit">
+      <h2 class="kit-h">Color</h2>
+      <p class="kit-p">Chrome stays monochrome; only status, focus and destructive actions get color. Components use these names, never a hex.</p>
+      <div class="two">
+        <div class="theme-card graphite">
+          <div class="theme-name">graphite · dark</div>
+          <div class="swatches">
+            <div class="sw"><i class="c" style="background: var(--canvas)"></i><span><b>canvas</b><code>#0e1012</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--chrome)"></i><span><b>chrome</b><code>#131619</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--surface)"></i><span><b>surface</b><code>#17191c</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--raised)"></i><span><b>raised</b><code>#202225</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--border)"></i><span><b>border</b><code>#25282c</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--term-bg)"></i><span><b>term-bg</b><code>#111316</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--fg)"></i><span><b>fg</b><code>#e8e9eb</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--muted)"></i><span><b>muted</b><code>#a9adb3</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--dim)"></i><span><b>dim</b><code>#8b8f95</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--solid)"></i><span><b>solid</b><code>#e8e9eb</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--solid-fg)"></i><span><b>solid-fg</b><code>#131619</code></span></div>
+            <div class="sw"><i class="c" style="background: #a7b4c6"></i><span><b>focus</b><code>#a7b4c6</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--working)"></i><span><b>working</b><code>#8f84f5</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--blocked)"></i><span><b>blocked</b><code>#e2a03f</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--done)"></i><span><b>done</b><code>#3fb68b</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--idle)"></i><span><b>idle</b><code>#8b8f95</code></span></div>
+            <div class="sw"><i class="c" style="background: #ef6f6c"></i><span><b>danger</b><code>#ef6f6c</code></span></div>
+            <div class="sw"><i class="c" style="background: #372f22"></i><span><b>blocked/16</b><code>#372f22</code></span></div>
+          </div>
+          <div class="sub-h">Terminal, 0 to 15</div>
+          <div class="ansi">
+            <div><i style="background: #454c59"></i>0</div><div><i style="background: #e06c75"></i>1</div><div><i style="background: #98c379"></i>2</div><div><i style="background: #e5c07b"></i>3</div>
+            <div><i style="background: #61afef"></i>4</div><div><i style="background: #c678dd"></i>5</div><div><i style="background: #56b6c2"></i>6</div><div><i style="background: #abb2bf"></i>7</div>
+            <div><i style="background: #767676"></i>8</div><div><i style="background: #e06c75"></i>9</div><div><i style="background: #98c379"></i>10</div><div><i style="background: #e5c07b"></i>11</div>
+            <div><i style="background: #61afef"></i>12</div><div><i style="background: #c678dd"></i>13</div><div><i style="background: #56b6c2"></i>14</div><div><i style="background: #e6e7e9"></i>15</div>
+          </div>
+        </div>
+        <div class="theme-card paper" style="border: 1px solid #dfe2e7">
+          <div class="theme-name">paper · light</div>
+          <div class="swatches">
+            <div class="sw"><i class="c" style="background: var(--canvas)"></i><span><b>canvas</b><code>#f6f7f9</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--chrome)"></i><span><b>chrome</b><code>#fcfcfd</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--surface)"></i><span><b>surface</b><code>#ffffff</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--raised)"></i><span><b>raised</b><code>#f0f1f4</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--border)"></i><span><b>border</b><code>#e5e7ec</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--term-bg)"></i><span><b>term-bg</b><code>#ffffff</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--fg)"></i><span><b>fg</b><code>#252b37</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--muted)"></i><span><b>muted</b><code>#5f6672</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--dim)"></i><span><b>dim</b><code>#89909d</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--solid)"></i><span><b>solid</b><code>#252b37</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--solid-fg)"></i><span><b>solid-fg</b><code>#ffffff</code></span></div>
+            <div class="sw"><i class="c" style="background: #5b6b82"></i><span><b>focus</b><code>#5b6b82</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--working)"></i><span><b>working</b><code>#7465db</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--blocked)"></i><span><b>blocked</b><code>#d79032</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--done)"></i><span><b>done</b><code>#39a380</code></span></div>
+            <div class="sw"><i class="c" style="background: var(--idle)"></i><span><b>idle</b><code>#99a0ad</code></span></div>
+            <div class="sw"><i class="c" style="background: #d14b45"></i><span><b>danger</b><code>#d14b45</code></span></div>
+            <div class="sw"><i class="c" style="background: #f9edde"></i><span><b>blocked/16</b><code>#f9edde</code></span></div>
+          </div>
+          <div class="sub-h">Terminal, 0 to 15</div>
+          <div class="ansi">
+            <div><i style="background: #383a42"></i>0</div><div><i style="background: #e45649"></i>1</div><div><i style="background: #50a14f"></i>2</div><div><i style="background: #c18401"></i>3</div>
+            <div><i style="background: #4078f2"></i>4</div><div><i style="background: #a626a4"></i>5</div><div><i style="background: #0184bc"></i>6</div><div><i style="background: #a0a1a7"></i>7</div>
+            <div><i style="background: #696c77"></i>8</div><div><i style="background: #ca1243"></i>9</div><div><i style="background: #448c27"></i>10</div><div><i style="background: #986801"></i>11</div>
+            <div><i style="background: #2f5af3"></i>12</div><div><i style="background: #7f1d9e"></i>13</div><div><i style="background: #0b7a9e"></i>14</div><div><i style="background: #252b37"></i>15</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Type -->
+    <section class="kit">
+      <h2 class="kit-h">Type</h2>
+      <p class="kit-p">Geist for the interface, JetBrains Mono for terminals, paths and keys. Sizes are points at the default Dynamic Type size.</p>
+      <div class="type-table">
+        <div class="type-row"><span class="name">largeTitle</span><span style="font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 36px">Agents</span><span class="spec">Geist 600 · 30/36 · −0.025em</span></div>
+        <div class="type-row"><span class="name">pairTitle</span><span style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 34px">Connect to your Mac</span><span class="spec">Geist 600 · 28/34 · −0.025em</span></div>
+        <div class="type-row"><span class="name">title</span><span style="font-size: 16.5px; font-weight: 600; line-height: 22px">pricing page</span><span class="spec">Geist 600 · 16.5/22</span></div>
+        <div class="type-row"><span class="name">headline</span><span style="font-size: 15.5px; font-weight: 500; line-height: 20px">doc comments</span><span class="spec">Geist 500 · 15.5/20</span></div>
+        <div class="type-row"><span class="name">body</span><span style="font-size: 15px; line-height: 21px">Message Claude Code…</span><span class="spec">Geist 400 · 15/21</span></div>
+        <div class="type-row"><span class="name">callout</span><span style="font-size: 13.5px; line-height: 19px; color: #5f6672">Do you want to make this edit to nav.md?</span><span class="spec">Geist 400 · 13.5/19 · muted</span></div>
+        <div class="type-row"><span class="name">button</span><span style="font-size: 13.5px; font-weight: 500; line-height: 18px">Yes, don't ask again</span><span class="spec">Geist 500 · 13.5/18</span></div>
+        <div class="type-row"><span class="name">section</span><span style="font-size: 13px; font-weight: 500; line-height: 16px; color: #d79032">Needs you <span style="color: #89909d; font-weight: 400">1</span></span><span class="spec">Geist 500 · 13/16 · state color or dim</span></div>
+        <div class="type-row"><span class="name">subhead</span><span style="font-size: 12.5px; line-height: 16px; color: #89909d">website · Claude Code</span><span class="spec">Geist 400 · 12.5/16 · dim</span></div>
+        <div class="type-row"><span class="name">caption</span><span style="font-size: 12px; line-height: 16px; color: #89909d">4m · 8 agents · 5 spaces</span><span class="spec">Geist 400 · 12/16 · dim</span></div>
+        <div class="type-row"><span class="name">micro</span><span><span class="needs" style="color: #d79032; background: #f9edde">Needs you</span></span><span class="spec">Geist 600 · 11.5/14</span></div>
+        <div class="type-row"><span class="name">tag</span><span><span class="tag" style="color: #89909d; border-color: #e5e7ec">vps</span></span><span class="spec">Geist 400 · 11/14 · dim</span></div>
+        <div class="type-row"><span class="name">tabLabel</span><span style="font-size: 10.5px; font-weight: 500; line-height: 13px">Agents</span><span class="spec">Geist 500 · 10.5/13</span></div>
+        <div class="type-row"><span class="name">terminal</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 10.6px; line-height: 16.4px">Edit  src/components/PlanCard.astro</span><span class="spec">JetBrains Mono 400 · 10.6/16.4 · pinch 8 to 16</span></div>
+        <div class="type-row"><span class="name">mono</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 16px; color: #89909d">~/code/website · main ↑2 · 120×36</span><span class="spec">JetBrains Mono 400 · 11.5/16 · dim</span></div>
+      </div>
+    </section>
+
+    <!-- Space and shape -->
+    <section class="kit">
+      <h2 class="kit-h">Space and shape</h2>
+      <p class="kit-p">A 2 pt scale, 1 pt hairlines in border, no shadows. Every tap target is at least 44 × 44 pt.</p>
+      <div class="shapes">
+        <div class="shape"><i style="border-radius: 5px"></i>xs<code>5</code></div>
+        <div class="shape"><i style="border-radius: 6px"></i>sm<code>6</code></div>
+        <div class="shape"><i style="border-radius: 8px"></i>md<code>8</code></div>
+        <div class="shape"><i style="border-radius: 9px"></i>key<code>9</code></div>
+        <div class="shape"><i style="border-radius: 10px"></i>btn<code>10</code></div>
+        <div class="shape"><i style="border-radius: 11px"></i>seg<code>11</code></div>
+        <div class="shape"><i style="border-radius: 12px"></i>pane<code>12</code></div>
+        <div class="shape"><i style="border-radius: 14px"></i>group<code>14</code></div>
+        <div class="shape"><i style="border-radius: 15px"></i>card<code>15</code></div>
+        <div class="shape"><i style="border-radius: 17px"></i>field<code>17</code></div>
+        <div class="shape"><i style="border-radius: 999px"></i>full<code>999</code></div>
+        <div class="space-scale" style="margin: 0 0 0 30px">
+          <div><i style="height: 2px"></i>2</div><div><i style="height: 4px"></i>4</div><div><i style="height: 6px"></i>6</div><div><i style="height: 7px"></i>7</div><div><i style="height: 8px"></i>8</div><div><i style="height: 9px"></i>9</div><div><i style="height: 10px"></i>10</div><div><i style="height: 12px"></i>12</div><div><i style="height: 13px"></i>13</div><div><i style="height: 14px"></i>14</div><div><i style="height: 16px"></i>16</div><div><i style="height: 20px"></i>20</div><div><i style="height: 24px"></i>24</div><div><i style="height: 26px"></i>26</div><div><i style="height: 32px"></i>32</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Icons -->
+    <section class="kit">
+      <h2 class="kit-h">Icons</h2>
+      <p class="kit-p">Lucide glyphs at stroke 1.8, colored by a token. Program icons are herdr-app's own, shown with expo-image; a program without one gets bot in muted.</p>
+      <div class="graphite theme-card">
+        <div class="icon-grid">
+          <div class="icon-cell"><svg class="i"><use href="#bot" /></svg>bot<span>Agents tab</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#layers" /></svg>layers<span>Spaces, by space</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#settings" /></svg>settings<span>Settings tab</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#clock" /></svg>clock<span>Priority</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#search" /></svg>search<span>Search</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#chev-l" /></svg>chevron-left<span>Back</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#chev-r" /></svg>chevron-right<span>Closed</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#chev-d" /></svg>chevron-down<span>Open, menus</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#more" /></svg>ellipsis<span>More</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#eye" /></svg>eye<span>Watching</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#arrow-up" /></svg>arrow-up<span>Send</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#plus" /></svg>plus<span>New</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#branch" /></svg>git-branch<span>Branch</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#copy" /></svg>copy<span>Copy</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#scan" /></svg>scan-line<span>Scan</span></div>
+          <div class="icon-cell"><svg class="i"><use href="#terminal" /></svg>terminal<span>App icon, for now</span></div>
+          <div class="icon-cell"><svg class="p" style="width: 22px; height: 22px"><use href="#claude" /></svg>claude<span>program</span></div>
+          <div class="icon-cell"><svg class="p" style="width: 22px; height: 22px"><use href="#codex" /></svg>codex<span>program</span></div>
+          <div class="icon-cell"><svg class="i" style="color: var(--muted)"><use href="#bot" /></svg>fallback<span>unknown program</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Components -->
+    <section class="kit">
+      <h2 class="kit-h">Components</h2>
+      <p class="kit-p">Each board shows one component and its states, graphite on the left and paper on the right. Names match design-kit.md and the code.</p>
+
+      <div class="board">
+        <div class="board-h"><b>StatusMark</b><span>working, blocked, blockedCompact, done, idle</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="marks">
+              <div class="mark-cell"><svg class="spin"><use href="#spinner" /></svg>working</div>
+              <div class="mark-cell"><span class="needs">Needs you</span>blocked</div>
+              <div class="mark-cell"><span class="bang">!</span>compact</div>
+              <div class="mark-cell"><span class="dot"></span>done</div>
+              <div class="mark-cell"><span class="ring"></span>idle</div>
+            </div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="marks">
+              <div class="mark-cell"><svg class="spin"><use href="#spinner" /></svg>working</div>
+              <div class="mark-cell"><span class="needs">Needs you</span>blocked</div>
+              <div class="mark-cell"><span class="bang">!</span>compact</div>
+              <div class="mark-cell"><span class="dot"></span>done</div>
+              <div class="mark-cell"><span class="ring"></span>idle</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>SectionHeader · ListGroup · AgentRow</b><span>priority view: blocked with its question, done, working, idle on another machine</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="section blocked" style="padding-top: 0">Needs you <span class="n">1</span></div>
+            <div class="list">
+              <div class="row top"><svg class="p" style="margin-top: 2px"><use href="#claude" /></svg><div class="main"><div class="t">docs nav</div><div class="s">website · Claude Code</div><div class="q">Do you want to make this edit to nav.md?</div></div><div class="end">1m <span class="bang">!</span></div></div>
+            </div>
+            <div class="section done">Done <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#codex" /></svg><div class="main"><div class="t">readme</div><div class="s">plugins · Codex</div></div><div class="end">4m <span class="dot"></span></div></div></div>
+            <div class="section working">Working <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#claude" /></svg><div class="main"><div class="t">pricing page</div><div class="s">website · Claude Code</div></div><div class="end">4m <svg class="spin"><use href="#spinner" /></svg></div></div></div>
+            <div class="section">Idle <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#codex" /></svg><div class="main"><div class="t idle">metrics</div><div class="s">api · Codex</div></div><div class="end"><span class="tag">vps</span> 1h <span class="ring"></span></div></div></div>
+            <div class="state-label">by-space view: the full pill, the question in the subtitle</div>
+            <div class="list"><div class="row"><svg class="p"><use href="#claude" /></svg><div class="main"><div class="t">docs nav</div><div class="s">Claude Code · Do you want to make this edit…</div></div><div class="end">1m <span class="needs">Needs you</span></div></div></div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="section blocked" style="padding-top: 0">Needs you <span class="n">1</span></div>
+            <div class="list">
+              <div class="row top"><svg class="p" style="margin-top: 2px"><use href="#claude" /></svg><div class="main"><div class="t">docs nav</div><div class="s">website · Claude Code</div><div class="q">Do you want to make this edit to nav.md?</div></div><div class="end">1m <span class="bang">!</span></div></div>
+            </div>
+            <div class="section done">Done <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#codex" /></svg><div class="main"><div class="t">readme</div><div class="s">plugins · Codex</div></div><div class="end">4m <span class="dot"></span></div></div></div>
+            <div class="section working">Working <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#claude" /></svg><div class="main"><div class="t">pricing page</div><div class="s">website · Claude Code</div></div><div class="end">4m <svg class="spin"><use href="#spinner" /></svg></div></div></div>
+            <div class="section">Idle <span class="n">1</span></div>
+            <div class="list"><div class="row"><svg class="p"><use href="#codex" /></svg><div class="main"><div class="t idle">metrics</div><div class="s">api · Codex</div></div><div class="end"><span class="tag">vps</span> 1h <span class="ring"></span></div></div></div>
+            <div class="state-label">by-space view: the full pill, the question in the subtitle</div>
+            <div class="list"><div class="row"><svg class="p"><use href="#claude" /></svg><div class="main"><div class="t">docs nav</div><div class="s">Claude Code · Do you want to make this edit…</div></div><div class="end">1m <span class="needs">Needs you</span></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>ScreenHeader · MachineChip · IconButton</b><span>connected, reconnecting, offline; plain and boxed buttons</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="titlebar" style="padding: 0 4px"><h2>Agents</h2><div class="actions"><div class="iconbtn"><svg class="i"><use href="#clock" /></svg></div><div class="iconbtn"><svg class="i"><use href="#search" /></svg></div><div class="iconbtn boxed"><svg class="i"><use href="#plus" /></svg></div></div></div>
+            <div class="machine" style="padding-bottom: 0"><span class="chip"><span class="dot" style="margin: 0"></span>MacBook Pro<svg class="i"><use href="#chev-d" /></svg></span><span>8 agents · 5 spaces</span></div>
+            <div class="chips-col">
+              <span class="chip"><span class="dot" style="margin: 0; background: var(--blocked)"></span>MacBook Pro<svg class="i"><use href="#chev-d" /></svg></span>
+              <span class="chip"><span class="dot" style="margin: 0; background: var(--dim)"></span>vps<svg class="i"><use href="#chev-d" /></svg></span>
+            </div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="titlebar" style="padding: 0 4px"><h2>Agents</h2><div class="actions"><div class="iconbtn"><svg class="i"><use href="#layers" /></svg></div><div class="iconbtn"><svg class="i"><use href="#search" /></svg></div><div class="iconbtn boxed"><svg class="i"><use href="#plus" /></svg></div></div></div>
+            <div class="machine" style="padding-bottom: 0"><span class="chip"><span class="dot" style="margin: 0"></span>MacBook Pro<svg class="i"><use href="#chev-d" /></svg></span><span>8 agents · 5 spaces</span></div>
+            <div class="chips-col">
+              <span class="chip"><span class="dot" style="margin: 0; background: var(--blocked)"></span>MacBook Pro<svg class="i"><use href="#chev-d" /></svg></span>
+              <span class="chip"><span class="dot" style="margin: 0; background: var(--dim)"></span>vps<svg class="i"><use href="#chev-d" /></svg></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>NavHeader · StatusStrip</b><span>working, needs you, done, idle, and after a takeover</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="nav static"><div class="iconbtn"><svg class="i" style="width: 24px; height: 24px"><use href="#chev-l" /></svg></div><div class="tt"><div class="t">pricing page</div><div class="s">website · MacBook Pro</div></div><div class="iconbtn"><svg class="i"><use href="#more" /></svg></div></div>
+            <div class="strip static"><span class="st"><svg class="spin"><use href="#spinner" /></svg>Working · 4m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="needs">Needs you · 1m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st" style="color: var(--done)"><span class="dot" style="margin: 0"></span>Done · 12m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st" style="color: var(--dim); font-weight: 400"><span class="ring" style="margin: 0"></span>Idle · 3h</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st"><svg class="spin"><use href="#spinner" /></svg>Working · 4m</span><span class="watch" style="color: var(--fg); font-weight: 500">In control</span></div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="nav static"><div class="iconbtn"><svg class="i" style="width: 24px; height: 24px"><use href="#chev-l" /></svg></div><div class="tt"><div class="t">pricing page</div><div class="s">website · MacBook Pro</div></div><div class="iconbtn"><svg class="i"><use href="#more" /></svg></div></div>
+            <div class="strip static"><span class="st"><svg class="spin"><use href="#spinner" /></svg>Working · 4m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="needs">Needs you · 1m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st" style="color: var(--done)"><span class="dot" style="margin: 0"></span>Done · 12m</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st" style="color: var(--dim); font-weight: 400"><span class="ring" style="margin: 0"></span>Idle · 3h</span><span class="watch"><svg class="i"><use href="#eye" /></svg>Watching</span></div>
+            <div class="strip static"><span class="st"><svg class="spin"><use href="#spinner" /></svg>Working · 4m</span><span class="watch" style="color: var(--fg); font-weight: 500">In control</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>TerminalPane · KeyBar · Key</b><span>a 120-column terminal at the default zoom, wider than the pane; the keys and what they send</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="pane static">
+              <div class="pane-h"><svg class="p"><use href="#claude" /></svg><b>Claude Code</b><span>~/code/website</span><span class="size">120×36</span></div>
+              <div class="term short"><span class="c-teal">Read</span>  src/pages/pricing.astro
+<span class="c-teal">Edit</span>  src/components/PlanCard.astro
+<span class="c-green">  + Clear plan names, shorter descriptions
+  + One shared list of included features</span>
+The three plans now line up on mobile, too, and the yearly switch keeps its place.
+<span class="c-amber">✻ Checking focus order… (esc to interrupt)</span></div>
+              <div class="hbar"><i></i></div>
+            </div>
+            <div class="keys static"><div class="key">esc</div><div class="key">⌃C</div><div class="key">tab</div><div class="key">↑</div><div class="key">↓</div><div class="key">←</div><div class="key">→</div><div class="key">⏎</div></div>
+            <div class="state-label">esc → esc · ⌃C → ctrl+c · tab → tab · arrows → up down left right · ⏎ → enter</div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="pane static">
+              <div class="pane-h"><svg class="p"><use href="#claude" /></svg><b>Claude Code</b><span>~/code/website</span><span class="size">120×36</span></div>
+              <div class="term short"><span class="c-teal">Read</span>  src/pages/pricing.astro
+<span class="c-teal">Edit</span>  src/components/PlanCard.astro
+<span class="c-green">  + Clear plan names, shorter descriptions
+  + One shared list of included features</span>
+The three plans now line up on mobile, too, and the yearly switch keeps its place.
+<span class="c-amber">✻ Checking focus order… (esc to interrupt)</span></div>
+              <div class="hbar"><i></i></div>
+            </div>
+            <div class="keys static"><div class="key">esc</div><div class="key">⌃C</div><div class="key">tab</div><div class="key">↑</div><div class="key">↓</div><div class="key">←</div><div class="key">→</div><div class="key">⏎</div></div>
+            <div class="state-label">esc → esc · ⌃C → ctrl+c · tab → tab · arrows → up down left right · ⏎ → enter</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>Composer</b><span>empty, typed, sending, then Sent</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="composer static"><div class="ph">Message Claude Code…</div><div class="send is-disabled"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+            <div class="composer static"><div class="typed">Keep the switch above the cards</div><div class="send"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+            <div class="composer static"><div class="typed">Keep the switch above the cards</div><div class="send"><svg class="spin" style="color: var(--solid-fg)"><use href="#spinner" /></svg></div></div>
+            <div class="sentline"><svg class="i" style="width: 14px; height: 14px"><use href="#arrow-up" /></svg>Sent · waiting for Claude Code</div>
+            <div class="composer static"><div class="ph">Message Claude Code…</div><div class="send is-disabled"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="composer static"><div class="ph">Message Claude Code…</div><div class="send is-disabled"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+            <div class="composer static"><div class="typed">Keep the switch above the cards</div><div class="send"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+            <div class="composer static"><div class="typed">Keep the switch above the cards</div><div class="send"><svg class="spin" style="color: var(--solid-fg)"><use href="#spinner" /></svg></div></div>
+            <div class="sentline"><svg class="i" style="width: 14px; height: 14px"><use href="#arrow-up" /></svg>Sent · waiting for Claude Code</div>
+            <div class="composer static"><div class="ph">Message Claude Code…</div><div class="send is-disabled"><svg class="i"><use href="#arrow-up" /></svg></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>PromptCard</b><span>a recognized question, then Sent after a tap</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="ask static">
+              <div class="hd"><span class="needs">Needs you</span><span class="grow">Claude Code</span><span>1m</span></div>
+              <h3>Do you want to make this edit to nav.md?</h3>
+              <div class="file">docs/nav.md · +3 −1</div>
+              <div class="btns"><span class="btn solid">Yes</span><span class="btn">Yes, don't ask again</span><span class="btn">No</span></div>
+            </div>
+            <div class="ask static">
+              <div class="hd"><span class="needs">Needs you</span><span class="grow">Claude Code</span><span>1m</span></div>
+              <h3>Do you want to make this edit to nav.md?</h3>
+              <div class="sentline" style="padding: 12px 0 0"><svg class="spin"><use href="#spinner" /></svg>Sent "Yes" · waiting for Claude Code</div>
+            </div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="ask static">
+              <div class="hd"><span class="needs">Needs you</span><span class="grow">Claude Code</span><span>1m</span></div>
+              <h3>Do you want to make this edit to nav.md?</h3>
+              <div class="file">docs/nav.md · +3 −1</div>
+              <div class="btns"><span class="btn solid">Yes</span><span class="btn">Yes, don't ask again</span><span class="btn">No</span></div>
+            </div>
+            <div class="ask static">
+              <div class="hd"><span class="needs">Needs you</span><span class="grow">Claude Code</span><span>1m</span></div>
+              <h3>Do you want to make this edit to nav.md?</h3>
+              <div class="sentline" style="padding: 12px 0 0"><svg class="spin"><use href="#spinner" /></svg>Sent "Yes" · waiting for Claude Code</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>Button</b><span>solid, outline, danger, large; pressed and disabled</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="rowline"><span class="btn solid">Yes</span><span class="btn">No</span><span class="btn danger">End terminal</span></div>
+            <div class="rowline"><span class="btn solid pressed">Pressed</span><span class="btn pressed">Pressed</span><span class="btn solid is-disabled">Disabled</span><span class="btn is-disabled">Disabled</span></div>
+            <div class="big"><svg class="i"><use href="#scan" /></svg>Scan the code</div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="rowline"><span class="btn solid">Yes</span><span class="btn">No</span><span class="btn danger">End terminal</span></div>
+            <div class="rowline"><span class="btn solid pressed">Pressed</span><span class="btn pressed">Pressed</span><span class="btn solid is-disabled">Disabled</span><span class="btn is-disabled">Disabled</span></div>
+            <div class="big"><svg class="i"><use href="#scan" /></svg>Scan the code</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>SpaceRow · TabPill · Tag</b><span>open with its tabs, closed, all idle; tab dots for blocked and done only</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="group" style="padding-top: 0">MacBook Pro <span class="tag">this Mac</span></div>
+            <div class="list">
+              <div class="space"><div class="main"><span class="name">website</span><span class="branch"><svg class="i"><use href="#branch" /></svg>main ↑2</span></div><span class="bang">!</span><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-d" /></svg></div>
+              <div class="tabs">
+                <span class="tabpill"><svg class="p"><use href="#claude" /></svg>docs nav<span class="sdot" style="background: var(--blocked)"></span></span>
+                <span class="tabpill"><svg class="p"><use href="#claude" /></svg>pricing page</span>
+                <span class="tabpill"><svg class="p"><use href="#codex" /></svg>blog pass<span class="sdot" style="background: var(--done)"></span></span>
+                <span class="tabpill add"><svg class="i" style="width: 15px; height: 15px"><use href="#plus" /></svg></span>
+              </div>
+              <div class="space"><div class="main"><span class="name">core</span><span class="branch"><svg class="i"><use href="#branch" /></svg>main</span></div><svg class="spin"><use href="#spinner" /></svg><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-r" /></svg></div>
+              <div class="space"><div class="main"><span class="name" style="color: var(--muted); font-weight: 400">extensions</span></div><span class="ring"></span><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-r" /></svg></div>
+            </div>
+            <div class="rowline"><span class="tag">vps</span><span class="tag">this Mac</span><span class="tag">ssh</span></div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="group" style="padding-top: 0">MacBook Pro <span class="tag">this Mac</span></div>
+            <div class="list">
+              <div class="space"><div class="main"><span class="name">website</span><span class="branch"><svg class="i"><use href="#branch" /></svg>main ↑2</span></div><span class="bang">!</span><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-d" /></svg></div>
+              <div class="tabs">
+                <span class="tabpill"><svg class="p"><use href="#claude" /></svg>docs nav<span class="sdot" style="background: var(--blocked)"></span></span>
+                <span class="tabpill"><svg class="p"><use href="#claude" /></svg>pricing page</span>
+                <span class="tabpill"><svg class="p"><use href="#codex" /></svg>blog pass<span class="sdot" style="background: var(--done)"></span></span>
+                <span class="tabpill add"><svg class="i" style="width: 15px; height: 15px"><use href="#plus" /></svg></span>
+              </div>
+              <div class="space"><div class="main"><span class="name">core</span><span class="branch"><svg class="i"><use href="#branch" /></svg>main</span></div><svg class="spin"><use href="#spinner" /></svg><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-r" /></svg></div>
+              <div class="space"><div class="main"><span class="name" style="color: var(--muted); font-weight: 400">extensions</span></div><span class="ring"></span><svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-r" /></svg></div>
+            </div>
+            <div class="rowline"><span class="tag">vps</span><span class="tag">this Mac</span><span class="tag">ssh</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>TabBar</b><span>Agents active</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div style="flex: 1; min-height: 20px"></div>
+            <div class="tabbar static"><div class="on"><svg class="i"><use href="#bot" /></svg>Agents</div><div><svg class="i"><use href="#layers" /></svg>Spaces</div><div><svg class="i"><use href="#settings" /></svg>Settings</div></div>
+          </div>
+          <div class="surface-frame paper">
+            <div style="flex: 1; min-height: 20px"></div>
+            <div class="tabbar static"><div class="on"><svg class="i"><use href="#bot" /></svg>Agents</div><div><svg class="i"><use href="#layers" /></svg>Spaces</div><div><svg class="i"><use href="#settings" /></svg>Settings</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>Banner · EmptyState</b><span>reconnecting, can't reach the bridge; no agents yet</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="banner"><svg class="spin"><use href="#spinner" /></svg><span class="grow">Reconnecting to MacBook Pro…</span></div>
+            <div class="banner"><span class="bang">!</span><span class="grow">Can't reach the bridge. Check that Tailscale is on.</span><span class="btn" style="height: 30px">Retry</span></div>
+            <div class="empty">No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.</div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="banner"><svg class="spin"><use href="#spinner" /></svg><span class="grow">Reconnecting to MacBook Pro…</span></div>
+            <div class="banner"><span class="bang">!</span><span class="grow">Can't reach the bridge. Check that Tailscale is on.</span><span class="btn" style="height: 30px">Retry</span></div>
+            <div class="empty">No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board">
+        <div class="board-h"><b>PairingSteps · Snippet · ConnectionLine</b><span>first run</span></div>
+        <div class="board-two">
+          <div class="surface-frame graphite">
+            <div class="steps" style="margin-top: 0">
+              <div class="step"><span class="num">1</span><div class="main"><div class="t">Start the bridge on your Mac</div><div class="snippet">bunx herdr-bridge pair<svg class="i"><use href="#copy" /></svg></div></div></div>
+              <div class="step"><span class="num">2</span><div class="main"><div class="t">Scan the code it shows</div><div class="s" style="white-space: normal">It holds the bridge's address and a one-time token.</div></div></div>
+              <div class="step"><span class="num">3</span><div class="main"><div class="t">Keep Tailscale on</div><div class="ok"><span class="dot"></span>Connected as my-iphone</div></div></div>
+            </div>
+          </div>
+          <div class="surface-frame paper">
+            <div class="steps" style="margin-top: 0">
+              <div class="step"><span class="num">1</span><div class="main"><div class="t">Start the bridge on your Mac</div><div class="snippet">bunx herdr-bridge pair<svg class="i"><use href="#copy" /></svg></div></div></div>
+              <div class="step"><span class="num">2</span><div class="main"><div class="t">Scan the code it shows</div><div class="s" style="white-space: normal">It holds the bridge's address and a one-time token.</div></div></div>
+              <div class="step"><span class="num">3</span><div class="main"><div class="t">Keep Tailscale on</div><div class="ok"><span class="dot"></span>Connected as my-iphone</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>
