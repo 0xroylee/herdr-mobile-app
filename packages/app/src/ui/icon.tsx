@@ -48,11 +48,13 @@ const colorVariables = {
   fg: "--color-fg",
   muted: "--color-muted",
   dim: "--color-dim",
+  "solid-fg": "--color-solid-fg",
   working: "--color-working",
   blocked: "--color-blocked",
   done: "--color-done",
   idle: "--color-idle",
   danger: "--color-danger",
+  "danger-fg": "--color-danger-fg",
   focus: "--color-focus",
 } as const;
 
@@ -62,19 +64,20 @@ export type IconColor = keyof typeof colorVariables;
 
 export interface IconProps {
   name: IconName;
-  size?: IconSize;
+  size?: IconSize | number;
   color?: IconColor;
+  strokeWidth?: number;
 }
 
-export function Icon({ name, size = "row", color = "dim" }: IconProps) {
+export function Icon({ name, size = "row", color = "dim", strokeWidth = 1.8 }: IconProps) {
   const IconComponent = icons[name];
   const tokenColor = useCSSVariable(colorVariables[color]);
 
   return (
     <IconComponent
       color={typeof tokenColor === "string" ? tokenColor : undefined}
-      size={sizePresets[size]}
-      strokeWidth={1.8}
+      size={typeof size === "number" ? size : sizePresets[size]}
+      strokeWidth={strokeWidth}
     />
   );
 }

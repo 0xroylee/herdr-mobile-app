@@ -37,6 +37,7 @@ Two themes, named as herdr names them: **graphite** (dark) and **paper** (light)
 | `done`     | Done dot and section label, connected dot               | `#3fb68b`   | `#39a380`   |
 | `idle`     | Idle ring                                               | `#8b8f95`   | `#99a0ad`   |
 | `danger`   | Destructive buttons, errors                             | `#ef6f6c`   | `#d14b45`   |
+| `danger-fg` | Text and icon on a `danger` button                     | `#ffffff`   | `#ffffff`   |
 | `focus`    | Keyboard focus ring (web and hardware keyboards)        | `#a7b4c6`   | `#5b6b82`   |
 
 Tints are their own tokens, so no code applies an alpha by hand. React Native takes `#rrggbbaa`; where a tint sits on a known color, the token is the precomputed solid.
@@ -260,7 +261,7 @@ After a tap the buttons give way to the Sent state. If the question isn't recogn
 | --------- | ------ | ------- | ------ | --------- | --------------- |
 | `solid`   | 36     | 0 13    | `btn`  | `solid`   | `button`, `solid-fg` |
 | `outline` | 36     | 0 13    | `btn`  | `surface` + hairline | `button`, `fg` |
-| `danger`  | 36     | 0 13    | `btn`  | `danger`  | `button`, `#ffffff` |
+| `danger`  | 36     | 0 13    | `btn`  | `danger`  | `button`, `danger-fg` |
 | `large`   | 52     | 0 20    | `card` | `solid`   | Geist 600 16, `solid-fg`, optional icon 19 |
 
 Pressed: 85 % opacity. Disabled: 40 % opacity.
@@ -389,6 +390,7 @@ Graphite is Uniwind's `dark` theme and paper its `light` theme, so the built-in 
       --color-done: #3fb68b;
       --color-idle: #8b8f95;
       --color-danger: #ef6f6c;
+      --color-danger-fg: #ffffff;
       --color-focus: #a7b4c6;
       --color-blocked-tint: #e2a03f29;
       --color-prompt-bg: #27241f;
@@ -416,6 +418,7 @@ Graphite is Uniwind's `dark` theme and paper its `light` theme, so the built-in 
       --color-done: #39a380;
       --color-idle: #99a0ad;
       --color-danger: #d14b45;
+      --color-danger-fg: #ffffff;
       --color-focus: #5b6b82;
       --color-blocked-tint: #d7903229;
       --color-prompt-bg: #fcf6ef;
