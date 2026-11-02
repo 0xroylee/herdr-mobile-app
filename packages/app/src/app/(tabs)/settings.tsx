@@ -1,10 +1,5 @@
-import { View } from "react-native";
-import { Text } from "@/ui/text.tsx";
+import { SettingsScreen } from "../../screens/settings/SettingsScreen.tsx";
 
-export default function SettingsScreen() {
-  return (
-    <View className="flex-1 bg-canvas px-3.5 pt-safe">
-      <Text variant="largeTitle">Settings</Text>
-    </View>
-  );
+export default function SettingsRoute() {
+  return <SettingsScreen />;
 }
