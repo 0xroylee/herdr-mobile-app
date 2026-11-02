@@ -5,6 +5,7 @@
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
+    "moduleSuffixes": [".native", ""],
     "paths": {
       "@/*": ["./src/*"],
       "@/assets/*": ["./assets/*"]
