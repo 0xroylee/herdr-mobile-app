@@ -35,4 +35,5 @@ export {
   type PayloadAllocator,
 } from "./frame.ts";
 export { type Line, LineDecoder } from "./lines.ts";
+export type { EventSnapshot, EventSubscription, SubscribeCallbacks } from "./subscribe.ts";
 export { utf8Decode, utf8Encode } from "./utf8.ts";

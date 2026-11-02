@@ -150,7 +150,7 @@ export class Attachment implements AttachHandle {
       this.finish(
         frame.payload.length === 0
           ? { kind: "detached" }
-          : { kind: "program", reason: reasonOf(frame) },
+          : { kind: "program", reason: closeReason(frame.payload) },
       );
     }
   }
@@ -185,11 +185,11 @@ export class Attachment implements AttachHandle {
   }
 }
 
-/** The core's CLOSE reason as sent. A payload that isn't JSON is kept as its text. */
-function reasonOf(frame: Frame): JsonValue {
+/** A non-empty CLOSE's reason as the core sent it. A payload that isn't JSON is kept as text. */
+export function closeReason(payload: Uint8Array): JsonValue {
   try {
-    return decodeClose(frame.payload) as JsonValue;
+    return decodeClose(payload) as JsonValue;
   } catch {
-    return utf8Decode(frame.payload);
+    return utf8Decode(payload);
   }
 }

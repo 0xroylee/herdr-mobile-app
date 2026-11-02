@@ -94,10 +94,10 @@ interface FakeStream {
 }
 
 /**
- * herdr-core on one framed connection, after wire.rs's Outbox: it answers hello and
- * terminal.attach, sends stream output only as far as the viewer's credit allows, ends a stream
- * with CLOSE only once its output is out, and answers a viewer's CLOSE with an empty one. It
- * records every frame the client writes, and sends what it has in one read.
+ * herdr-core on one framed connection, after wire.rs's Outbox: it answers hello,
+ * terminal.attach and events.subscribe, sends stream output only as far as the reader's credit
+ * allows, ends a stream with CLOSE only once its output is out, and answers a client's CLOSE
+ * with an empty one. It records every frame the client writes, and sends what it has in one read.
  */
 export class FakeCore {
   readonly client: HcClient;
@@ -107,6 +107,14 @@ export class FakeCore {
   paint: Uint8Array = utf8Encode("\u001b[?9001l\u001b[H\u001b[2Jpaint|");
   /** Send the first paint ahead of the attach reply, as the core may. */
   paintFirst = false;
+  /** What the next events.subscribe answers, before its channel is added. */
+  snapshot: { seq: number; terminals: Terminal[] } = { seq: 10, terminals: [] };
+  /** Event lines a new subscription's channel carries ahead of its reply. */
+  early: Uint8Array = new Uint8Array(0);
+  /** Answer a client's CLOSE. */
+  answerClose = true;
+  /** Each events.subscribe's params, in order. */
+  readonly subscribed: unknown[] = [];
   private readonly decoder = new FrameDecoder();
   private readonly streams = new Map<number, FakeStream>();
   private outbox: Uint8Array[] = [];
@@ -191,7 +199,7 @@ export class FakeCore {
     if (received.kind === FrameKind.Credit) {
       stream.credit += decodeCredit(received.payload);
       this.pump(received.channel);
-    } else if (received.kind === FrameKind.Close) {
+    } else if (received.kind === FrameKind.Close && this.answerClose) {
       this.streams.delete(received.channel);
       this.outbox.push(
         encodeFrame({
@@ -204,6 +212,14 @@ export class FakeCore {
   }
 
   private rpc(request: Message): void {
+    if (request.method === "events.subscribe") {
+      this.subscribed.push(request.params);
+      const channel = this.openStream(this.early);
+      this.pump(channel);
+      const result = { ...this.snapshot, channel };
+      this.outbox.push(frame({ jsonrpc: "2.0", id: request.id, result }));
+      return;
+    }
     const terminal = String((request.params as { terminal?: string }).terminal);
     if (request.method !== "terminal.attach" || terminal.startsWith("missing")) {
       const error = {
@@ -214,17 +230,19 @@ export class FakeCore {
       this.outbox.push(frame({ jsonrpc: "2.0", id: request.id, error }));
       return;
     }
-    const channel = ++this.nextChannel;
-    this.streams.set(channel, {
-      credit: INITIAL_STREAM_CREDIT,
-      pending: [this.paint],
-      ending: undefined,
-    });
+    const channel = this.openStream(this.paint);
     const result = { channel, terminal: terminalRecord(terminal) };
     const reply = frame({ jsonrpc: "2.0", id: request.id, result });
     if (!this.paintFirst) this.outbox.push(reply);
     this.pump(channel);
     if (this.paintFirst) this.outbox.push(reply);
+  }
+
+  private openStream(first: Uint8Array): number {
+    const channel = ++this.nextChannel;
+    const pending = first.length > 0 ? [first] : [];
+    this.streams.set(channel, { credit: INITIAL_STREAM_CREDIT, pending, ending: undefined });
+    return channel;
   }
 
   private pump(channel: number): void {

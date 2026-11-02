@@ -41,6 +41,19 @@ export interface JsonRpcNotification {
   params?: JsonValue;
 }
 
+/** An `event` notification's params: one fact change, in the core's order. */
+export interface HcEvent {
+  /** The core's sequence number. A filtered subscription skips other terminals' numbers. */
+  seq: number;
+  /** created, lost, restarted, keep, finished, removed, status, turn, title, labels, size, foreground or doc. */
+  type: string;
+  /** The terminal as seen from this core: `t7`, or `rohan/t7` on a connected machine. */
+  terminal?: string;
+  /** A document event's machine, when it isn't this core. */
+  machine?: string;
+  data: JsonValue;
+}
+
 export type JsonValue =
   | null
   | boolean
