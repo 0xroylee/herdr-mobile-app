@@ -187,6 +187,19 @@ describe("startSession", () => {
     expect(socket.sent).toHaveLength(2);
   });
 
+  test("uses the configured hc executable path", () => {
+    const runner = new FakeRunner();
+    startSession({
+      socket: new FakeSocket(),
+      runner,
+      clock: new FakeClock(),
+      env,
+      role: "watch",
+      hc: "/opt/herdr/bin/hc",
+    });
+    expect(runner.spawnArgs).toEqual(["/opt/herdr/bin/hc", "connect"]);
+  });
+
   test("socket close closes child stdin and kills after five seconds", async () => {
     const socket = new FakeSocket();
     const runner = new FakeRunner();

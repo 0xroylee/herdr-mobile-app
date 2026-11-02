@@ -15,12 +15,14 @@ export interface StartSessionOptions {
   clock: Clock;
   env: Env;
   role: Role;
+  /** Full path to `hc`; defaults to PATH lookup for existing callers. */
+  hc?: string;
   session?: string;
 }
 
 /** Owns one `hc connect` child and forwards its bytes through the role gate. */
 export function startSession(options: StartSessionOptions): void {
-  const child = options.runner.spawn(["hc", "connect"], {
+  const child = options.runner.spawn([options.hc ?? "hc", "connect"], {
     env: connectEnv(options.env, { session: options.session }),
     cwd: options.env.HOME ?? "/",
   });
