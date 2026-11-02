@@ -25,6 +25,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-font",
       [
         "expo-splash-screen",
         {
@@ -34,7 +35,13 @@
         }
       ],
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow herdr mobile to use your camera to scan a pairing code."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
