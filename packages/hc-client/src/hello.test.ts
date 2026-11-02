@@ -168,6 +168,19 @@ describe("hello", () => {
     expect(writes).toHaveLength(1);
   });
 
+  test("acceptsCalls is false while hello negotiates and after end", async () => {
+    const { client } = capture();
+    expect(client.acceptsCalls).toBe(true);
+    const hello = client.hello();
+    expect(client.acceptsCalls).toBe(false);
+    await flush();
+    client.feed(line({ jsonrpc: "2.0", id: 1, result: HC_0_1_16 }));
+    await hello;
+    expect(client.acceptsCalls).toBe(true);
+    client.end();
+    expect(client.acceptsCalls).toBe(false);
+  });
+
   test("call('hello') is refused without writing", async () => {
     const { client, writes } = capture();
     const call = track(client.call("hello", { framed: true }));

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@herdr-mobile/hc-client": "*",
-    "@herdr-mobile/protocol": "*"
+    "@herdr-mobile/protocol": "*",
+    "@xterm/headless": "6.0.0"
   }
 }

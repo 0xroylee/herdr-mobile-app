@@ -97,7 +97,8 @@ interface FakeStream {
  * herdr-core on one framed connection, after wire.rs's Outbox: it answers hello,
  * terminal.attach and events.subscribe, sends stream output only as far as the reader's credit
  * allows, ends a stream with CLOSE only once its output is out, and answers a client's CLOSE
- * with an empty one. It records every frame the client writes, and sends what it has in one read.
+ * with an empty one. It records every frame the client writes, and sends what it has in one read:
+ * to its own `client`, or to `deliver` when one is given, as `hc connect`'s stdout would.
  */
 export class FakeCore {
   readonly client: HcClient;
@@ -113,17 +114,29 @@ export class FakeCore {
   early: Uint8Array = new Uint8Array(0);
   /** Answer a client's CLOSE. */
   answerClose = true;
+  /** An error to answer hello with, instead of hc 0.1.16's result. */
+  helloError: object | undefined;
   /** Each events.subscribe's params, in order. */
   readonly subscribed: unknown[] = [];
+  /** The method of every call it received, hello included, in order. */
+  readonly calls: string[] = [];
+  /** The channels it opened, by what opened them. */
+  readonly opened: { attach: number[]; subscribe: number[] } = { attach: [], subscribe: [] };
+  /** Answers other methods: a result, or undefined for a not_found error. */
+  answer: (method: string, params: Record<string, unknown>) => unknown = () => undefined;
+  private readonly held = new Map<string, { request: Message; plain: boolean }[]>();
+  private readonly sink: (bytes: Uint8Array) => void;
   private readonly decoder = new FrameDecoder();
   private readonly streams = new Map<number, FakeStream>();
   private outbox: Uint8Array[] = [];
   private nextChannel = 0;
-  private greeted = false;
+  /** Plain until it answers a hello that asked for framing. */
+  private framed = false;
   private gate: Promise<void> | undefined;
 
-  constructor() {
+  constructor(deliver?: (bytes: Uint8Array) => void) {
     this.client = createClient({ write: (bytes) => this.write(bytes) });
+    this.sink = deliver ?? ((bytes) => this.client.feed(bytes));
   }
 
   async open(): Promise<void> {
@@ -175,10 +188,25 @@ export class FakeCore {
     return this.frames(channel, FrameKind.Credit).map((f) => decodeCredit(f.payload));
   }
 
-  private write(bytes: Uint8Array): void | Promise<void> {
-    if (!this.greeted) {
-      this.greeted = true;
-      this.outbox.push(line({ jsonrpc: "2.0", id: decode(bytes).id, result: HC_0_1_16 }));
+  /** Leaves calls to `method` unanswered until release(). */
+  hold(method: string): void {
+    this.held.set(method, this.held.get(method) ?? []);
+  }
+
+  /** Answers the held calls to `method`, and those that follow. */
+  release(method: string): void {
+    const requests = this.held.get(method) ?? [];
+    this.held.delete(method);
+    for (const { request, plain } of requests) this.respond(request, plain);
+    this.deliver();
+  }
+
+  /** Takes bytes the client wrote. */
+  write(bytes: Uint8Array): void | Promise<void> {
+    if (!this.framed) {
+      for (const text of utf8Decode(bytes).split("\n")) {
+        if (text.trim() !== "") this.rpc(JSON.parse(text) as Message, true);
+      }
     } else {
       for (const received of this.decoder.push(bytes)) this.handle(received);
     }
@@ -211,26 +239,55 @@ export class FakeCore {
     }
   }
 
-  private rpc(request: Message): void {
+  private rpc(request: Message, plain = false): void {
+    const method = String(request.method);
+    this.calls.push(method);
+    const held = this.held.get(method);
+    if (held) held.push({ request, plain });
+    else this.respond(request, plain);
+  }
+
+  private respond(request: Message, plain: boolean): void {
+    const method = String(request.method);
+    const answer = (message: object) => {
+      this.outbox.push(plain ? line(message) : frame(message));
+    };
+    if (method === "hello" && this.helloError) {
+      answer({ jsonrpc: "2.0", id: request.id, error: this.helloError });
+      return;
+    }
+    if (method === "hello") {
+      answer({ jsonrpc: "2.0", id: request.id, result: HC_0_1_16 });
+      if ((request.params as { framed?: boolean } | undefined)?.framed === true) this.framed = true;
+      return;
+    }
     if (request.method === "events.subscribe") {
       this.subscribed.push(request.params);
       const channel = this.openStream(this.early);
+      this.opened.subscribe.push(channel);
       this.pump(channel);
       const result = { ...this.snapshot, channel };
       this.outbox.push(frame({ jsonrpc: "2.0", id: request.id, result }));
       return;
     }
-    const terminal = String((request.params as { terminal?: string }).terminal);
+    const params = (request.params ?? {}) as Record<string, unknown>;
+    const terminal = String(params.terminal);
+    const answered = method === "terminal.attach" ? undefined : this.answer(method, params);
+    if (answered !== undefined) {
+      answer({ jsonrpc: "2.0", id: request.id, result: answered });
+      return;
+    }
     if (request.method !== "terminal.attach" || terminal.startsWith("missing")) {
       const error = {
         code: -32000,
         message: `no terminal ${terminal}`,
         data: { kind: "not_found" },
       };
-      this.outbox.push(frame({ jsonrpc: "2.0", id: request.id, error }));
+      answer({ jsonrpc: "2.0", id: request.id, error });
       return;
     }
     const channel = this.openStream(this.paint);
+    this.opened.attach.push(channel);
     const result = { channel, terminal: terminalRecord(terminal) };
     const reply = frame({ jsonrpc: "2.0", id: request.id, result });
     if (!this.paintFirst) this.outbox.push(reply);
@@ -266,6 +323,6 @@ export class FakeCore {
     if (this.outbox.length === 0) return;
     const bytes = concat(...this.outbox);
     this.outbox = [];
-    this.client.feed(bytes);
+    this.sink(bytes);
   }
 }

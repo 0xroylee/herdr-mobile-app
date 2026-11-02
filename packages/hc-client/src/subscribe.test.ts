@@ -328,6 +328,7 @@ describe("plain subscriptions", () => {
     await flush();
     for (const state of after) expect((state.error as Error).message).toBe(NOTIFICATIONS_ONLY);
     expect(writes).toHaveLength(2);
+    expect(client.acceptsCalls).toBe(false);
   });
 
   test("a subscribe error reply lets calls through again", async () => {

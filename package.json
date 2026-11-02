@@ -16,7 +16,8 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "protocol:generate": "bun packages/protocol/scripts/hc-api.ts --write",
-    "protocol:check": "bun packages/protocol/scripts/hc-api.ts --check"
+    "protocol:check": "bun packages/protocol/scripts/hc-api.ts --check",
+    "prototype:hc": "bun packages/bridge/scripts/prototype-hc.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

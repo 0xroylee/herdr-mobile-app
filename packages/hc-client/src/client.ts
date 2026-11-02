@@ -143,6 +143,11 @@ export class HcClient {
     return this.mode === "framed";
   }
 
+  /** Whether call() would send now: not ended, and no transition or plain subscription. */
+  get acceptsCalls(): boolean {
+    return this.refusal() === undefined;
+  }
+
   call<M extends HcMethod>(method: M, params: HcParams<M>): Promise<HcResult<M>> {
     if (method === "hello") return Promise.reject(new Error("negotiate with hello(), not call()"));
     if (method === "terminal.attach") {
