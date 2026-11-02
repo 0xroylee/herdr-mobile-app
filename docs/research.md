@@ -19,6 +19,14 @@ Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs 
   - Enabling HTTPS certificates publishes the machine names and the tailnet's DNS name in the public Certificate Transparency logs.
 - **2026-11-01: Bun workspaces with the hoisted linker.** Bun installs the monorepo and runs the bridge, scripts and tests, and `bun build --compile` can ship the bridge as one binary. Expo's CLI and Metro still run on Node. `bunfig.toml` sets `linker = "hoisted"`, the setting [Tamagui](https://github.com/tamagui/tamagui) uses to run Expo SDK 58 on Bun 1.4. The first `bun install` took 47 s; the same tree took about 15 minutes with npm on this network. If Bun breaks the Expo install, fall back to pnpm with `nodeLinker: hoisted`.
 
+- **2026-11-02: The app's stack and look.** The first version follows [docs/ui/mockups.html](ui/mockups.html) and [docs/ui/design-kit.md](ui/design-kit.md), which copy herdr-app's themes (graphite and paper), fonts (Geist and JetBrains Mono) and status marks.
+  - Lists: `@shopify/flash-list` 2, which needs the new architecture the app already uses.
+  - Images and program icons: `expo-image`, which also draws herdr-app's SVG program icons. Chosen over react-native-fast-image, which can't show SVG and isn't in Expo's module set.
+  - State: `zustand`, persisted with its `persist` middleware through `expo-sqlite`'s kv-store. The device token goes to `expo-secure-store`, never to the kv store.
+  - Styling: Uniwind with Tailwind 4. Graphite and paper are its `dark` and `light` themes, so the built-in `system` theme follows the phone.
+  - Icons: Lucide through `lucide-react-native`, as in herdr-app.
+  - The app is built with the paseo-plan-build-review workflow: GPT-6 Luna at max in Codex fast mode implements, and GPT-6.1 Sol at xhigh reviews, with GPT-6 Astra at xhigh only when a Sol review run fails. Work is tracked in GitHub issues.
+
 ## What herdr looks like now
 
 herdr is three separate products. On 2026-10-30 this machine had only the old TUI installed, version 0.9.0. The latest release was 0.9.5.
@@ -65,7 +73,7 @@ Nenu's [ARCHITECTURE.md](https://github.com/frizynn/nenu/blob/main/ARCHITECTURE.
 
 ## What to take from Paseo
 
-Paths are relative to the local checkout at `/Users/roy/Desktop/SourceCode/openhark/paseo`. It's all Apache-2.0, so you can reuse it with attribution.
+Paths are relative to the root of the [Paseo repository](https://github.com/getpaseo/paseo). It's all Apache-2.0, so you can reuse it with attribution.
 
 | Piece          | How Paseo does it                                                                                                                                                                                                                                   | Use for herdr                                                                                                                                |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
