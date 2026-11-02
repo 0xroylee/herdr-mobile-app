@@ -104,9 +104,49 @@ herdr-core  ◄── herdr-app desktop window, same terminals and spaces
 Recommended decisions:
 
 1. **Pass core's protocol through instead of designing a new API.** The phone talks to herdr-core directly. The bridge adds a few calls of its own for push, devices and history. Core's API is add-only, and a test fails on any change that would break existing clients. That makes the phone another core client, like herdr-app. The bridge checks the method name of each call against the device's permissions and forwards the rest.
-2. **Read spaces and tabs from terminal labels first.** herdr-app documents `herdr.space` and `herdr.tab` labels on terminals. The app's stored layout has names and order, but its format is private to the app. Nenu's author asked upstream which one clients should use in [herdr-app#43](https://github.com/herdrdev/herdr-app/issues/43), with no answer as of 2026-10-30.
+2. **Read spaces and tabs defensively.** herdr-app documents `herdr.space` and `herdr.tab` labels on terminals. The app's stored layout has names and order, but its format is private to the app. Nenu's author asked upstream which one clients should use in [herdr-app#43](https://github.com/herdrdev/herdr-app/issues/43), with no answer as of 2026-10-30. [Supporting herdr-app](#supporting-herdr-app) has the plan.
 3. **Run the bridge on a machine that stays awake.** A sleeping MacBook means the phone shows nothing.
 4. **Keep message text out of push payloads, or encrypt it.** Paseo puts message previews in the push, which Expo, Apple and Google can read. Either send a generic alert and load details over the tailnet, or encrypt the payload and decrypt it on the phone with an iOS Notification Service Extension.
+
+## Supporting herdr-app
+
+Researched 2026-11-01. herdr-app keeps its state in two places, so the bridge on the Mac talks to both:
+
+| Layer                                            | Available                              | Use it for                                                                                                                                                  |
+| ------------------------------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| herdr-core, through `hc connect`                 | Always, with the window open or closed | Terminals, status, events, attach, send and keys, starting terminals with `terminal.run`, reading the `herdr-app` document                                  |
+| The open window, through `herdr-app do <action>` | Only while the window is open          | Making, renaming, moving and closing spaces and tabs, splitting panes. `space.new` and `tab.new` also take an agent (`argv`) and its first message (`task`) |
+
+Ovis lists space and tab changes as unsupported on core, because it only talks to core. Calling `herdr-app do` from the bridge is the way around that while the window is open.
+
+- **Structure.** Read space and tab names and their order from the core document `herdr-app` with `doc.get`, and fetch it again on its `doc` event, after a reconnect and after `missed`. Its format belongs to the app, so parse it defensively and fall back to the `herdr.space` and `herdr.tab` labels on terminals. While the window is open, `herdr-app ls` is the documented way to inspect it.
+- **Changes.** With the window open, run `herdr-app do` on the Mac. Arguments are named flags or one JSON object. With it closed, start terminals with `terminal.run`, `keep` and the space and tab labels; an id the app doesn't know becomes a new unnamed space or tab. Disable the other actions. Ask on the phone before any action that ends terminals: `space.close`, `tab.close`, `pane.close` and `terminal.kill`.
+- **Terminal size.** The last viewer that types or resizes sets the size, so typing through an attach from the phone also resizes that terminal in the Mac window. Watch with `observe: true`, send prompts with `terminal.send` and keys with `terminal.keys`, and make a full takeover an explicit action.
+- **Attention.** herdr-app shows Working, Blocked, Done and Idle. Done means it finished while nobody was looking, and each screen tracks that on its own, so the phone keeps its own seen state.
+- **Push.** herdr-app already alerts on the Mac. Skip phone pushes while the Mac is in use, judged by its input idle time and whether the screen is locked.
+- **Other machines.** SSH machines added in herdr-app are core machines. Their terminals arrive in the same event stream, addressed like `box/t7`, and their layout is `doc.get` with `on: "box"`.
+- **Running on the Mac.** Run the bridge as a launchd LaunchAgent with `KeepAlive`, and give it the full paths of `hc` and `herdr-app`, because launchd's `PATH` is short. Keep the Mac awake on power, or run the agents on an always-on Mac added as a machine.
+
+### Verified on this Mac, 2026-11-01
+
+herdr-app 0.1.10 from the DMG, herdr-core 0.1.16. The window held one space with one tab and one shell, so splits and mod panes haven't been seen yet.
+
+- **Install.** The app installs the core on first launch as `~/.local/bin/herdr-core`, with `~/.local/bin/hc` linking to it. `~/.local/bin/herdr-app` links to `/Applications/Herdr.app/Contents/MacOS/Herdr`, so the GUI binary is also the CLI. The app runs `herdr-core serve` and talks to it through a `herdr-core connect` child process, the same way the bridge will.
+- **Session.** `default`. Its socket is `~/.local/state/herdr-core/default/default.sock`, because macOS has no `XDG_RUNTIME_DIR`.
+- **`hello`.** Version 0.1.16, protocol generation 1, features `framed`, `attach`, `events`, `status` and `shell`.
+- **The `herdr-app` document**, at document version 1:
+
+  ```
+  spaces[]: id "sp…", name ("" when unnamed), folder, tabs[]
+    tabs[]: id "tb…", name ("" when unnamed), root
+      root: a layout tree. Containers have a type such as "row", an id and children;
+            leaves have type "block", an id "p…" and content.terminal, e.g. "t1"
+  ```
+
+- **Labels.** A terminal's `herdr.space` and `herdr.tab` are the document's space and tab ids. A third label, `where`, is display text such as `~ / 1`. Terminals the app holds have `keep: true`.
+- **`herdr-app ls`** prints JSON with no flags: `spaces[]` with `id`, `name`, `folder`, `machine` (null for this Mac), `active` and `tabs[]`. Each tab has `id`, `name`, `active`, `settled` and `terminals[]`, and each terminal has `terminal`, `pane`, `status`, `app`, `name` and `sub_agents[]`. A `recent[]` list follows.
+- **`herdr-app status`** prints JSON with the selected `space`, `tab` and `focused_pane`, the `layout` name, zoom and font sizes.
+- **CLI usage:** `herdr-app ls | commands | status | shot [file.png] | do <command> [--arg value ... | json]`.
 
 ## Setup
 

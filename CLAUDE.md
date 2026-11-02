@@ -25,7 +25,7 @@ bun run format      # Biome, writes fixes, Markdown included
 
 ## Rules
 
-- Never point tests or experiments at the user's real herdr-core. Set `HC_SESSION=<name>` and scratch `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR`.
+- Never point tests or experiments that write at the user's real herdr-core. Set `HC_SESSION=<name>` and scratch `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR`. Read-only inspection of the real core and window (`terminal.list`, `doc.get`, `herdr-app ls`, `herdr-app status`) needs the user's agreement and shouldn't print terminal names, paths, command lines or screen text.
 - Never run `hc server stop`, `hc server restart` or `hc update`, and never kill the user's core. Every terminal on the machine runs in it.
 - The bridge binds to `127.0.0.1` only. Never use `tailscale funnel`.
 - Bun installs the workspace and runs the bridge, scripts and tests. Expo's CLI and Metro still run on Node 24.
