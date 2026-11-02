@@ -1,4 +1,4 @@
-// @ts-expect-error Bun provides this module at test runtime; Expo's app tsconfig has no Bun types.
+/// <reference types="bun" />
 import { expect, test } from "bun:test";
 import {
   cellSizeForZoom,
