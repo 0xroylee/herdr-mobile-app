@@ -11,6 +11,11 @@ export interface TerminalCellSize {
   readonly height: number;
 }
 
+export interface TerminalFit {
+  cols: number;
+  rows: number;
+}
+
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return DEFAULT_ZOOM;
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
@@ -26,6 +31,17 @@ export function cellSizeForZoom(zoom: number): TerminalCellSize {
     fontSize,
     width: Math.round(fontSize * CELL_WIDTH_PER_FONT_SIZE * 1_000) / 1_000,
     height: Math.round(fontSize * DEFAULT_LINE_HEIGHT_RATIO * 1_000) / 1_000,
+  };
+}
+
+export function gridThatFits(
+  viewport: { width: number; height: number },
+  zoom: number,
+): TerminalFit {
+  const cell = cellSizeForZoom(zoom);
+  return {
+    cols: viewport.width > 0 ? Math.floor(viewport.width / cell.width) : 0,
+    rows: viewport.height > 0 ? Math.floor(viewport.height / cell.height) : 0,
   };
 }
 

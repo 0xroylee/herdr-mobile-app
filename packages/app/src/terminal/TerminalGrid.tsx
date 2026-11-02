@@ -21,14 +21,17 @@ import type { ScreenRow, ScreenRun, ScreenSnapshot, TerminalColor } from "./snap
 import {
   cellSizeForZoom,
   DEFAULT_ZOOM,
+  gridThatFits,
   resetZoom,
   scrollOffsetToBottom,
+  type TerminalFit,
   zoomFromPinch,
 } from "./zoom.ts";
 
 export interface TerminalGridProps {
   snapshot: ScreenSnapshot;
   palette: TerminalPalette;
+  onFit?(fit: TerminalFit): void;
 }
 
 interface ViewportSize {
@@ -112,7 +115,7 @@ function onLayout(setSize: (size: ViewportSize) => void) {
   };
 }
 
-export function TerminalGrid({ snapshot, palette }: TerminalGridProps) {
+export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [viewport, setViewport] = useState<ViewportSize>({ width: 0, height: 0 });
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -148,6 +151,9 @@ export function TerminalGrid({ snapshot, palette }: TerminalGridProps) {
   const gesture = useSimultaneousGestures(pinch, doubleTap);
 
   const cellSize = cellSizeForZoom(zoom);
+  const fit = gridThatFits(viewport, zoom);
+  const fitCols = fit.cols;
+  const fitRows = fit.rows;
   const contentWidth = snapshot.cols * cellSize.width;
   const gridHeight = snapshot.rows.length * cellSize.height;
   const contentHeight = Math.max(viewport.height, gridHeight);
@@ -175,6 +181,10 @@ export function TerminalGrid({ snapshot, palette }: TerminalGridProps) {
     }),
     [contentHeight, snapshot.rows.length, viewport.height, viewport.width, zoom],
   );
+
+  useEffect(() => {
+    onFit?.({ cols: fitCols, rows: fitRows });
+  }, [onFit, fitCols, fitRows]);
 
   useEffect(() => {
     verticalScroll.current?.scrollTo({

@@ -7,15 +7,23 @@ import { shortenHomeFolder } from "./folder.ts";
 import { type TerminalTheme, terminalPalettes } from "./palette.ts";
 import type { ScreenSnapshot } from "./snapshot.ts";
 import { TerminalGrid } from "./TerminalGrid.tsx";
+import type { TerminalFit } from "./zoom.ts";
 
 export interface TerminalPaneProps {
   program: string;
   folder: string;
   homeDirectory?: string;
   snapshot: ScreenSnapshot;
+  onFit?(fit: TerminalFit): void;
 }
 
-export function TerminalPane({ program, folder, homeDirectory, snapshot }: TerminalPaneProps) {
+export function TerminalPane({
+  program,
+  folder,
+  homeDirectory,
+  snapshot,
+  onFit,
+}: TerminalPaneProps) {
   const { theme } = useUniwind();
   const paletteTheme: TerminalTheme = theme === "dark" ? "graphite" : "paper";
   const palette = terminalPalettes[paletteTheme];
@@ -40,7 +48,7 @@ export function TerminalPane({ program, folder, homeDirectory, snapshot }: Termi
         </Text>
       </View>
       <View className="bg-border" style={{ height: HAIRLINE }} />
-      <TerminalGrid palette={palette} snapshot={snapshot} />
+      <TerminalGrid onFit={onFit} palette={palette} snapshot={snapshot} />
     </View>
   );
 }

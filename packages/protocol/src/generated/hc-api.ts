@@ -436,6 +436,14 @@ export interface TerminalKeysParams {
   terminal: string;
 }
 
+/** End the program: hangup, then terminate, then kill. Returns the observed result. */
+export interface TerminalKillParams {
+  /** Who is calling; a parent looking at its child has seen its news. */
+  caller?: string | null;
+  /** The terminal: `t7`, a name, or `machine/t7`. */
+  terminal: string;
+}
+
 /** Start a program in a new terminal; or, when argv[0] names a template, start its command and send its body plus the rest of argv as the first message once the agent is ready. Returns once it runs (and the first message is sent or not). */
 export interface TerminalRunParams {
   /**
@@ -522,6 +530,7 @@ export interface HcMethodMap {
   "terminal.attach": { params: TerminalAttachParams; result: AttachResult };
   "terminal.send": { params: TerminalSendParams; result: SendResult };
   "terminal.keys": { params: TerminalKeysParams; result: KeysResult };
+  "terminal.kill": { params: TerminalKillParams; result: Terminal };
   "terminal.run": { params: TerminalRunParams; result: RunResult };
   "events.subscribe": { params: EventsSubscribeParams; result: SubscribeResult };
   "doc.get": { params: DocGetParams; result: DocGetResult };
