@@ -20,5 +20,8 @@ export const REQUIRED_HC_METHODS = [
 
 export type RequiredHcMethod = (typeof REQUIRED_HC_METHODS)[number];
 
+export * from "./bridge.ts";
 export type * from "./generated/hc-api.ts";
+export * from "./herdr-app-doc.ts";
+export * from "./policy.ts";
 export * from "./wire.ts";
