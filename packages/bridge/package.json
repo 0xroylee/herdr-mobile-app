@@ -3,11 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "herdr-bridge": "./scripts/bridge.ts"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bridge": "bun scripts/bridge.ts"
   },
   "dependencies": {
     "@herdr-mobile/hc-client": "*",

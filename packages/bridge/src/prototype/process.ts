@@ -8,6 +8,8 @@ export interface OwnedProcess {
   closeInput(): void;
   /** Hands each chunk of its stdout to `onData`, then calls `onEnd` once stdout closes. */
   read(onData: (bytes: Uint8Array) => void, onEnd: () => void): void;
+  /** Hands each chunk of piped stderr to `onData`; present when spawn requested stderr piping. */
+  readStderr?(onData: (bytes: Uint8Array) => void, onEnd: () => void): void;
   /** Its exit code once it has exited; null when a signal ended it. */
   readonly exited: Promise<number | null>;
   /** Sends it SIGTERM. */
@@ -15,14 +17,23 @@ export interface OwnedProcess {
 }
 
 export interface ProcessRunner {
-  spawn(argv: string[], options: { env: Record<string, string>; cwd: string }): OwnedProcess;
+  spawn(
+    argv: string[],
+    options: { env: Record<string, string>; cwd: string; stderr?: "pipe" },
+  ): OwnedProcess;
 }
 
 export const bunRunner: ProcessRunner = {
-  spawn(argv, { env, cwd }) {
-    const child = Bun.spawn(argv, { env, cwd, stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+  spawn(argv, { env, cwd, stderr }) {
+    const child = Bun.spawn(argv, {
+      env,
+      cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: stderr === "pipe" ? "pipe" : "inherit",
+    });
     let open = true;
-    return {
+    const owned: OwnedProcess = {
       write(bytes) {
         child.stdin.write(bytes);
         return Promise.resolve(child.stdin.flush()).then(() => {});
@@ -48,5 +59,19 @@ export const bunRunner: ProcessRunner = {
         child.kill("SIGTERM");
       },
     };
+    if (stderr === "pipe") {
+      owned.readStderr = (onData, onEnd) => {
+        void (async () => {
+          try {
+            if (child.stderr) {
+              for await (const chunk of child.stderr) onData(chunk);
+            }
+          } finally {
+            onEnd();
+          }
+        })();
+      };
+    }
+    return owned;
   },
 };
