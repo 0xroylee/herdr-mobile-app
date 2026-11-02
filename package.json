@@ -15,6 +15,8 @@
     "test": "bun test",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "build:web": "bun --filter @herdr-mobile/app build:web",
+    "bridge": "bun packages/bridge/scripts/bridge.ts",
     "protocol:generate": "bun packages/protocol/scripts/hc-api.ts --write",
     "protocol:check": "bun packages/protocol/scripts/hc-api.ts --check",
     "prototype:hc": "bun packages/bridge/scripts/prototype-hc.ts"

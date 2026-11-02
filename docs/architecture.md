@@ -1,88 +1,87 @@
 # Architecture
 
-How the pieces fit, as planned on 2026-11-02. The decisions behind it are in [research.md](research.md#decisions), and the task order comes from the unshit plan for `hc-client`.
+This page describes the integrated v1 app and bridge. The transport and security decisions are in [research.md](research.md#decisions). The herdr-core client prototype and its scratch-session rules are in [prototype.md](prototype.md).
 
 ## System
 
 ```mermaid
 flowchart LR
-  subgraph phone["Phone or browser, with Tailscale on"]
-    app["Expo app<br/>iOS, Android, web"]
+  subgraph client["Phone or browser on the tailnet"]
+    app["Expo app"]
+    web["Web export in packages/app/dist"]
   end
 
-  subgraph mac["Agent machine, macOS"]
-    serve["tailscale serve<br/>HTTPS, adds Tailscale-User-Login"]
-    subgraph bridge["herdr-bridge: Bun, listens on 127.0.0.1"]
-      auth["identity and device-token check"]
-      proxy["one hc connect per phone session<br/>per-device method policy"]
-      push["push on blocked, done, error"]
-      web["serves the web build"]
+  subgraph mac["Agent Mac"]
+    serve["Tailscale Serve: HTTPS and identity header"]
+    subgraph bridge["herdr-bridge: Bun, 127.0.0.1"]
+      identity["Owner identity check"]
+      api["HTTP API"]
+      pairing["Pairing codes and device store"]
+      static["Web assets and index.html fallback"]
+      ws["WebSocket token check"]
+      session["One hc connect child per app session"]
+      gate["Role policy and protocol gate"]
+      admin["Private admin.sock"]
     end
-    hcc["hc connect<br/>stdin and stdout"]
-    core["herdr-core<br/>herdr-core serve, session default"]
-    cli["herdr-app ls and do"]
-    window["herdr-app window"]
+    cli["herdr-bridge CLI"]
+    hc["hc connect"]
+    core["herdr-core"]
+    herdr["herdr-app CLI and window"]
   end
 
-  expo["Expo push service"]
-  apns["APNs and FCM"]
-
-  app -- "WSS over the tailnet" --> serve
-  serve --> auth --> proxy --> hcc --> core
-  serve --> web
-  window -- "herdr-core connect" --> core
-  proxy -. "spaces and tabs, window open only" .-> cli --> window
-  proxy --> push --> expo --> apns --> app
+  app -- "HTTPS and WebSocket" --> serve --> identity
+  identity --> api
+  api --> pairing
+  identity --> static
+  identity --> ws --> session --> gate --> hc --> core
+  static --> web
+  api --> herdr
+  cli -- "Unix socket" --> admin
+  admin --> pairing
 ```
 
-## Packages and the hc-client layers
+Tailscale Serve forwards tailnet requests to the loopback bridge and supplies `Tailscale-User-Login`. The bridge checks that identity before handling API, static-file or WebSocket requests. Pairing uses the identity header and a one-time code. Other API calls and WebSocket sessions also need a paired device token.
 
-```mermaid
-flowchart TB
-  subgraph protocol["packages/protocol"]
-    schema["schema/hc.openrpc.json<br/>hc 0.1.16, generation 1"]
-    types["T3 method types<br/>bun run protocol:check"]
-  end
+The app's web export uses the same hostname and bridge as the native app. The bridge serves files from `--web`; missing paths fall back to `index.html` for app routes. See [bridge setup](bridge.md) for the build, Serve and pairing commands.
 
-  subgraph client["packages/hc-client: no runtime dependencies"]
-    codec["T2 frame codec<br/>9-byte header, 16 MiB cap"]
-    rpc["T4 plain JSON-RPC<br/>FIFO writes, id correlation"]
-    hello["T5 hello and framed multiplexing"]
-    attach["T6 attach streams<br/>credit, CLOSE, observe mode"]
-    events["T7 event subscriptions<br/>snapshot, seq, missed"]
-  end
+## Packages
 
-  subgraph bridgepkg["packages/bridge: Bun"]
-    proto["T8 prototype<br/>bun run prototype:hc"]
-    xterm["@xterm/headless"]
-  end
+| Package              | Boundary                                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`  | Pinned `schema/hc.openrpc.json` and wire types shared by the bridge and app. `bun run protocol:check` checks generated types.                                 |
+| `packages/hc-client` | Runtime-neutral JSON-RPC, line and frame codecs, attach streams and events. It has no runtime dependencies and imports no Node built-ins.                     |
+| `packages/bridge`    | Bun CLI, loopback HTTP and WebSocket server, Unix admin socket, pairing and device storage, process sessions, gate, herdr-app actions and static web serving. |
+| `packages/app`       | Expo Router client for iOS, Android and web. Expo CLI and Metro run with Node 24.                                                                             |
 
-  subgraph apppkg["packages/app: Expo SDK 58"]
-    screens["screens, later"]
-  end
+The bridge's `hc connect` child communicates with herdr-core over stdio. The child receives only the configured environment, including an optional `HC_SESSION`. `Gate` checks channel-zero JSON-RPC calls against the paired device's role and forwards allowed core bytes unchanged. Nonzero attachment channels pass through. See [bridge details](bridge.md) for the full policy and API.
 
-  schema --> types --> rpc
-  codec --> hello
-  rpc --> hello
-  hello --> attach
-  hello --> events
-  client --> proto
-  xterm --> proto
-  client -. "later, over the bridge WebSocket" .-> screens
-```
+## App layers
 
-`bun run prototype:hc` runs the whole stack once against a scratch core. [prototype.md](prototype.md) covers its isolation, deadlines, interruption and cleanup.
+| Layer    | Location                                                | Responsibility                                                                                                                                                                                                                  |
+| -------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Network  | `packages/app/src/net/`                                 | Pairing API, link parsing, WebSocket adapter and `ConnectionManager`. The manager authenticates, starts hc-client in framed mode, subscribes to events, loads the `herdr-app` document and reconnects after transport failures. |
+| Stores   | `packages/app/src/store/`                               | Persisted settings, paired machine records and seen turns, plus the in-memory core snapshot. Native settings use SQLite key-value storage and SecureStore secrets. Web settings and secrets use `localStorage`.                 |
+| Models   | `packages/app/src/model/`                               | Pure terminal, status, prompt, agent, space, address and seen-state derivation. Screens render these results.                                                                                                                   |
+| Terminal | `packages/app/src/terminal/`                            | `@xterm/headless` model, styled screen snapshots, ANSI theme palettes and the native text-grid renderer. Attach credit returns after the renderer writes output.                                                                |
+| Screens  | `packages/app/src/screens/` and `packages/app/src/app/` | Agents, agent terminal, spaces, settings and pairing routes. Controllers hold interaction state; route components connect them to stores and UI.                                                                                |
+| UI       | `packages/app/src/ui/`                                  | Uniwind themes, fonts, safe-area handling, Image and FlashList wrappers, shared text variants and controls.                                                                                                                     |
 
-## Dependencies
+The settings store selects `system`, `graphite` or `paper` before the first route renders. The root layout holds the splash screen until boot hydration and font loading finish. A failed font load offers a retry state.
 
-| Package           | Used by              | Version    | Why                                                                                                                     |
-| ----------------- | -------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------- |
-| none              | `packages/hc-client` |            | Runs in Bun and in Hermes. Typed arrays, `DataView` and a small UTF-8 helper replace `node:buffer` and encoding globals |
-| `@xterm/headless` | `packages/bridge`    | 6.0.0, MIT | Turns attach-stream bytes into screen text in the prototype                                                             |
-| Bun built-ins     | `packages/bridge`    | Bun 1.4.4  | `Bun.spawn` for `hc connect`, `bun test`                                                                                |
-| `typescript`      | workspace            | ~6.0.3     | Typecheck, same version as the Expo template                                                                            |
-| `@biomejs/biome`  | workspace            | 2.6.4      | Lint and format                                                                                                         |
-| `@types/bun`      | workspace            | ^1.4.4     | Types for Bun APIs and `bun:test`                                                                                       |
-| Expo SDK 58       | `packages/app`       | 58         | Already in the scaffold; this milestone doesn't touch it                                                                |
+## Data flow by screen
 
-Later milestones add `Bun.serve` for the bridge's WebSocket server, a native terminal renderer in the app (Paseo's `@xterm/headless` plus native grid is the reference), `expo-notifications` for push and `expo-camera` for QR pairing.
+1. **Agents.** `ConnectionManager` feeds core snapshots and events into the core store. `deriveAgents` combines terminals, the `herdr-app` layout, seen turns and receipt time. It chooses titles and subtitles, marks urgency and groups agents into Needs you, Done, Working and Idle. The Agents screen renders the rows and machine connection state.
+2. **Agent terminal.** The screen attaches with `observe: true` at the Mac terminal's size. `TerminalModel` parses output and creates styled rows for `TerminalPane`. A size event updates the model. Keys and composer text call `terminal.keys` and `terminal.send`. Take over confirms before it reattaches without observe at the pane size. Interrupt and end-terminal actions also require confirmation.
+3. **Needs-you prompt.** The Claude Code and Codex recognizers read the terminal status and screen snapshot. A recognized prompt adds answer choices. A watch-role device sees the prompt without answer controls. An unrecognized prompt leaves the composer available for direct input.
+4. **Spaces.** `deriveSpaces` combines the `herdr-app` layout document with core terminals. The screen keeps document and tab order, uses fallback labels when the document is missing, and shows connection state by machine. New space and tab actions call the bridge's `/api/app/do` route, which invokes the configured `herdr-app` executable.
+5. **Agents by space.** With `agents.sort` set to `space`, the Agents screen groups the same derived rows by document order and tab order.
+6. **Pairing.** The app reads a `#pair=` fragment, pasted link or typed URL and code. It sends the one-time code to `/api/pair`, saves the returned token through `Secrets`, adds the public machine record and makes it active. `ConnectionManager` then opens the bridge WebSocket. The connection line reports the paired device name and connection state.
+7. **Settings.** Theme and notification preferences persist in the settings store. Notification switches do not send push notifications. The Machines section revokes a device through `/api/devices/self`, then removes local machine data even if the bridge cannot be reached. About shows app and protocol versions and explains web storage.
+
+## Build and verification boundaries
+
+Run `bun run build:web` from the repository root to export the app into `packages/app/dist`. `herdr-bridge serve --owner <login> --web packages/app/dist` serves that directory through the same identity-gated handler as the API and WebSocket routes. The handler applies COOP and COEP headers to static responses.
+
+The first simulator, physical-device and browser runs are still pending. The web export checks bundling, and bridge tests use fake filesystems and handlers without opening a port. Use the [smoke checklist](smoke-checklist.md) for the native and browser checks.
+
+Push delivery is the remaining product feature. The notification settings only persist preferences. U15 waits for push credentials.
