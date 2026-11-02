@@ -34,6 +34,13 @@ export interface Frame {
   payload: Uint8Array;
 }
 
+/** A JSON-RPC message without an id: herdr-core's `event`, `heartbeat` and `missed`. */
+export interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params?: JsonValue;
+}
+
 export type JsonValue =
   | null
   | boolean
