@@ -12,6 +12,10 @@
   "dependencies": {
     "@herdr-mobile/hc-client": "*",
     "@herdr-mobile/protocol": "*",
-    "@xterm/headless": "6.0.0"
+    "@xterm/headless": "6.0.0",
+    "qrcode": "^1.5"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }
