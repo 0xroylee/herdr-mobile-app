@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@import "uniwind";
+
+@theme {
+  --font-sans: "Geist_400Regular";
+  --font-sans-medium: "Geist_500Medium";
+  --font-sans-semibold: "Geist_600SemiBold";
+  --font-mono: "JetBrainsMono_400Regular";
+  --font-mono-semibold: "JetBrainsMono_600SemiBold";
+
+  --radius-xs: 5px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-key: 9px;
+  --radius-btn: 10px;
+  --radius-seg: 11px;
+  --radius-pane: 12px;
+  --radius-group: 14px;
+  --radius-card: 15px;
+  --radius-field: 17px;
+}
+
+@layer theme {
+  :root {
+    @variant dark {
+      --color-canvas: #0e1012;
+      --color-chrome: #131619;
+      --color-surface: #17191c;
+      --color-raised: #202225;
+      --color-border: #25282c;
+      --color-fg: #e8e9eb;
+      --color-muted: #a9adb3;
+      --color-dim: #8b8f95;
+      --color-term-bg: #111316;
+      --color-term-fg: #e6e7e9;
+      --color-solid: #e8e9eb;
+      --color-solid-fg: #131619;
+      --color-working: #8f84f5;
+      --color-blocked: #e2a03f;
+      --color-done: #3fb68b;
+      --color-idle: #8b8f95;
+      --color-danger: #ef6f6c;
+      --color-focus: #a7b4c6;
+      --color-blocked-tint: #e2a03f29;
+      --color-prompt-bg: #27241f;
+      --color-prompt-border: #6d5633;
+      --color-spinner-track: #8f84f53d;
+      --color-scroll-track: #8b8f952e;
+      --color-scroll-thumb: #8b8f958c;
+    }
+
+    @variant light {
+      --color-canvas: #f6f7f9;
+      --color-chrome: #fcfcfd;
+      --color-surface: #ffffff;
+      --color-raised: #f0f1f4;
+      --color-border: #e5e7ec;
+      --color-fg: #252b37;
+      --color-muted: #5f6672;
+      --color-dim: #89909d;
+      --color-term-bg: #ffffff;
+      --color-term-fg: #252b37;
+      --color-solid: #252b37;
+      --color-solid-fg: #ffffff;
+      --color-working: #7465db;
+      --color-blocked: #d79032;
+      --color-done: #39a380;
+      --color-idle: #99a0ad;
+      --color-danger: #d14b45;
+      --color-focus: #5b6b82;
+      --color-blocked-tint: #d7903229;
+      --color-prompt-bg: #fcf6ef;
+      --color-prompt-border: #e0c6a5;
+      --color-spinner-track: #7465db3d;
+      --color-scroll-track: #89909d2e;
+      --color-scroll-thumb: #89909d8c;
+    }
+  }
+}

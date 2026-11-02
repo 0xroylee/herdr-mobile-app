@@ -15,6 +15,7 @@
       "!packages/protocol/src/generated"
     ]
   },
+  "css": { "parser": { "tailwindDirectives": true } },
   "formatter": {
     "indentStyle": "space",
     "indentWidth": 2,
