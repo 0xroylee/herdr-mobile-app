@@ -33,6 +33,6 @@ bun run prototype:hc     # one checked run against a scratch core, see docs/prot
 - Bun installs the workspace and runs the bridge, scripts and tests. Expo's CLI and Metro still run on Node 24.
 - `bunfig.toml` uses the hoisted linker. Don't switch to isolated without checking the app on iOS, Android and web.
 - Dependencies' install scripts run only if the package is listed in `trustedDependencies`. `bun pm untrusted` shows what was skipped.
-- Import local files with the `.ts` extension, and use erasable TypeScript only: no enums, namespaces or parameter properties. The same code also runs through Metro and Node's type stripping.
+- Import local files with the `.ts` extension, and use erasable TypeScript only: no enums, namespaces or parameter properties. The same code also runs through Metro and Node's type stripping. Platform-split modules with `.native.ts` or `.web.ts` variants are imported without an extension so Metro can select the platform file; every other local import keeps its extension.
 - Add app dependencies with `bunx expo install` from `packages/app`, so versions match the Expo SDK.
 - Write docs, comments and commit messages in English.

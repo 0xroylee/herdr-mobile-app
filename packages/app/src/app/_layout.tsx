@@ -1,9 +1,8 @@
-// @ts-expect-error Metro processes this global stylesheet import.
 import "../global.css";
 
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Boot } from "../boot.tsx";
@@ -30,12 +29,14 @@ export default function RootLayout() {
 
 function FontGate({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
   const [fontsLoaded, error] = useAppFonts();
+  const [bootReady, setBootReady] = useState(false);
+  const reportBootReady = useCallback(() => setBootReady(true), []);
 
   useEffect(() => {
-    if (fontsLoaded || error) {
+    if ((fontsLoaded && bootReady) || error) {
       void SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, error]);
+  }, [fontsLoaded, bootReady, error]);
 
   if (error) return <FontLoadError onRetry={onRetry} />;
 
@@ -45,8 +46,9 @@ function FontGate({ retrying, onRetry }: { retrying: boolean; onRetry: () => voi
 
   return (
     <AppSafeArea>
-      <Boot />
-      <Stack screenOptions={{ headerShown: false }} />
+      <Boot onReady={reportBootReady}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </Boot>
     </AppSafeArea>
   );
 }
