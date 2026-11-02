@@ -14,7 +14,9 @@
     "typecheck": "bun --filter '*' typecheck",
     "test": "bun test",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "protocol:generate": "bun packages/protocol/scripts/hc-api.ts --write",
+    "protocol:check": "bun packages/protocol/scripts/hc-api.ts --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

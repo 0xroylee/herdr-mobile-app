@@ -20,4 +20,5 @@ export const REQUIRED_HC_METHODS = [
 
 export type RequiredHcMethod = (typeof REQUIRED_HC_METHODS)[number];
 
+export type * from "./generated/hc-api.ts";
 export * from "./wire.ts";
