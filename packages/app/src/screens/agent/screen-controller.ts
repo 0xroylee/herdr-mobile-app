@@ -92,17 +92,22 @@ export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreen
     agentRow?.age ??
     formatAge(terminal?.status_ms ?? terminal?.finished_ms ?? terminal?.created_ms, now);
   const connected = machineCore?.connection === "connected" && attachment.phase === "connected";
+  const terminalFinished =
+    machineCore?.connection === "connected" && terminal?.state === "finished";
   const showBanner =
     machineCore?.connection !== "connected" ||
     attachment.phase === "error" ||
-    attachment.phase === "closed";
+    attachment.phase === "closed" ||
+    terminalFinished;
   const reconnecting =
     machineCore?.connection === "connecting" || machineCore?.connection === "reconnecting";
   const bannerMessage =
     machineCore?.connection === "unauthorized"
       ? "This device is no longer authorized."
       : machineCore?.connection === "connected"
-        ? "The terminal stream is unavailable."
+        ? terminal?.state === "finished"
+          ? finishedTerminalMessage(terminal)
+          : "The terminal stream is unavailable."
         : reconnecting
           ? `Reconnecting to ${machine?.name ?? "machine"}…`
           : "Can't reach the bridge. Check that Tailscale is on.";
@@ -126,6 +131,23 @@ export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreen
     placeholder,
     disabled: !connected,
   };
+}
+
+function finishedTerminalMessage(terminal: NonNullable<AgentRow["terminal"]>): string {
+  if (typeof terminal.exit_code === "number") {
+    return `The program exited with code ${terminal.exit_code}.`;
+  }
+  if (typeof terminal.signal === "number") {
+    const signalNames: Record<number, string> = {
+      1: "SIGHUP",
+      2: "SIGINT",
+      3: "SIGQUIT",
+      9: "SIGKILL",
+      15: "SIGTERM",
+    };
+    return `The program was stopped by ${signalNames[terminal.signal] ?? `signal ${terminal.signal}`}.`;
+  }
+  return "The program has ended.";
 }
 
 function selectAgentRow(

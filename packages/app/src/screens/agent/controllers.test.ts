@@ -23,6 +23,35 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function finishedScreen(details: Partial<Terminal> = {}, phase: "closed" | "connected" = "closed") {
+  const terminal: Terminal = {
+    address: "t7",
+    argv: ["claude"],
+    cols: 80,
+    created_ms: 100,
+    cwd: "/work",
+    labels: {},
+    rows: 24,
+    screen: "exact",
+    state: "finished",
+    ...details,
+  };
+  return selectAgentScreen({
+    address: "t7",
+    activeId: null,
+    seen: {},
+    now: 100,
+    snapshot: { cols: 80, rows: [[]], cursor: { x: 0, y: 0, visible: false } },
+    machineCore: {
+      connection: "connected",
+      terminals: { t7: terminal },
+      layout: undefined,
+      snapshotAt: 100,
+    },
+    attachment: { mode: "watching", phase },
+  });
+}
+
 describe("agent screen controllers", () => {
   test("watch and control roles expose only their allowed controls", () => {
     expect(selectAgentCapabilities("watch")).toEqual({
@@ -119,6 +148,33 @@ describe("agent screen controllers", () => {
 
     expect(view.title).toBe("Claude Code");
     expect(view.subtitle).toBe("Other · Mac");
+  });
+
+  test("reports the exit code when a finished terminal stream closes", () => {
+    expect(finishedScreen({ exit_code: 0, signal: 15 }).bannerMessage).toBe(
+      "The program exited with code 0.",
+    );
+  });
+
+  test("reports known signal names and unknown signal numbers for finished terminals", () => {
+    for (const [signal, name] of [
+      [1, "SIGHUP"],
+      [2, "SIGINT"],
+      [3, "SIGQUIT"],
+      [9, "SIGKILL"],
+      [15, "SIGTERM"],
+    ] as const) {
+      expect(finishedScreen({ signal }).bannerMessage).toBe(`The program was stopped by ${name}.`);
+    }
+    expect(finishedScreen({ signal: 6 }).bannerMessage).toBe(
+      "The program was stopped by signal 6.",
+    );
+  });
+
+  test("shows the generic ended message when a finished terminal has no exit details", () => {
+    const view = finishedScreen({ reason: "server_stop" }, "connected");
+    expect(view.bannerMessage).toBe("The program has ended.");
+    expect(view.showBanner).toBe(true);
   });
 
   test("marks the opening turn once, then marks new machine or address openings", () => {
