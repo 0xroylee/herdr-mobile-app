@@ -26,6 +26,16 @@ Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs 
   - Styling: Uniwind with Tailwind 4. Graphite and paper are its `dark` and `light` themes, so the built-in `system` theme follows the phone.
   - Icons: Lucide through `lucide-react-native`, as in herdr-app.
   - The app is built with the paseo-plan-build-review workflow: GPT-6 Luna at max in Codex fast mode implements, and GPT-6.1 Sol at xhigh reviews, with GPT-6 Astra at xhigh only when a Sol review run fails. Work is tracked in GitHub issues.
+- **2026-11-03: Start agents from the phone.** The phone loads `GET /api/agents/catalog` and submits starts to `POST /api/agents/start`. The bridge chooses the Herdr window or herdr-core path.
+  - **Q1, Run choices.** Allow templates returned by `templates.list` and the built-in `claude` and `codex` programs. The bridge can add built-ins with `--run-program <name>`. Pass the first message to a built-in as its only CLI argument, where the CLI treats it as the initial prompt. Do not accept shell lines or extra arguments.
+  - **Q2, Folder.** Suggest the selected space's layout `folder` by default, terminal `cwd` values from that space, and the last five folders this phone used to start agents. Also accept typed absolute paths and paths that start with `~/`. The bridge resolves `~`, checks that the folder exists, and requires it to be under the home folder or a `--run-root <dir>` root. Do not add a folder browser; `file.read` is never forwarded.
+  - **Q3, Window state.** Probe with `herdr-app ls`. Exit 0 means the window is open, so use `herdr-app do`. A failure there is an error, never a fallback. A non-zero probe means the window is closed, so use `terminal.run` with `keep: true` and the `herdr.space` and `herdr.tab` labels. Tell the phone whether Herdr or herdr-core started the terminal.
+  - **Q4, Space and tab.** Offer existing spaces and `New space`. Use an existing space's folder by default. Require a folder for a new space. Start the agent in a new tab.
+  - **Q5, Pending agents.** Also list live terminals that run a known agent program or came from a template. Until the first OSC 7501 report, show them under Idle with `Waiting for status` where a question would appear. Do not add finished terminals by this rule.
+  - **Q6, `terminal.run` passthrough.** Remove `terminal.run` from `CONTROL_ONLY_METHODS`. The start route becomes the only way to start a program from a phone. Keep `terminal.keep` and `terminal.label`.
+  - **Q7, Entry points.** Put a `plus` button in the Agents header to open Start. The `+` pill in a space opens Start with that space preselected and `Empty tab` as the last choice. Keep the Spaces header `+` for creating an empty space.
+  - **Q8, Confirmation.** Keep the first message visible and show the program, folder, space and tab in the summary before Start. The summary and Start button are the confirmation. Do not add a second alert.
+  - **Safety and audit.** Only control devices can start agents. Allow only templates and the named programs, with no shell lines or extra arguments. Restrict folders to the approved roots. Label core-started terminals with `herdr-mobile.origin=<device id>` and log each start on the bridge.
 
 ## What herdr looks like now
 
