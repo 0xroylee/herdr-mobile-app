@@ -1,3 +1,4 @@
+import "./xterm-environment.ts";
 import { Terminal } from "@xterm/headless";
 import {
   coalesceRuns,
