@@ -73,6 +73,48 @@ describe("agent screen controllers", () => {
   test("selects terminal fallbacks and a connection banner from screen state", () => {
     const terminal: Terminal = {
       address: "t7",
+      argv: ["bash"],
+      cols: 80,
+      created_ms: 100,
+      cwd: "/work",
+      labels: {},
+      rows: 24,
+      screen: "exact",
+      state: "live",
+    };
+    const view = selectAgentScreen({
+      address: "t7",
+      activeId: "machine-1",
+      machine: {
+        id: "machine-1",
+        name: "Mac",
+        url: "https://machine.example.ts.net",
+        role: "watch",
+        deviceId: "phone",
+      },
+      machineCore: {
+        connection: "connected",
+        terminals: { t7: terminal },
+        layout: undefined,
+        snapshotAt: 100,
+      },
+      seen: {},
+      now: 100,
+      snapshot: { cols: 80, rows: [[]], cursor: { x: 0, y: 0, visible: true } },
+      attachment: { mode: "watching", phase: "error" },
+    });
+
+    expect(view.title).toBe("Bash");
+    expect(view.subtitle).toBe("Mac");
+    expect(view.showBanner).toBe(true);
+    expect(view.bannerMessage).toBe("The terminal stream is unavailable.");
+    expect(view.disabled).toBe(true);
+    expect(view.readOnly).toBe(true);
+  });
+
+  test("shows a pending Claude terminal's program and fallback space", () => {
+    const terminal: Terminal = {
+      address: "t7",
       argv: ["claude"],
       cols: 80,
       created_ms: 100,
@@ -105,11 +147,7 @@ describe("agent screen controllers", () => {
     });
 
     expect(view.title).toBe("Claude Code");
-    expect(view.subtitle).toBe("Mac");
-    expect(view.showBanner).toBe(true);
-    expect(view.bannerMessage).toBe("The terminal stream is unavailable.");
-    expect(view.disabled).toBe(true);
-    expect(view.readOnly).toBe(true);
+    expect(view.subtitle).toBe("Other · Mac");
   });
 
   test("reports the exit code when a finished terminal stream closes", () => {

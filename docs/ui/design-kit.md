@@ -146,6 +146,8 @@ UI glyphs are [Lucide](https://lucide.dev), as in herdr-app, drawn with `lucide-
 | Back           | `chevron-left`      |
 | Disclosure     | `chevron-right`, `chevron-down` |
 | More           | `ellipsis`          |
+| Cancel         | `x`                 |
+| Selected row   | `check`             |
 | Watching       | `eye`               |
 | Send           | `arrow-up`          |
 | New            | `plus`              |
@@ -191,6 +193,8 @@ One agent. Parts, left to right: program icon (18), the text column, then the en
 
 Time is how long the agent has been in its state: `<1m`, then whole minutes (`4m`), hours (`2h`) and days (`3d`), refreshed every 30 s. Tapping a row opens the agent. A long press offers Pin to the top, Copy address, and Take over.
 
+Live Claude Code or Codex terminals without a status report, and other live terminals with a known program icon or a non-null `terminal.template`, also appear in Idle. Show `Waiting for status` in `caption` `dim` where the question would go. Move the row to its reported state after its first OSC 7501 report. Do not add finished terminals by this rule.
+
 ### `SectionHeader`
 
 `section` text and a count in `dim` at weight 400, 7 apart, padding 14 top, 8 bottom, 4 sides. In the priority view the label is the state's name in its color: Needs you (`blocked`), Done (`done`), Working (`working`) and Idle (`dim`). In the by-space view the label is the space name in `dim`.
@@ -201,7 +205,7 @@ A `surface` container with a `border` hairline and radius `group`, holding rows 
 
 ### `ScreenHeader`
 
-`largeTitle` on the left, icon buttons on the right, padding 6 top, 10 bottom, 4 sides, inside the screen padding. The Agents screen puts the sort button before search: `clock` when sorted by priority, `layers` when by space. Tapping it toggles the sort, which is stored as `agents.sort`.
+`largeTitle` on the left, icon buttons on the right, padding 6 top, 10 bottom, 4 sides, inside the screen padding. The Agents screen puts sort, search and `plus` in that order. Sort uses `clock` when sorted by priority and `layers` when by space. Tapping it toggles the sort, which is stored as `agents.sort`. The Agents header's `plus` opens `/start`. The Spaces header's `plus` keeps creating an empty space.
 
 ### `MachineChip`
 
@@ -255,6 +259,16 @@ Shown when a blocked agent's question is one the app recognizes. `prompt-bg` bac
 
 After a tap the buttons give way to the Sent state. If the question isn't recognized, no card shows; the composer's placeholder becomes `Answer Claude Code…`.
 
+### `StartForm`
+
+The route `/start` is a modal. It fills the phone screen and appears as a centered card on web. The header has Cancel (`x`) on the left and `Start agent` in the center.
+
+`Run` is a `ListGroup` of templates from `templates.list` and the built-in Claude Code and Codex programs. Each row has a `ProgramIcon` at 18, a name in `headline`, and a description in `subhead` `dim`. Built-ins use `Interactive session`. The selected row shows `check` at 17 in `fg`. When a space is preselected, the last row is `Empty tab` with the `terminal` icon.
+
+`Where` is a `ListGroup` with a Space row and a Folder row. The space picker lists existing spaces and `New space`. An existing space defaults to its folder. A new space needs a folder. The folder picker suggests the selected space's layout `folder` first, then `cwd` values from terminals in that space, then the last five folders this phone used to start agents. Mark the default with a `Tag` reading `space folder`. `Other…` reveals a `TextInput` styled like `ManualEntry.tsx` in `mono` 13. The field accepts only absolute paths or paths that start with `~/`.
+
+`First message` is a multiline field styled like `Composer`, with the placeholder `What should Claude Code do? Optional`. The footer shows the selected program, shortened folder, space and tab, for example `Claude Code · ~/src/herdr · Work › new tab`, above a `Button large` labeled `Start Claude Code`. This line and button confirm the start; do not show a second alert. While starting, disable the inputs and show the spinner in `solid-fg`. If the device has the Watch role, replace the form with an `EmptyState` message.
+
 ### `Button`
 
 | Variant   | Height | Padding | Radius | Fill      | Text            |
@@ -268,7 +282,7 @@ Pressed: 85 % opacity. Disabled: 40 % opacity.
 
 ### `TabPill`
 
-A tab inside a space: 30 tall, 0 11 padding, radius `md`, `raised` fill, program icon (13), the tab's name in Geist 400 13, then a 6 dot in `blocked` or `done` when the tab is in that state, as herdr's tab bar draws it. Working and idle tabs have no dot. The last pill is `+` in `dim`, which starts a new tab.
+A tab inside a space: 30 tall, 0 11 padding, radius `md`, `raised` fill, program icon (13), the tab's name in Geist 400 13, then a 6 dot in `blocked` or `done` when the tab is in that state, as herdr's tab bar draws it. Working and idle tabs have no dot. The last pill is `+` in `dim`. It opens `/start` with that space preselected. The `Run` list includes `Empty tab` as its last choice, which keeps the existing empty-tab action.
 
 ### `SpaceRow`
 
@@ -311,6 +325,7 @@ Each screen is drawn in [mockups.html](mockups.html):
 | 5   | Agents, by space      | screen 1 with the by-space sort, in paper                          |
 | 6   | Pairing               | `PairingSteps`, `Snippet`, `ConnectionLine`, `Button large`        |
 | 7   | Push                  | Notifications                                                      |
+| 8   | Start agent           | `StartForm`, `ListGroup`, `Composer`, `Button large`               |
 
 Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Paper), Notifications (Needs you, Done), Machines (paired machines with Remove), and About.
 
@@ -320,7 +335,7 @@ Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Pap
 - **Seen.** Done means it finished while nobody looked. Opening the agent on the phone shows it as idle from then on, until its next turn. The phone keeps this per terminal and turn in the kv store under `seen.<machine>.<terminal>`.
 - **Watching.** Every attach is `observe: true`. Take over asks first, then attaches without `observe`, which makes the phone the active viewer and resizes the Mac's terminal to the phone.
 - **Sending.** The composer uses `terminal.send`, which pastes and presses Enter once nobody has typed for about 3 s. Keys use `terminal.keys`.
-- **Spaces.** Read from the `herdr-app` document with `doc.get`, falling back to the `herdr.space` and `herdr.tab` labels. New spaces and tabs go through `herdr-app do` on the Mac, so they need Herdr running there; say so under the list.
+- **Spaces.** Read from the `herdr-app` document with `doc.get`, falling back to the `herdr.space` and `herdr.tab` labels. The Spaces header `+` and `Empty tab` still use `herdr-app do` on the Mac, so they need Herdr running there; say so under the list. Agent starts support both window states: use `herdr-app do` when Herdr is open, and `terminal.run` with the `herdr.space` and `herdr.tab` labels when it is closed.
 - **Offline.** Keep the last snapshot on screen, dimmed to 60 %, with the `Banner`. Never show a stale state as live.
 
 ## Building it with Uniwind

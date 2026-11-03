@@ -22,7 +22,6 @@ const CONTROL_ONLY_METHODS = [
   "terminal.keys",
   "terminal.interrupt",
   "terminal.wait",
-  "terminal.run",
   "terminal.kill",
   "terminal.keep",
   "terminal.label",
@@ -32,6 +31,7 @@ const CONTROL_ONLY_METHODS = [
 export const NEVER_FORWARDED = [
   "server.stop",
   "server.restart",
+  "terminal.run",
   "doc.set",
   "terminal.rm",
   "terminal.put",
