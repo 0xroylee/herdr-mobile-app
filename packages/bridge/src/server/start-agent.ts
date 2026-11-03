@@ -99,6 +99,22 @@ function uniqueResolvedRoots(roots: readonly string[]): string[] {
   return [...new Set(roots.map((root) => resolve(root)))];
 }
 
+async function canonicalRoots(
+  roots: readonly string[],
+  realPath: (path: string) => Promise<string>,
+): Promise<string[]> {
+  const paths = await Promise.all(
+    uniqueResolvedRoots(roots).map(async (root) => {
+      try {
+        return resolve(await realPath(root));
+      } catch {
+        return root;
+      }
+    }),
+  );
+  return [...new Set(paths)];
+}
+
 function validateRequest(request: StartAgentRequest): void {
   if (!isRecord(request) || !isRecord(request.run) || !isRecord(request.space)) {
     throw new StartAgentError(400, "run_not_allowed", "The start request is invalid.");
@@ -247,9 +263,10 @@ export class AgentStarter {
   }
 
   async catalog(): Promise<AgentCatalog> {
-    const [templatesResult, windowOpen] = await Promise.allSettled([
+    const [templatesResult, windowOpen, rootsResult] = await Promise.allSettled([
       this.loadTemplates(),
       this.probeWindow(),
+      canonicalRoots(this.config.roots, (root) => this.statFs.realPath(root)),
     ]);
     const templates = templatesResult.status === "fulfilled" ? templatesResult.value : [];
     return {
@@ -258,7 +275,10 @@ export class AgentStarter {
       ...(templatesResult.status === "rejected"
         ? { templatesError: errorMessage(templatesResult.reason) }
         : {}),
-      roots: uniqueResolvedRoots(this.config.roots),
+      roots:
+        rootsResult.status === "fulfilled"
+          ? rootsResult.value
+          : uniqueResolvedRoots(this.config.roots),
       home: resolve(this.config.home),
       windowOpen: windowOpen.status === "fulfilled" && windowOpen.value,
     };
@@ -333,16 +353,62 @@ export class AgentStarter {
       return await within(
         "folder verification",
         (async () => {
-          const canonicalFolder = await this.statFs.realPath(resolved);
-          const canonicalRoots = await Promise.all(
-            this.config.roots.map((root) => this.statFs.realPath(resolve(root))),
+          const rootPaths = uniqueResolvedRoots(this.config.roots);
+          const rootResolutions = rootPaths.map((root, index) =>
+            Promise.resolve()
+              .then(() => this.statFs.realPath(root))
+              .then(
+                (path) => ({ kind: "root" as const, index, path }),
+                () => ({ kind: "root" as const, index, path: undefined }),
+              ),
           );
-          if (!canonicalRoots.some((root) => isUnder(root, canonicalFolder))) {
-            throw new StartAgentError(
-              422,
-              "folder_not_allowed",
-              "That folder is outside the allowed roots.",
-            );
+          const folderResolution = this.statFs.realPath(resolved).then(
+            (path) => ({ kind: "folder" as const, path }),
+            () => ({ kind: "folder" as const, path: undefined }),
+          );
+          const pendingRoots = new Set(rootPaths.map((_, index) => index));
+          const canonicalRootPaths: string[] = [];
+          let folderSettled = false;
+          let canonicalFolder: string | undefined;
+
+          while (true) {
+            if (folderSettled && canonicalFolder === undefined) {
+              throw new StartAgentError(422, "folder_missing", "That folder does not exist.");
+            }
+            const resolvedFolder = canonicalFolder;
+            if (
+              resolvedFolder !== undefined &&
+              canonicalRootPaths.some((root) => isUnder(root, resolvedFolder))
+            ) {
+              break;
+            }
+            if (folderSettled && pendingRoots.size === 0) {
+              throw new StartAgentError(
+                422,
+                "folder_not_allowed",
+                "That folder is outside the allowed roots.",
+              );
+            }
+
+            const pending = [
+              ...(folderSettled ? [] : [folderResolution]),
+              ...[...pendingRoots].flatMap((index) => {
+                const resolution = rootResolutions[index];
+                return resolution === undefined ? [] : [resolution];
+              }),
+            ];
+            const result = await Promise.race(pending);
+            if (result.kind === "folder") {
+              folderSettled = true;
+              canonicalFolder = result.path;
+            } else {
+              pendingRoots.delete(result.index);
+              if (result.path !== undefined) canonicalRootPaths.push(result.path);
+            }
+          }
+
+          if (canonicalFolder === undefined) {
+            throw new StartAgentError(422, "folder_missing", "That folder does not exist.");
           }
           const details = await this.statFs.stat(canonicalFolder);
           if (!details.isDirectory()) {

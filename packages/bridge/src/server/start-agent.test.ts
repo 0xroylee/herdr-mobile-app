@@ -445,6 +445,99 @@ describe("AgentStarter", () => {
     expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
   });
 
+  test("starts from an allowed home folder when an additional root is missing", async () => {
+    const { starter, runner, calls } = setup({ roots: ["/home/owner", "/offline"] });
+
+    await expect(starter.start(request(), control)).resolves.toMatchObject({ placement: "core" });
+
+    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
+    expect(calls[0]).toMatchObject({
+      method: "terminal.run",
+      params: { cwd: "/home/owner/project" },
+    });
+  });
+
+  test("starts from an allowed folder before a never-settling additional root reaches the deadline", async () => {
+    const clock = new ManualClock();
+    const never = new Promise<string>(() => {});
+    const statFs: StatFs = {
+      async realPath(path) {
+        if (path === "/offline") return await never;
+        return path;
+      },
+      async stat() {
+        return { isDirectory: () => true };
+      },
+    };
+    const { starter, runner, calls } = setup({
+      clock,
+      roots: ["/home/owner", "/offline"],
+      statFs,
+    });
+
+    await expect(starter.start(request(), control)).resolves.toMatchObject({ placement: "core" });
+
+    expect(clock.delayMs).toBe(10_000);
+    expect(clock.callback).toBeUndefined();
+    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
+    expect(calls[0]).toMatchObject({
+      method: "terminal.run",
+      params: { cwd: "/home/owner/project" },
+    });
+  });
+
+  test("rejects an outside folder after all roots settle even when one root is missing", async () => {
+    const statFs = new MapFs();
+    statFs.directories.add("/etc");
+    const { starter, runner, calls } = setup({
+      roots: ["/home/owner", "/offline"],
+      statFs,
+    });
+
+    await expect(starter.start(request({ folder: "/etc" }), control)).rejects.toMatchObject({
+      status: 422,
+      code: "folder_not_allowed",
+    });
+    expect(runner.argv).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  test("rejects an outside folder when no allowed root resolves", async () => {
+    const statFs: StatFs = {
+      async realPath(path) {
+        if (path === "/etc") return path;
+        throw new Error("root is unavailable");
+      },
+      async stat() {
+        return { isDirectory: () => true };
+      },
+    };
+    const { starter, runner, calls } = setup({
+      roots: ["/offline-a", "/offline-b"],
+      statFs,
+    });
+
+    await expect(starter.start(request({ folder: "/etc" }), control)).rejects.toMatchObject({
+      status: 422,
+      code: "folder_not_allowed",
+    });
+    expect(runner.argv).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  test("catalog de-duplicates canonical root aliases and keeps an unavailable root", async () => {
+    const statFs = new MapFs();
+    statFs.canonicalPaths.set("/linked/workspace", "/workspace");
+    const { starter } = setup({
+      roots: ["/linked/workspace", "/workspace", "/offline"],
+      statFs,
+    });
+
+    await expect(starter.catalog()).resolves.toMatchObject({
+      roots: ["/workspace", "/offline"],
+    });
+  });
+
   test("rejects a sibling path that only shares the allowed root's prefix", async () => {
     const statFs = new MapFs();
     statFs.directories.add("/home/a");

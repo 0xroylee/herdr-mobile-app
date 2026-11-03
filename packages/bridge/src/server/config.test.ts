@@ -124,6 +124,37 @@ describe("bridge config", () => {
     expect(runner.calls).toEqual([]);
   });
 
+  test("de-duplicates canonical run roots and keeps unavailable roots lexically", async () => {
+    const config = await createBridgeConfig(
+      [
+        "--owner",
+        "owner@example.com",
+        "--public-url",
+        "https://mac.tailnet.example",
+        "--run-root",
+        "/linked/shared",
+        "--run-root",
+        "/vol/shared",
+        "--run-root",
+        "/offline",
+        "--run-root",
+        "/offline",
+      ],
+      {
+        runner: new FakeRunner(),
+        env,
+        cwd: "/repo",
+        realPath: async (path) => {
+          if (path === "/linked/shared" || path === "/vol/shared") return "/vol/shared";
+          if (path === "/Users/bridge") return path;
+          throw new Error("root is unavailable");
+        },
+      },
+    );
+
+    expect(config.roots).toEqual(["/Users/bridge", "/vol/shared", "/offline"]);
+  });
+
   test("rejects invalid owner, flags, port and public URL", () => {
     expect(() => parseServeFlags([], "/repo")).toThrow("--owner");
     expect(() => parseServeFlags(["--owner", "owner", "--port", "0"], "/repo")).toThrow("--port");
