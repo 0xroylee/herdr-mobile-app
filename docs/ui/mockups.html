@@ -88,13 +88,15 @@
           <path d="M7 21H5a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" />
         </symbol>
         <symbol id="terminal" viewBox="0 0 24 24"><path d="M12 19h8" /><path d="m4 17 6-6-6-6" /></symbol>
+        <symbol id="x" viewBox="0 0 24 24"><path d="m18 6-12 12" /><path d="m6 6 12 12" /></symbol>
+        <symbol id="check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5" /></symbol>
       </defs>
     </svg>
 
     <header class="page">
       <h1>herdr mobile: first UI pass</h1>
       <p>
-        Seven screens for the phone app, in Herdr's own vocabulary. Dark screens use the graphite
+        Eight screens for the phone app, in Herdr's own vocabulary. Dark screens use the graphite
         look and light ones the paper look. UI text is Geist and terminals are JetBrains Mono, the
         fonts herdr-app ships. Status marks copy herdr-app's agents list.
       </p>
@@ -124,6 +126,7 @@
               <div class="actions">
                 <div class="iconbtn"><svg class="i"><use href="#clock" /></svg></div>
                 <div class="iconbtn"><svg class="i"><use href="#search" /></svg></div>
+                <div class="iconbtn"><svg class="i"><use href="#plus" /></svg></div>
               </div>
             </div>
             <div class="machine">
@@ -198,7 +201,8 @@
           Needs you, Done, Working, then Idle, the order herdr-app's agents list uses. A blocked row
           shows the question it is waiting on. Time is how long the agent has been in that state.
           The clock button switches to grouping by space, as Herdr's sort button does. Opening a done
-          agent turns it idle, and the phone keeps that seen state itself.
+          agent turns it idle, and the phone keeps that seen state itself. The plus button opens Start
+          agent.
         </figcaption>
       </figure>
 
@@ -397,7 +401,7 @@ I am checking the keyboard focus order next.
                 <svg class="i" style="width: 17px; height: 17px; color: var(--dim)"><use href="#chev-r" /></svg>
               </div>
             </div>
-            <div class="foot">New spaces and tabs open in Herdr on your Mac, so it has to be running.</div>
+            <div class="foot">The + pill opens Start for this space. Herdr shows core-started agents when it opens.</div>
           </div>
           <div class="tabbar">
             <div><svg class="i"><use href="#bot" /></svg>Agents</div>
@@ -410,7 +414,8 @@ I am checking the keyboard focus order next.
           <b>4 · Spaces</b>
           Spaces grouped by machine, from the <code>herdr-app</code> document, each with its branch.
           A space shows its most urgent agent: blocked, then done, working, idle. Tabs are pills, with
-          a dot when one is blocked or done, as in Herdr's tab bar.
+          a dot when one is blocked or done, as in Herdr's tab bar. The <code>+</code> pill opens Start
+          for that space, with Empty tab as the last choice.
         </figcaption>
       </figure>
 
@@ -431,6 +436,7 @@ I am checking the keyboard focus order next.
               <div class="actions">
                 <div class="iconbtn"><svg class="i"><use href="#layers" /></svg></div>
                 <div class="iconbtn"><svg class="i"><use href="#search" /></svg></div>
+                <div class="iconbtn"><svg class="i"><use href="#plus" /></svg></div>
               </div>
             </div>
             <div class="machine">
@@ -591,6 +597,149 @@ I am checking the keyboard focus order next.
           Pushes for Needs you and Done only, and only while the Mac is idle or locked, since
           Herdr already alerts on the Mac. Tapping one opens that agent. The app icon is a
           placeholder.
+        </figcaption>
+      </figure>
+
+      <!-- 8. Start agent -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="nav">
+            <div class="iconbtn" style="display: flex; width: auto; gap: 5px; padding: 0 4px; font-size: 13px" aria-label="Cancel">
+              <svg class="i" style="width: 17px; height: 17px"><use href="#x" /></svg>Cancel
+            </div>
+            <div class="tt" style="text-align: center"><div class="t">Start agent</div></div>
+            <div style="width: 68px"></div>
+          </div>
+          <div class="scroll">
+            <div class="group">Run</div>
+            <div class="list">
+              <div class="row" style="background: var(--raised)">
+                <svg class="p"><use href="#claude" /></svg>
+                <div class="main"><div class="t">Claude Code</div><div class="s">Interactive session</div></div>
+                <svg class="i" style="width: 17px; height: 17px; color: var(--fg)"><use href="#check" /></svg>
+              </div>
+              <div class="row">
+                <svg class="p"><use href="#codex" /></svg>
+                <div class="main"><div class="t">Codex</div><div class="s">Interactive session</div></div>
+              </div>
+              <div class="row">
+                <svg class="i" style="width: 18px; height: 18px; color: var(--muted)"><use href="#bot" /></svg>
+                <div class="main"><div class="t">Code review</div><div class="s">Template · review a change</div></div>
+              </div>
+              <div class="row">
+                <svg class="i" style="color: var(--dim)"><use href="#terminal" /></svg>
+                <div class="main"><div class="t">Empty tab</div><div class="s">Start with an empty terminal</div></div>
+              </div>
+            </div>
+
+            <div class="group">Where</div>
+            <div class="list">
+              <div class="row">
+                <div class="main"><div class="t">Work</div><div class="s">Space</div></div>
+                <svg class="i" style="color: var(--dim)"><use href="#chev-r" /></svg>
+              </div>
+              <div class="row">
+                <div class="main"><div class="t" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">~/src/herdr</div><div class="s">Folder</div></div>
+                <span class="tag">space folder</span>
+                <svg class="i" style="color: var(--dim)"><use href="#chev-r" /></svg>
+              </div>
+            </div>
+
+            <div class="group">First message <span style="font-weight: 400">Optional</span></div>
+            <div class="composer static" style="min-height: 92px; align-items: flex-start">
+              <div class="typed">Refactor the event bridge and add tests for reconnects.</div>
+            </div>
+          </div>
+          <div class="cta">
+            <div class="foot" style="padding: 0 4px 10px; font-size: 12px">Claude Code · ~/src/herdr · Work › new tab</div>
+            <div class="big">Start Claude Code</div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>8 · Start agent</b>
+          The modal route <code>/start</code>. The selected program, folder, space and first message
+          appear before the Start button. On web, the route is a centered card. This filled state
+          uses a space opened from its <code>+</code> pill, so the last Run choice is Empty tab.
+        </figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone paper">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="nav">
+            <div class="iconbtn" style="display: flex; width: auto; gap: 5px; padding: 0 4px; font-size: 13px" aria-label="Cancel">
+              <svg class="i" style="width: 17px; height: 17px"><use href="#x" /></svg>Cancel
+            </div>
+            <div class="tt" style="text-align: center"><div class="t">Start agent</div></div>
+            <div style="width: 68px"></div>
+          </div>
+          <div class="scroll">
+            <div class="group">Run</div>
+            <div class="list">
+              <div class="row" style="background: var(--raised)">
+                <svg class="p"><use href="#claude" /></svg>
+                <div class="main"><div class="t">Claude Code</div><div class="s">Interactive session</div></div>
+                <svg class="i" style="width: 17px; height: 17px; color: var(--fg)"><use href="#check" /></svg>
+              </div>
+              <div class="row">
+                <svg class="p"><use href="#codex" /></svg>
+                <div class="main"><div class="t">Codex</div><div class="s">Interactive session</div></div>
+              </div>
+              <div class="row">
+                <svg class="i" style="width: 18px; height: 18px; color: var(--muted)"><use href="#bot" /></svg>
+                <div class="main"><div class="t">Code review</div><div class="s">Template · review a change</div></div>
+              </div>
+              <div class="row">
+                <svg class="i" style="color: var(--dim)"><use href="#terminal" /></svg>
+                <div class="main"><div class="t">Empty tab</div><div class="s">Start with an empty terminal</div></div>
+              </div>
+            </div>
+
+            <div class="group">Where</div>
+            <div class="list">
+              <div class="row">
+                <div class="main"><div class="t">Work</div><div class="s">Space</div></div>
+                <svg class="i" style="color: var(--dim)"><use href="#chev-r" /></svg>
+              </div>
+              <div class="row">
+                <div class="main"><div class="t" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">~/src/herdr</div><div class="s">Folder</div></div>
+                <span class="tag">space folder</span>
+                <svg class="i" style="color: var(--dim)"><use href="#chev-r" /></svg>
+              </div>
+            </div>
+
+            <div class="group">First message <span style="font-weight: 400">Optional</span></div>
+            <div class="composer static" style="min-height: 92px; align-items: flex-start">
+              <div class="typed">Refactor the event bridge and add tests for reconnects.</div>
+            </div>
+          </div>
+          <div class="cta">
+            <div class="foot" style="padding: 0 4px 10px; font-size: 12px">Claude Code · ~/src/herdr · Work › new tab</div>
+            <div class="big">Start Claude Code</div>
+            <div class="c-blocked" style="margin-top: 8px; font-size: 12px; text-align: center">Couldn't start in Herdr. Try again.</div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>8 · Start agent, error state</b>
+          Keep the same form and summary after a failed start. Show the error below the button and
+          let the user try again.
         </figcaption>
       </figure>
     </main>
