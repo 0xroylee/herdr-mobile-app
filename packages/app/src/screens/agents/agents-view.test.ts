@@ -1,6 +1,6 @@
 /// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import type { Terminal } from "@herdr-mobile/protocol";
+import type { Layout, Terminal } from "@herdr-mobile/protocol";
 import { deriveAgents } from "../../model/agents.ts";
 import { createCoreStore } from "../../store/core.ts";
 import { createMachinesStore, type Machine } from "../../store/machines.ts";
@@ -8,6 +8,7 @@ import { createMemorySecrets, createMemoryStorage } from "../../store/memory.ts"
 import { createSeenStore } from "../../store/seen.ts";
 import { createSettingsStore } from "../../store/settings.ts";
 import {
+  agentSearchFilter,
   blockedQuestionCallout,
   connectionPresentation,
   deriveAgentSections,
@@ -37,6 +38,48 @@ describe("matchesAgentSearch", () => {
     expect(matchesAgentSearch(agent, "  website  ")).toBe(true);
     expect(matchesAgentSearch(agent, "  ")).toBe(true);
   });
+});
+
+describe("agentSearchFilter with pending rows", () => {
+  const pending = { ...doneTerminal("pending"), reported: false, status: null };
+  const unnamedLayout: Layout = {
+    spaces: [
+      {
+        id: "unnamed",
+        name: "",
+        folder: null,
+        tabs: [{ id: "unnamed-tab", name: "", terminalAddresses: [pending.address] }],
+      },
+    ],
+  };
+  const layouts: { label: string; layout: Layout | undefined }[] = [
+    { label: "without a layout", layout: undefined },
+    { label: "with an unnamed layout space", layout: unnamedLayout },
+  ];
+
+  for (const { label, layout } of layouts) {
+    for (const sort of ["priority", "space"] as const) {
+      test(`searches for Other in ${sort} sort ${label}`, () => {
+        const sections = deriveAgents(
+          [pending],
+          layout,
+          {},
+          "mac-a",
+          20_000,
+          sort,
+          agentSearchFilter("Other"),
+        );
+        const rows = sections.flatMap(({ agents }) => agents);
+
+        expect(rows).toMatchObject([{ address: "pending", pending: true, space: "Other" }]);
+        if (sort === "priority") {
+          expect(rows[0]?.subtitle).toBe("Other · Claude Code");
+        } else {
+          expect(sections.map(({ label: sectionLabel }) => sectionLabel)).toEqual(["Other"]);
+        }
+      });
+    }
+  }
 });
 
 describe("Agents screen decisions", () => {

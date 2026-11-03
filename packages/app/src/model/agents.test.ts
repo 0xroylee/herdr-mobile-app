@@ -55,7 +55,7 @@ const layout: Layout = {
 };
 
 describe("deriveAgents", () => {
-  test("filters to reported terminals and orders priority sections and recent changes", () => {
+  test("orders reported agents by priority and excludes unrelated unreported terminals", () => {
     const rows = deriveAgents(
       [
         terminal("done-old", "done", 10),
@@ -63,7 +63,7 @@ describe("deriveAgents", () => {
         terminal("blocked-old", "error", 5),
         terminal("blocked-new", "blocked", 30, { status: { state: "blocked", msg: "Allow?" } }),
         terminal("idle", "unknown", 40),
-        terminal("unreported", "", 50, { reported: false, status: null }),
+        terminal("unreported", "", 50, { argv: ["bash"], reported: false, status: null }),
       ],
       undefined,
       {},
@@ -77,6 +77,161 @@ describe("deriveAgents", () => {
     expect(rows[0]?.agents[0]?.question).toBe("Allow?");
     expect(rows[1]?.agents[0]?.address).toBe("done-old");
     expect(rows[3]?.agents.map(({ address }) => address)).toEqual(["idle"]);
+  });
+
+  test("lists live unreported Claude Code and Codex terminals as pending Idle rows", () => {
+    const claudeArgv = terminal("claude-argv", "", 10, {
+      argv: ["claude"],
+      reported: false,
+      status: null,
+    });
+    const claudeForeground = terminal("claude-foreground", "", 11, {
+      argv: ["zsh"],
+      foreground: { argv: ["claude"], cwd: "/repo", name: "claude", pid: 101 },
+      reported: false,
+      status: null,
+    });
+    const codexArgv = terminal("codex-argv", "", 12, {
+      argv: ["codex"],
+      reported: false,
+      status: null,
+    });
+    const codexForeground = terminal("codex-foreground", "", 13, {
+      argv: ["zsh"],
+      foreground: { argv: ["codex"], cwd: "/repo", name: "codex", pid: 102 },
+      reported: false,
+      status: null,
+    });
+
+    const rows = deriveAgents(
+      [claudeArgv, claudeForeground, codexArgv, codexForeground],
+      undefined,
+      {},
+      "machine-id",
+      20,
+      "priority",
+      undefined,
+    );
+
+    expect(rows.map(({ label }) => label)).toEqual(["Idle"]);
+    expect(
+      rows[0]?.agents.map(({ address, program, state, pending, question }) => ({
+        address,
+        program: program.name,
+        state,
+        pending,
+        question,
+      })),
+    ).toEqual([
+      {
+        address: "codex-foreground",
+        program: "Codex",
+        state: "idle",
+        pending: true,
+        question: undefined,
+      },
+      {
+        address: "codex-argv",
+        program: "Codex",
+        state: "idle",
+        pending: true,
+        question: undefined,
+      },
+      {
+        address: "claude-foreground",
+        program: "Claude Code",
+        state: "idle",
+        pending: true,
+        question: undefined,
+      },
+      {
+        address: "claude-argv",
+        program: "Claude Code",
+        state: "idle",
+        pending: true,
+        question: undefined,
+      },
+    ]);
+  });
+
+  test("lists live unreported template terminals as pending", () => {
+    const result = deriveAgents(
+      [
+        terminal("template", "", 1, {
+          argv: ["bash"],
+          reported: false,
+          status: null,
+          template: "ask",
+        }),
+      ],
+      undefined,
+      {},
+      "machine-id",
+      2,
+      "priority",
+      undefined,
+    );
+
+    expect(result[0]?.agents[0]).toMatchObject({
+      state: "idle",
+      pending: true,
+      question: undefined,
+    });
+  });
+
+  test("does not list finished unreported Claude Code terminals as pending", () => {
+    const result = deriveAgents(
+      [terminal("finished", "", 1, { state: "finished", reported: false, status: null })],
+      undefined,
+      {},
+      "machine-id",
+      2,
+      "priority",
+      undefined,
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  test("does not list live unreported shell terminals without a template", () => {
+    const result = deriveAgents(
+      [terminal("shell", "", 1, { argv: ["bash"], reported: false, status: null })],
+      undefined,
+      {},
+      "machine-id",
+      2,
+      "priority",
+      undefined,
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  test("clears pending when a terminal reports working", () => {
+    const pending = terminal("t1", "", 1, { reported: false, status: null });
+    const reported = { ...pending, reported: true, status: { state: "working" } };
+    const result = deriveAgents([reported], undefined, {}, "machine-id", 2, "priority", undefined);
+
+    expect(result.map(({ label }) => label)).toEqual(["Working"]);
+    expect(result[0]?.agents[0]).toMatchObject({ state: "working", pending: false });
+  });
+
+  test("includes pending rows in search and their space group", () => {
+    const pending = terminal("t2", "", 1, { reported: false, status: null });
+    const searched = deriveAgents(
+      [pending],
+      undefined,
+      {},
+      "machine-id",
+      2,
+      "priority",
+      "Claude Code",
+    );
+    const grouped = deriveAgents([pending], layout, {}, "machine-id", 2, "space", undefined);
+
+    expect(searched[0]?.agents[0]).toMatchObject({ address: "t2", pending: true });
+    expect(grouped.map(({ label }) => label)).toEqual(["Work"]);
+    expect(grouped[0]?.agents[0]).toMatchObject({ address: "t2", pending: true });
   });
 
   test("a seen done turn becomes idle and a higher turn returns it to Done", () => {
