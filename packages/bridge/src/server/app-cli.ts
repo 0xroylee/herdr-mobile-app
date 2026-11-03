@@ -11,15 +11,18 @@ const APP_ACTION_TIMEOUT_MS = 10_000;
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_ARGUMENT_BYTES = 32 * 1024;
 
-export interface AppCliContext {
-  identity: { ownerLogin: string };
-  whois?: WhoisLookup;
-  devices: DeviceStore;
+export interface HerdrAppProcessContext {
   runner: ProcessRunner;
   env: Record<string, string>;
   cwd: string;
   herdrAppPath: string;
   clock?: Clock;
+}
+
+export interface AppCliContext extends HerdrAppProcessContext {
+  identity: { ownerLogin: string };
+  whois?: WhoisLookup;
+  devices: DeviceStore;
 }
 
 interface CapturedProcess {
@@ -72,7 +75,10 @@ function collect(
   });
 }
 
-async function runHerdrApp(context: AppCliContext, argv: string[]): Promise<CapturedProcess> {
+export async function runHerdrApp(
+  context: HerdrAppProcessContext,
+  argv: string[],
+): Promise<CapturedProcess> {
   const child = context.runner.spawn(argv, {
     env: context.env,
     cwd: context.cwd,
@@ -97,7 +103,7 @@ async function runHerdrApp(context: AppCliContext, argv: string[]): Promise<Capt
   }
 }
 
-async function authenticatedCaller(
+export async function authenticatedCaller(
   request: Request,
   context: AppCliContext,
 ): Promise<DeviceRecordView | Response> {
@@ -111,7 +117,7 @@ async function authenticatedCaller(
   return caller;
 }
 
-async function requestBody(request: Request): Promise<unknown | Response> {
+export async function requestBody(request: Request): Promise<unknown | Response> {
   const text = await request.text();
   if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
     return failure(413, "body_too_large");
@@ -123,7 +129,7 @@ async function requestBody(request: Request): Promise<unknown | Response> {
   }
 }
 
-function validateArgs(value: unknown): string[] | undefined {
+export function validateArgs(value: unknown): string[] | undefined {
   if (!isObject(value)) return undefined;
   const argv: string[] = [];
   for (const [key, item] of Object.entries(value)) {

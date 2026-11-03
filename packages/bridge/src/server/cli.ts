@@ -10,6 +10,7 @@ const HELP = `herdr-bridge — private Tailscale bridge for herdr-core
 Usage:
   herdr-bridge serve --owner <login> [--port 8787] [--public-url https://host]
     [--web <dir>] [--hc <path>] [--herdr-app <path>] [--session <name>] [--whois]
+    [--run-program <name>]... [--run-root <dir>]...
   herdr-bridge pair [--watch] [--name <device>]
   herdr-bridge devices [revoke <id>]
   herdr-bridge status

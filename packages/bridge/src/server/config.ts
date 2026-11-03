@@ -18,6 +18,9 @@ export interface BridgeConfig {
   webDir: string;
   hcPath: string;
   herdrAppPath: string;
+  programs: string[];
+  roots: string[];
+  home: string;
   session?: string;
   whois: boolean;
   stateDir: string;
@@ -51,7 +54,12 @@ interface ParsedFlags {
   herdrAppPath: string;
   session?: string;
   whois: boolean;
+  programs: string[];
+  runRoots: string[];
 }
+
+const DEFAULT_RUN_PROGRAMS = ["claude", "codex"] as const;
+const RUN_PROGRAM_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
 function flagValue(args: readonly string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -98,6 +106,8 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
   let herdrAppPath = "herdr-app";
   let session: string | undefined;
   let whois = false;
+  const programs: string[] = [...DEFAULT_RUN_PROGRAMS];
+  const runRoots: string[] = [];
 
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
@@ -131,6 +141,19 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
         if (session === "") throw new Error("--session must not be empty");
         index++;
         break;
+      case "--run-program": {
+        const program = flagValue(args, index, flag);
+        if (!RUN_PROGRAM_PATTERN.test(program)) {
+          throw new Error("--run-program must match ^[a-z0-9][a-z0-9._-]{0,63}$");
+        }
+        if (!programs.includes(program)) programs.push(program);
+        index++;
+        break;
+      }
+      case "--run-root":
+        runRoots.push(flagValue(args, index, flag));
+        index++;
+        break;
       case "--whois":
         whois = true;
         break;
@@ -149,6 +172,8 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
     herdrAppPath,
     ...(session === undefined ? {} : { session }),
     whois,
+    programs,
+    runRoots,
   };
 }
 
@@ -240,6 +265,7 @@ export async function createBridgeConfig(
 ): Promise<BridgeConfig> {
   const flags = parseServeFlags(args, dependencies.cwd);
   const env = recordEnv(dependencies.env);
+  const home = resolve(env.HOME || homedir());
   const paths = bridgeStatePaths(dependencies.env);
   const machineName = hostname();
   const publicUrl =
@@ -258,6 +284,14 @@ export async function createBridgeConfig(
     webDir: flags.webDir,
     hcPath: flags.hcPath,
     herdrAppPath: flags.herdrAppPath,
+    programs: flags.programs,
+    roots: [
+      ...new Set([
+        home,
+        ...flags.runRoots.map((root) => resolveRunRoot(root, home, dependencies.cwd)),
+      ]),
+    ],
+    home,
     ...(flags.session === undefined ? {} : { session: flags.session }),
     whois: flags.whois,
     ...paths,
@@ -265,6 +299,12 @@ export async function createBridgeConfig(
     env,
     cwd: dependencies.cwd,
   };
+}
+
+function resolveRunRoot(root: string, home: string, cwd: string): string {
+  if (root === "~") return home;
+  if (root.startsWith("~/")) return resolve(home, root.slice(2));
+  return resolve(cwd, root);
 }
 
 /** Refuses a public or wildcard bind before a socket can be opened. */

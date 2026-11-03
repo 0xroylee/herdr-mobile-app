@@ -14,6 +14,7 @@ import { DeviceFileError, DeviceStore } from "./devices.ts";
 import { PairingCodes } from "./pairing.ts";
 import type { WebSocketUpgradeTarget } from "./serve.ts";
 import { createBridgeFetchHandler, serveBridge, WS_AUTH_TIMEOUT_MS } from "./serve.ts";
+import { AgentStarter } from "./start-agent.ts";
 import type { StaticFs } from "./static.ts";
 
 interface FakeWebSocketCallbacks {
@@ -143,13 +144,53 @@ class FakeConnect implements OwnedProcess {
   }
 }
 
+class FakeOneShotConnect extends FakeConnect {
+  override closeInput(): void {
+    super.closeInput();
+    this.exit(0);
+  }
+}
+
+class FakeCommand implements OwnedProcess {
+  readonly exited: Promise<number | null>;
+  private readonly stdoutText: string;
+  private readonly stderrText: string;
+
+  constructor(stdoutText = "", stderrText = "", exitCode: number | null = 0) {
+    this.stdoutText = stdoutText;
+    this.stderrText = stderrText;
+    this.exited = Promise.resolve(exitCode);
+  }
+
+  write(): void {}
+  closeInput(): void {}
+  read(onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
+    if (this.stdoutText) onData(new TextEncoder().encode(this.stdoutText));
+    onEnd();
+  }
+  readStderr(onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
+    if (this.stderrText) onData(new TextEncoder().encode(this.stderrText));
+    onEnd();
+  }
+  kill(): void {}
+}
+
 class FakeBridgeRunner implements ProcessRunner {
   readonly children: FakeConnect[] = [];
   readonly argv: string[][] = [];
+  oneShotCore = false;
 
   spawn(argv: string[]): OwnedProcess {
     this.argv.push(argv);
-    const child = new FakeConnect();
+    if (argv[0] === "/fake/herdr-app") return new FakeCommand("", "", 1);
+    const child = this.oneShotCore ? new FakeOneShotConnect() : new FakeConnect();
+    child.core.answer = (method) => {
+      if (method === "templates.list") {
+        return { templates: [{ name: "review", description: "Review" }] };
+      }
+      if (method === "terminal.run") return { address: "t-started" };
+      return undefined;
+    };
     this.children.push(child);
     return child;
   }
@@ -193,6 +234,7 @@ interface BridgeHarness {
   runner: FakeBridgeRunner;
   serve: FakeServe;
   root: string;
+  output: string[];
   upgradeServer: FakeUpgradeServer;
   dispose(): Promise<void>;
 }
@@ -204,6 +246,7 @@ async function startHarness(): Promise<BridgeHarness> {
   const serve = fakeServe();
   const clock = new FakeClock();
   const runner = new FakeBridgeRunner();
+  const output: string[] = [];
   const config: BridgeConfig = {
     ownerLogin: "owner@example.com",
     host: "127.0.0.1",
@@ -212,6 +255,9 @@ async function startHarness(): Promise<BridgeHarness> {
     webDir: join(root, "web"),
     hcPath: "/fake/hc",
     herdrAppPath: "/fake/herdr-app",
+    programs: ["claude", "codex"],
+    roots: [root],
+    home: root,
     whois: false,
     stateDir: join(root, "state"),
     deviceFilePath: join(root, "state", "devices.json"),
@@ -222,13 +268,18 @@ async function startHarness(): Promise<BridgeHarness> {
   };
 
   try {
-    const bridge = await serveBridge(config, { clock, runner });
+    const bridge = await serveBridge(config, {
+      clock,
+      runner,
+      stdout: (text) => output.push(text),
+    });
     return {
       bridge,
       clock,
       runner,
       serve,
       root,
+      output,
       upgradeServer: new FakeUpgradeServer(),
       async dispose() {
         try {
@@ -332,9 +383,29 @@ async function setup() {
     cwd: "/",
     herdrAppPath: "herdr-app",
   };
+  const agentStarter = new AgentStarter({
+    runner: appCli.runner,
+    programs: ["claude", "codex"],
+    roots: ["/"],
+    home: "/",
+    herdrAppPath: appCli.herdrAppPath,
+    hcPath: "hc",
+    env: appCli.env,
+    cwd: appCli.cwd,
+    statFs: {
+      async realPath(path) {
+        return path;
+      },
+      async stat() {
+        return { isDirectory: () => true };
+      },
+    },
+    coreCall: async () => ({ templates: [] }),
+  });
   const handler = createBridgeFetchHandler({
     api: { identity, devices, pairing, machine: { id: "mac-1", name: "Mac" } },
     appCli,
+    agentStarter,
     identity,
     webDir: "/web",
     staticFs,
@@ -354,6 +425,9 @@ describe("bridge HTTP dispatch", () => {
       webDir: "/web",
       hcPath: "hc",
       herdrAppPath: "herdr-app",
+      programs: ["claude", "codex"],
+      roots: ["/"],
+      home: "/",
       whois: false,
       stateDir: "/state/herdr-bridge",
       deviceFilePath: "/state/herdr-bridge/devices.json",
@@ -390,8 +464,68 @@ describe("bridge HTTP dispatch", () => {
     expect(paired?.status).toBe(201);
     expect(await devices.list()).toHaveLength(1);
 
+    const pairedBody = (await paired?.json()) as { token: string };
+    const catalog = await handler(
+      new Request("http://bridge/api/agents/catalog", {
+        headers: { ...ownerHeaders, Authorization: `Bearer ${pairedBody.token}` },
+      }),
+    );
+    expect(catalog?.status).toBe(200);
+    expect(await catalog?.json()).toMatchObject({ programs: ["claude", "codex"], templates: [] });
+
     const health = await handler(request("/api/health", ownerHeaders));
     expect(health?.status).toBe(401);
+  });
+
+  test("writes successful start audits through the bridge stdout sink", async () => {
+    await withHarness(async (harness) => {
+      harness.runner.oneShotCore = true;
+      const device = await harness.bridge.devices.add({
+        token: "start-output-token",
+        role: "control",
+        name: "Desk phone",
+      });
+      const fetch = harness.serve.web?.fetch;
+      if (!fetch) throw new Error("fake Bun server did not receive the web handler");
+      const response = await fetch(
+        new Request("http://bridge/api/agents/start", {
+          method: "POST",
+          headers: {
+            ...ownerHeaders,
+            Authorization: "Bearer start-output-token",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            run: { kind: "template", name: "review" },
+            folder: harness.root,
+            space: { kind: "new", name: "Review" },
+            task: "private first message",
+          }),
+        }),
+        harness.upgradeServer,
+      );
+
+      expect(response?.status).toBe(200);
+      expect(harness.output).toHaveLength(1);
+      expect(harness.output[0]).not.toContain("start-output-token");
+      expect(harness.output[0]).not.toContain("private first message");
+      const prefix = "Agent started ";
+      const audit = JSON.parse(harness.output[0]?.slice(prefix.length) ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(harness.output[0]?.startsWith(prefix)).toBe(true);
+      expect(audit).toMatchObject({
+        time: "1970-01-01T00:00:01.000Z",
+        device: { id: device.id, name: "Desk phone", role: "control" },
+        run: { kind: "template", name: "review" },
+        folder: harness.root,
+        placement: "core",
+        address: "t-started",
+        space: { id: expect.any(String), isNew: true },
+        tab: { id: expect.any(String), isNew: true },
+      });
+    });
   });
 
   test("requires identity before allowing a WebSocket upgrade", async () => {
@@ -673,6 +807,9 @@ describe("bridge startup failures", () => {
         webDir: join(root, "web"),
         hcPath: "/fake/hc",
         herdrAppPath: "/fake/herdr-app",
+        programs: ["claude", "codex"],
+        roots: [root],
+        home: root,
         whois: false,
         stateDir,
         deviceFilePath,
