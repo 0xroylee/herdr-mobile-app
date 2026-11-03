@@ -4,6 +4,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useConnectionManager } from "../../boot.tsx";
 import { createBridgeApi } from "../../net/bridge-api.ts";
+import { routes } from "../../routes.ts";
 import { appSecrets, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { Button } from "../../ui/components/Button.tsx";
@@ -16,7 +17,6 @@ import { Scanner } from "./Scanner.tsx";
 
 const bridgeApi = createBridgeApi((input, init) => globalThis.fetch(input, init));
 const deviceName = pairingDeviceName(Device.deviceName, Platform.OS === "web");
-const OPEN_AGENTS_LABEL = "Open agents";
 
 const textActionClasses = {
   rest: "min-h-11 items-center justify-center rounded-btn px-3",
@@ -43,6 +43,11 @@ export function PairScreen() {
 
   useEffect(() => controller.consumeCapturedPairFragment(), [controller]);
 
+  // Pop back to the tabs when /pair was pushed over them, or replace /pair on first launch.
+  useEffect(() => {
+    if (state.paired) router.dismissTo(routes.agents);
+  }, [router, state.paired]);
+
   return (
     <ScrollView className="flex-1 bg-canvas" keyboardShouldPersistTaps="handled">
       <View className="gap-5 px-3.5 pb-8 pt-safe">
@@ -64,21 +69,7 @@ export function PairScreen() {
         <PairingSteps connectionState={state.connectionState} paired={state.paired} />
 
         {state.paired ? (
-          <View className="gap-3">
-            <Text variant="callout">Paired with {state.paired.machineName}.</Text>
-            <Button onPress={() => router.replace("/(tabs)")} variant="large">
-              {OPEN_AGENTS_LABEL}
-            </Button>
-            <Pressable accessibilityRole="button" onPress={controller.pairAnotherMachine}>
-              {({ pressed }) => (
-                <View className={textActionClasses[pressed ? "pressed" : "rest"]}>
-                  <Text variant="button" tone="muted">
-                    Pair another Mac
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          </View>
+          <Text variant="callout">Paired with {state.paired.machineName}. Opening agents…</Text>
         ) : state.manual ? (
           <ManualEntry
             address={state.address}

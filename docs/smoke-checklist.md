@@ -86,7 +86,7 @@ Repeat these checks on both simulators.
 Repeat on at least one iOS or Android device. Check device-specific items that the simulator cannot cover.
 
 - [ ] Connect the phone and Mac to the same tailnet. Open the bridge's HTTPS address. Confirm that the app reaches the paired bridge and shows the device name and connection state.
-- [ ] Scan the pairing QR code. Test both camera permission paths. Confirm that the preview appears after permission, the code is accepted once, and a denied permission still allows manual URL and code entry.
+- [ ] Scan the pairing QR code. Test both camera permission paths. Confirm that the scanner opens as a sheet on iOS that a downward swipe closes, the preview appears after permission, the code is accepted once, a successful pairing opens Agents, and a denied permission still allows manual URL and code entry.
 - [ ] Pair, close and reopen the app. Confirm that the device stays paired and the token remains available through SecureStore.
 - [ ] Change settings and restart the app. Confirm that SQLite-backed settings persist.
 - [ ] Check safe areas, touch targets, pressed feedback, haptics, fonts and maximum Dynamic Type on the device. Confirm that pinch, double-tap, scroll and takeover work with real touch input.
