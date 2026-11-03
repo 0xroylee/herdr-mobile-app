@@ -29,7 +29,7 @@ export function TabPill({
   if (add) {
     return (
       <Pressable
-        accessibilityLabel="New tab"
+        accessibilityLabel="Start agent"
         accessibilityRole="button"
         disabled={disabled}
         hitSlop={tabPillHitSlop}

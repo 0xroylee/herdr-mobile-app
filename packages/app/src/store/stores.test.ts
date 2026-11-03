@@ -17,6 +17,7 @@ describe("app stores", () => {
     first.getState().setTheme("paper");
     first.getState().setAgentSort("space");
     first.getState().setNotifyDone(true);
+    first.getState().pushRecentFolder("machine-1", "/repo");
 
     const hydrated = createSettingsStore(storage);
     await hydrated.persist.rehydrate();
@@ -25,6 +26,23 @@ describe("app stores", () => {
       ui: { theme: "paper" },
       agents: { sort: "space" },
       notify: { blocked: true, done: true },
+      recentFolders: { "machine-1": ["/repo"] },
+    });
+  });
+
+  test("keeps each machine's five most recent start folders without duplicates", () => {
+    const settings = createSettingsStore(createMemoryStorage());
+    const push = settings.getState().pushRecentFolder;
+
+    for (let index = 1; index <= 6; index += 1) {
+      push("machine-1", `/repo/${index}`);
+    }
+    push("machine-1", "/repo/4");
+    push("machine-2", "/other");
+
+    expect(settings.getState().recentFolders).toEqual({
+      "machine-1": ["/repo/4", "/repo/6", "/repo/5", "/repo/3", "/repo/2"],
+      "machine-2": ["/other"],
     });
   });
 

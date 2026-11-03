@@ -5,7 +5,9 @@ import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { useConnectionManager } from "../../boot.tsx";
+import { canShowStartEntryPoint } from "../../model/startAgent.ts";
 import type { EffectiveState } from "../../model/status.ts";
+import { routes } from "../../routes.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { HAIRLINE } from "../../ui/components/classes.ts";
 import { EmptyState } from "../../ui/components/EmptyState.tsx";
@@ -119,6 +121,13 @@ export default function AgentsScreen() {
             if (searchOpen) setQuery("");
           }}
         />
+        {canShowStartEntryPoint(machine?.role) ? (
+          <IconButton
+            accessibilityLabel="Start agent"
+            icon="plus"
+            onPress={() => router.push(routes.start as Href)}
+          />
+        ) : null}
       </ScreenHeader>
 
       {presentation.banner ? (
