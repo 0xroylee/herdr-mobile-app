@@ -288,6 +288,56 @@ describe("recognizePrompt", () => {
     });
   });
 
+  test("keeps Claude file detail and choice keys for 12-, 13-, and 20-row boxed questions", () => {
+    for (const rowCount of [12, 13, 20]) {
+      const questionRows = makeLongClaudeQuestionRows(rowCount);
+      const screen = [
+        "Edit src/current.ts",
+        "- previous",
+        "+ next",
+        "╭────────────────────────────────────╮",
+        ...questionRows.map((line) => `│ ${line} │`),
+        "│ ❯ 1. Yes │",
+        "│   2. No  │",
+        "╰────────────────────────────────────╯",
+      ];
+      const prompt = recognizePrompt(claudeCodeApprovalPrompt.status, screen);
+
+      expect(prompt).toEqual({
+        question: questionRows.slice(-12).join(" "),
+        detail: "src/current.ts · +1 −1",
+        choices: [
+          { label: "Yes", keys: ["enter"] },
+          { label: "No", keys: ["down", "enter"] },
+        ],
+      });
+    }
+  });
+
+  test("keeps Claude file detail and choice keys for 12-, 13-, and 20-row unboxed questions", () => {
+    for (const rowCount of [12, 13, 20]) {
+      const questionRows = makeLongClaudeQuestionRows(rowCount);
+      const screen = [
+        "Edit src/current.ts",
+        "- previous",
+        "+ next",
+        ...questionRows,
+        "❯ 1. Yes",
+        "  2. No",
+      ];
+      const prompt = recognizePrompt(claudeCodeApprovalPrompt.status, screen);
+
+      expect(prompt).toEqual({
+        question: questionRows.slice(-12).join(" "),
+        detail: "src/current.ts · +1 −1",
+        choices: [
+          { label: "Yes", keys: ["enter"] },
+          { label: "No", keys: ["down", "enter"] },
+        ],
+      });
+    }
+  });
+
   test("normalizes side borders before reading boxed Claude file context", () => {
     const screen = [
       "│ Edit src/current.ts │",
@@ -376,3 +426,14 @@ describe("recognizePrompt", () => {
     expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toBeUndefined();
   });
 });
+
+function makeLongClaudeQuestionRows(rowCount: number): string[] {
+  return [
+    "Do you want to make this edit",
+    ...Array.from(
+      { length: rowCount - 2 },
+      (_, index) => `and please review detail ${index + 1} about the edit`,
+    ),
+    "and the change to current.ts?",
+  ];
+}

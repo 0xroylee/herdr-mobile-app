@@ -55,7 +55,7 @@ export interface Menu {
   selectedIndex: number;
 }
 
-const MAX_HEADER_ROWS = 12;
+const MAX_QUESTION_ROWS = 12;
 
 /** Build one active dialog model from the top-to-bottom screen rows. */
 export function readDialog(screen: readonly string[]): Dialog | undefined {
@@ -64,15 +64,17 @@ export function readDialog(screen: readonly string[]): Dialog | undefined {
   if (menu === undefined) return undefined;
 
   const region = readHeader(rows, menu.firstRow);
-  const header = region.slice(-MAX_HEADER_ROWS);
-  const { question, questionStart, statement } = readQuestion(header);
+  const { questionRows, questionStart, statement } = readQuestion(region);
   const contextEnd = questionStart ?? menu.firstRow;
+  const context = rows
+    .slice(0, contextEnd)
+    .filter((row) => row.kind !== "border")
+    .map((row) => row.text);
+  const header = region.map((row) => row.text);
+  const question = questionRows?.slice(-MAX_QUESTION_ROWS).join(" ").replace(/\s+/g, " ").trim();
   return {
-    context: rows
-      .slice(0, contextEnd)
-      .filter((row) => row.kind !== "border")
-      .map((row) => row.text),
-    header: header.map((row) => row.text),
+    context,
+    header,
     question,
     statement,
     menu,
@@ -216,7 +218,7 @@ function readHeader(rows: readonly Row[], menuFirstRow: number): readonly Row[] 
 }
 
 function readQuestion(header: readonly Row[]): {
-  question?: string;
+  questionRows?: readonly string[];
   questionStart?: number;
   statement?: string;
 } {
@@ -235,14 +237,9 @@ function readQuestion(header: readonly Row[]): {
 
   let start = questionIndex;
   while (start > 0 && isQuestionContinuation(content[start - 1]?.line ?? "")) start -= 1;
-  const question = content
-    .slice(start, questionIndex + 1)
-    .map(({ line }) => line)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const questionRows = content.slice(start, questionIndex + 1).map(({ line }) => line);
   return {
-    question: question.length > 0 ? question : undefined,
+    questionRows: questionRows.length > 0 ? questionRows : undefined,
     questionStart: content[start]?.row.index,
     statement,
   };
