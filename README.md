@@ -66,4 +66,4 @@ This build has not run in a simulator, on a device or in a browser. Use an isola
 
 Push notifications are not built. Settings currently save notification preferences only. U15 is waiting for push credentials.
 
-Read [docs/architecture.md](docs/architecture.md) for the current app and bridge structure. [docs/research.md](docs/research.md) records the transport, security and scope decisions. [CLAUDE.md](CLAUDE.md) contains repository rules.
+Read [docs/architecture.md](docs/architecture.md) for the current app and bridge structure. [docs/feature-map.md](docs/feature-map.md) lists what a user can do and where each feature lives in the code. [docs/research.md](docs/research.md) records the transport, security and scope decisions. [CLAUDE.md](CLAUDE.md) contains repository rules.
