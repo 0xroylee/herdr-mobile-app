@@ -4,6 +4,8 @@ A phone and web client for herdr agents. It talks to herdr-core (`hc`) through a
 
 Read [docs/research.md](docs/research.md) before non-trivial work. Its "Decisions" section is the source of truth for transport, security and scope.
 
+[docs/feature-map.md](docs/feature-map.md) lists everything a user can see and do in the app and the bridge, with the code behind each feature and an ID such as `TERM-5`. Look a feature up there before changing it.
+
 ## Layout
 
 | Package              | What it is                                                                                                                        |
@@ -36,3 +38,4 @@ bun run prototype:hc     # one checked run against a scratch core, see docs/prot
 - Import local files with the `.ts` extension, and use erasable TypeScript only: no enums, namespaces or parameter properties. The same code also runs through Metro and Node's type stripping. Platform-split modules with `.native.ts` or `.web.ts` variants are imported without an extension so Metro can select the platform file; every other local import keeps its extension.
 - Add app dependencies with `bunx expo install` from `packages/app`, so versions match the Expo SDK.
 - Write docs, comments and commit messages in English.
+- A change that adds, removes or alters anything a user can see or do updates [docs/feature-map.md](docs/feature-map.md) in the same commit: the feature's row and a change-log line. `bun test` fails when the map names a missing file, or misses an app route, a screen folder or a bridge command.
