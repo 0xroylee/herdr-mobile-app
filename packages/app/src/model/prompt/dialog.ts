@@ -34,12 +34,13 @@ type Row = BlankRow | BorderRow | TextRow | ClassifiedChoiceRow;
  *
  * Invariants:
  * - `header` contains no blank, border, choice, or earlier-choice continuation row.
- * - `preceding` ends before the first row owned by this dialog; a bounding border is owned.
+ * - `context` contains every normalized, non-border screen row before the question, in screen
+ *   order; it is not truncated by the header display limit.
  * - `menu.choices` are numbered 1..N in screen order, with one selected non-empty label each.
  * - `question`, when present, is built only from `header` rows.
  */
 export interface Dialog {
-  preceding: readonly string[];
+  context: readonly string[];
   header: readonly string[];
   question?: string;
   statement?: string;
@@ -63,10 +64,15 @@ export function readDialog(screen: readonly string[]): Dialog | undefined {
   if (menu === undefined) return undefined;
 
   const region = readHeader(rows, menu.firstRow);
-  const { question, statement } = readQuestion(region.rows);
+  const header = region.slice(-MAX_HEADER_ROWS);
+  const { question, questionStart, statement } = readQuestion(header);
+  const contextEnd = questionStart ?? menu.firstRow;
   return {
-    preceding: screen.slice(0, region.start),
-    header: region.rows.map((row) => row.text),
+    context: rows
+      .slice(0, contextEnd)
+      .filter((row) => row.kind !== "border")
+      .map((row) => row.text),
+    header: header.map((row) => row.text),
     question,
     statement,
     menu,
@@ -183,15 +189,12 @@ function findPreviousChoice(
   return undefined;
 }
 
-function readHeader(
-  rows: readonly Row[],
-  menuFirstRow: number,
-): { rows: readonly Row[]; start: number } {
+function readHeader(rows: readonly Row[], menuFirstRow: number): readonly Row[] {
   const collected: Row[] = [];
   let index = menuFirstRow - 1;
   let stopRow: Row | undefined;
 
-  while (index >= 0 && collected.length < MAX_HEADER_ROWS) {
+  while (index >= 0) {
     const row = rows[index];
     if (row === undefined) break;
     if (row.kind === "border" || row.kind === "blank" || row.kind === "choice") {
@@ -209,21 +212,21 @@ function readHeader(
     }
   }
 
-  const start = stopRow?.kind === "border" ? stopRow.index : (collected[0]?.index ?? menuFirstRow);
-  return { rows: collected, start };
+  return collected;
 }
 
 function readQuestion(header: readonly Row[]): {
   question?: string;
+  questionStart?: number;
   statement?: string;
 } {
   const content = header
-    .map(({ text }) => text.trim())
-    .filter((line) => line.length > 0 && !isContextLine(line));
-  const statement = content.at(-1);
+    .map((row) => ({ row, line: row.text.trim() }))
+    .filter(({ line }) => line.length > 0 && !isContextLine(line));
+  const statement = content.at(-1)?.line;
   let questionIndex = -1;
   for (let index = content.length - 1; index >= 0; index -= 1) {
-    if (content[index]?.includes("?")) {
+    if (content[index]?.line.includes("?")) {
       questionIndex = index;
       break;
     }
@@ -231,13 +234,18 @@ function readQuestion(header: readonly Row[]): {
   if (questionIndex < 0) return { statement };
 
   let start = questionIndex;
-  while (start > 0 && isQuestionContinuation(content[start - 1] ?? "")) start -= 1;
+  while (start > 0 && isQuestionContinuation(content[start - 1]?.line ?? "")) start -= 1;
   const question = content
     .slice(start, questionIndex + 1)
+    .map(({ line }) => line)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-  return { question: question.length > 0 ? question : undefined, statement };
+  return {
+    question: question.length > 0 ? question : undefined,
+    questionStart: content[start]?.row.index,
+    statement,
+  };
 }
 
 function stripChoiceBoxBorder(line: string): string {

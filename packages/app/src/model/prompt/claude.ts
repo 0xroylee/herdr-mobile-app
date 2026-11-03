@@ -22,7 +22,7 @@ export function recognizeClaudePrompt(status: Status, dialog: Dialog): Prompt | 
     label,
     keys: keysForChoice(dialog.menu.selectedIndex, index),
   }));
-  const detail = extractFileDetail(dialog.preceding);
+  const detail = extractFileDetail(dialog.context);
   return detail === undefined ? { question, choices } : { question, detail, choices };
 }
 

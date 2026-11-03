@@ -101,6 +101,33 @@ describe("recognizePrompt", () => {
     });
   });
 
+  test("keeps earlier wrapped choices out of the question regardless of their length", () => {
+    for (const continuationCount of [9, 10, 11, 13]) {
+      const screen = [
+        "Would you like to run the old command?",
+        "$ npm install",
+        "  1. Yes",
+        "› 2. No",
+        ...Array.from(
+          { length: continuationCount },
+          (_, index) => `     previous wrapped label ${index}`,
+        ),
+        "Would you like to run the following command?",
+        "$ bun test",
+        "  1. Yes",
+        "› 2. No",
+      ];
+
+      expect(recognizePrompt(codexCommandApprovalPrompt.status, screen)).toEqual({
+        question: "Would you like to run the following command?",
+        choices: [
+          { label: "Yes", keys: ["up", "enter"] },
+          { label: "No", keys: ["enter"] },
+        ],
+      });
+    }
+  });
+
   test("does not append blank rows or footer text to existing approval labels", () => {
     const cases = [
       [mockupClaudePrompt, "No, and tell Claude what to do"],
@@ -220,6 +247,67 @@ describe("recognizePrompt", () => {
     expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)?.detail).toBe(
       "src/current.ts · +1 −1",
     );
+  });
+
+  test("keeps file and diff context above an unboxed Claude question", () => {
+    const screen = [
+      "Edit src/current.ts",
+      "- const value = 1;",
+      "+ const value = 2;",
+      "Do you want to make this edit to current.ts?",
+      "❯ 1. Yes",
+      "  2. No",
+    ];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toEqual({
+      question: "Do you want to make this edit to current.ts?",
+      detail: "src/current.ts · +1 −1",
+      choices: [
+        { label: "Yes", keys: ["enter"] },
+        { label: "No", keys: ["down", "enter"] },
+      ],
+    });
+  });
+
+  test("counts all diff rows above an unboxed Claude question", () => {
+    const screen = [
+      "Edit src/current.ts",
+      ...Array.from({ length: 12 }, (_, index) => `+ added ${index}`),
+      "Do you want to make this edit to current.ts?",
+      "❯ 1. Yes",
+      "  2. No",
+    ];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toEqual({
+      question: "Do you want to make this edit to current.ts?",
+      detail: "src/current.ts · +12 −0",
+      choices: [
+        { label: "Yes", keys: ["enter"] },
+        { label: "No", keys: ["down", "enter"] },
+      ],
+    });
+  });
+
+  test("normalizes side borders before reading boxed Claude file context", () => {
+    const screen = [
+      "│ Edit src/current.ts │",
+      "│ - const value = 1; │",
+      "│ + const value = 2; │",
+      "╭──────────────────────────────────────────────╮",
+      "│ Do you want to make this edit to current.ts? │",
+      "│ ❯ 1. Yes                                     │",
+      "│   2. No                                      │",
+      "╰──────────────────────────────────────────────╯",
+    ];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toEqual({
+      question: "Do you want to make this edit to current.ts?",
+      detail: "src/current.ts · +1 −1",
+      choices: [
+        { label: "Yes", keys: ["enter"] },
+        { label: "No", keys: ["down", "enter"] },
+      ],
+    });
   });
 
   test("omits file detail when the dialog has no read, edit, or write header", () => {
