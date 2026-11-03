@@ -39,7 +39,6 @@ const EXPECTED_CONTROL_ONLY_METHODS = [
   "terminal.keys",
   "terminal.interrupt",
   "terminal.wait",
-  "terminal.run",
   "terminal.kill",
   "terminal.keep",
   "terminal.label",
@@ -48,6 +47,7 @@ const EXPECTED_CONTROL_ONLY_METHODS = [
 const EXPECTED_NEVER_FORWARDED_METHODS = [
   "server.stop",
   "server.restart",
+  "terminal.run",
   "doc.set",
   "terminal.rm",
   "terminal.put",
@@ -75,8 +75,8 @@ describe("bridge method policy", () => {
     const schemaMethods = schema.methods.map(({ name }) => name);
 
     expect(EXPECTED_WATCH_METHODS).toHaveLength(11);
-    expect(EXPECTED_CONTROL_ONLY_METHODS).toHaveLength(8);
-    expect(EXPECTED_NEVER_FORWARDED_METHODS).toHaveLength(13);
+    expect(EXPECTED_CONTROL_ONLY_METHODS).toHaveLength(7);
+    expect(EXPECTED_NEVER_FORWARDED_METHODS).toHaveLength(14);
     expect(
       policyMethods.filter((method, index) => policyMethods.indexOf(method) !== index),
     ).toEqual([]);
@@ -142,6 +142,21 @@ describe("bridge method policy", () => {
     }));
 
     expect(actual).toEqual(cases);
+  });
+
+  it("never forwards terminal.run, with or without a shell line", () => {
+    const parameterForms: { label: string; params?: JsonValue }[] = [
+      { label: "omitted" },
+      { label: "without line", params: { terminal: "t1" } },
+      { label: "with line", params: { terminal: "t1", line: "echo unsafe" } },
+    ];
+    const roles: Role[] = ["watch", "control"];
+
+    for (const role of roles) {
+      for (const { params } of parameterForms) {
+        expect(isAllowed(role, "terminal.run", params)).toBe(false);
+      }
+    }
   });
 
   it("denies watch attachments unless observe is exactly true", () => {
