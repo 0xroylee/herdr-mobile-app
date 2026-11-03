@@ -3,6 +3,7 @@ import { StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { Icon } from "@/ui/icon.tsx";
+import { calculateTabBarLayout } from "@/ui/tab-bar-layout.ts";
 import { routes } from "../../routes.ts";
 import { shouldRedirectToPair } from "../../screens/pair/pair-fragment.ts";
 import { machinesStore } from "../../store/platform.ts";
@@ -11,7 +12,11 @@ export default function TabsLayout() {
   const hasMachine = machinesStore((state) => Object.keys(state.machines).length > 0);
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
-  const tabBarHeight = Math.ceil(49 + 13 * (Math.max(1, fontScale) - 1)) + insets.bottom;
+  const tabBarLayout = calculateTabBarLayout(
+    fontScale,
+    insets.bottom,
+    StyleSheet.hairlineWidth * 2,
+  );
   const [chrome, fg, dim, border] = useCSSVariable([
     "--color-chrome",
     "--color-fg",
@@ -33,7 +38,7 @@ export default function TabsLayout() {
           height: 23,
         },
         tabBarStyle: {
-          height: tabBarHeight,
+          height: tabBarLayout.height,
           paddingBottom: insets.bottom,
           backgroundColor: String(chrome),
           borderTopWidth: StyleSheet.hairlineWidth * 2,
@@ -44,7 +49,7 @@ export default function TabsLayout() {
         tabBarLabelStyle: {
           fontFamily: "Geist_500Medium",
           fontSize: 10.5,
-          lineHeight: 13,
+          lineHeight: tabBarLayout.labelLineHeight,
           marginTop: 4,
         },
       }}

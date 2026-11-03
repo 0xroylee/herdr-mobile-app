@@ -224,7 +224,7 @@ Under the header: on the left the state, on the right Watching (`eye` 15 and `su
 A `term-bg` card with a hairline and radius `pane`, 10 from the screen edges.
 
 - **Header**, 34 tall with a hairline below: program icon (14), the program name in `caption` at weight 500 in `fg`, the folder in `caption` `dim` with the home folder shortened to `~`, then on the right the terminal size in `mono` at 10.5 (`120×36`).
-- **Body**: the terminal grid in `terminal`, 10 × 12 padding. Cells keep the Mac terminal's columns and rows. The view starts at the left edge and the bottom of the screen; wide lines scroll sideways; pinch zooms between 8 and 16 pt. Double tap returns to the default zoom.
+- **Body**: the terminal grid in `terminal`, 10 × 12 padding. Cells keep the Mac terminal's columns and rows. The view starts at the left edge with the last non-blank row or visible cursor row at the bottom; an empty grid falls back to its last row. Wide lines scroll sideways. Pinch zoom ranges from the smaller of 8 pt and the width-fitting overview size up to 16 pt. When overview is below the default, double tap switches between overview and default; otherwise it returns to default. Take over sizes the Mac terminal at the larger of the current zoom and 8 pt.
 - **Scroll indicator**: 3 tall at the bottom, `scroll-track` with a `scroll-thumb`, shown only when the grid is wider than the pane.
 
 ### `KeyBar` and `Key`

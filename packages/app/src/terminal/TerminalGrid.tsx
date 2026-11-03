@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type LayoutChangeEvent,
+  Platform,
   type ScrollViewInstance,
   type TextStyle,
   View,
@@ -15,17 +16,35 @@ import {
 } from "react-native-gesture-handler";
 import { useCSSVariable } from "uniwind";
 import { Text } from "../ui/text.tsx";
+import {
+  beginTerminalDrag,
+  createTerminalFollowState,
+  endTerminalDrag,
+  observeScrollOffset,
+  setAutomaticScrollTarget,
+  setFollowGeometry,
+  setProgrammaticScrollOffset,
+} from "./follow-state.ts";
+import {
+  focusRowForSnapshot,
+  preserveTerminalSpaces,
+  scrollOffsetToFocusRow,
+} from "./grid-layout.ts";
 import type { TerminalPalette } from "./palette.ts";
 import { terminalColorHex } from "./palette.ts";
+import { terminalScrollStyle } from "./scroll-anchor.ts";
 import type { ScreenRow, ScreenRun, ScreenSnapshot, TerminalColor } from "./snapshot.ts";
 import {
   cellSizeForZoom,
+  clampZoom,
   DEFAULT_ZOOM,
+  doubleTapZoom,
   gridThatFits,
-  resetZoom,
+  readableFitZoom,
   scrollOffsetToBottom,
   type TerminalFit,
   zoomFromPinch,
+  zoomRangeForGrid,
 } from "./zoom.ts";
 
 export interface TerminalGridProps {
@@ -122,17 +141,36 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
   const verticalScroll = useRef<ScrollViewInstance | null>(null);
   const startZoom = useRef(DEFAULT_ZOOM);
   const currentZoom = useRef(DEFAULT_ZOOM);
+  const terminalFollow = useRef(createTerminalFollowState());
+  const verticalScrollGeometry = useRef<{
+    viewportWidth: number;
+    viewportHeight: number;
+    zoom: number;
+    rowCount: number;
+    colCount: number;
+  } | null>(null);
   const [termForegroundValue, termBackgroundValue] = useCSSVariable([
     "--color-term-fg",
     "--color-term-bg",
   ]);
   const termForeground = cssColor(termForegroundValue);
   const termBackground = cssColor(termBackgroundValue);
+  const zoomRange = useMemo(
+    () => zoomRangeForGrid(viewport.width, snapshot.cols),
+    [snapshot.cols, viewport.width],
+  );
+  const renderedZoom = clampZoom(zoom, zoomRange);
 
   const setBoundedZoom = (nextZoom: number) => {
-    currentZoom.current = nextZoom;
-    setZoom(nextZoom);
+    const boundedZoom = clampZoom(nextZoom, zoomRange);
+    currentZoom.current = boundedZoom;
+    setZoom(boundedZoom);
   };
+
+  useEffect(() => {
+    currentZoom.current = renderedZoom;
+    if (zoom !== renderedZoom) setZoom(renderedZoom);
+  }, [renderedZoom, zoom]);
 
   const pinch = usePinchGesture({
     runOnJS: true,
@@ -140,18 +178,19 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
       startZoom.current = currentZoom.current;
     },
     onUpdate: ({ scale }) => {
-      setBoundedZoom(zoomFromPinch(startZoom.current, scale));
+      setBoundedZoom(zoomFromPinch(startZoom.current, scale, zoomRange));
     },
   });
   const doubleTap = useTapGesture({
     numberOfTaps: 2,
     runOnJS: true,
-    onActivate: () => setBoundedZoom(resetZoom()),
+    onActivate: () =>
+      setBoundedZoom(doubleTapZoom(currentZoom.current, viewport.width, snapshot.cols)),
   });
   const gesture = useSimultaneousGestures(pinch, doubleTap);
 
-  const cellSize = cellSizeForZoom(zoom);
-  const fit = gridThatFits(viewport, zoom);
+  const cellSize = cellSizeForZoom(renderedZoom, zoomRange);
+  const fit = gridThatFits(viewport, readableFitZoom(renderedZoom));
   const fitCols = fit.cols;
   const fitRows = fit.rows;
   const contentWidth = snapshot.cols * cellSize.width;
@@ -171,15 +210,37 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
       : 0;
   const cursorColor = palette.cursor === "term-fg" ? termForeground : undefined;
   const keyedRows = withStableKeys(snapshot.rows, rowIdentity, "row");
+  const focusRow = focusRowForSnapshot(snapshot);
   const verticalScrollTarget = useMemo(
     () => ({
       contentHeight,
       viewportHeight: viewport.height,
       viewportWidth: viewport.width,
       rowCount: snapshot.rows.length,
-      zoom,
+      colCount: snapshot.cols,
+      zoom: renderedZoom,
+      focusRow,
+      cellHeight: cellSize.height,
+      gridOffset,
+      offset: scrollOffsetToFocusRow({
+        focusRow,
+        cellHeight: cellSize.height,
+        viewportHeight: viewport.height,
+        contentHeight,
+        gridOffset,
+      }),
     }),
-    [contentHeight, snapshot.rows.length, viewport.height, viewport.width, zoom],
+    [
+      cellSize.height,
+      contentHeight,
+      focusRow,
+      gridOffset,
+      renderedZoom,
+      snapshot.cols,
+      snapshot.rows.length,
+      viewport.height,
+      viewport.width,
+    ],
   );
 
   useEffect(() => {
@@ -187,14 +248,63 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
   }, [onFit, fitCols, fitRows]);
 
   useEffect(() => {
-    verticalScroll.current?.scrollTo({
-      x: 0,
-      y: scrollOffsetToBottom(
-        verticalScrollTarget.contentHeight,
-        verticalScrollTarget.viewportHeight,
-      ),
-      animated: false,
-    });
+    const previous = verticalScrollGeometry.current;
+    const geometryChanged =
+      !previous ||
+      previous.viewportWidth !== verticalScrollTarget.viewportWidth ||
+      previous.viewportHeight !== verticalScrollTarget.viewportHeight ||
+      previous.zoom !== verticalScrollTarget.zoom ||
+      previous.rowCount !== verticalScrollTarget.rowCount ||
+      previous.colCount !== verticalScrollTarget.colCount;
+    verticalScrollGeometry.current = {
+      viewportWidth: verticalScrollTarget.viewportWidth,
+      viewportHeight: verticalScrollTarget.viewportHeight,
+      zoom: verticalScrollTarget.zoom,
+      rowCount: verticalScrollTarget.rowCount,
+      colCount: verticalScrollTarget.colCount,
+    };
+
+    if (
+      verticalScrollTarget.viewportWidth <= 0 ||
+      verticalScrollTarget.viewportHeight <= 0 ||
+      verticalScrollTarget.rowCount === 0
+    ) {
+      return;
+    }
+
+    const scrollToFocus = () => {
+      terminalFollow.current = setProgrammaticScrollOffset(
+        terminalFollow.current,
+        verticalScrollTarget.offset,
+      );
+      verticalScroll.current?.scrollTo({
+        x: 0,
+        y: verticalScrollTarget.offset,
+        animated: false,
+      });
+    };
+
+    if (geometryChanged) {
+      const transition = setFollowGeometry(terminalFollow.current, {
+        offset: verticalScrollTarget.offset,
+        cellHeight: verticalScrollTarget.cellHeight,
+        maxOffset: Math.max(
+          0,
+          verticalScrollTarget.contentHeight - verticalScrollTarget.viewportHeight,
+        ),
+      });
+      terminalFollow.current = transition.state;
+      if (transition.shouldScroll) scrollToFocus();
+      return;
+    }
+
+    const transition = setAutomaticScrollTarget(
+      terminalFollow.current,
+      verticalScrollTarget.offset,
+      verticalScrollTarget.cellHeight,
+    );
+    terminalFollow.current = transition.state;
+    if (transition.shouldScroll) scrollToFocus();
   }, [verticalScrollTarget]);
 
   return (
@@ -204,7 +314,30 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
           <ScrollView
             ref={verticalScroll}
             className="flex-1"
+            style={terminalScrollStyle(Platform.OS)}
             onLayout={onLayout(setViewport)}
+            onScroll={(event) => {
+              terminalFollow.current = observeScrollOffset(
+                terminalFollow.current,
+                event.nativeEvent.contentOffset.y,
+              );
+            }}
+            onScrollBeginDrag={() => {
+              terminalFollow.current = beginTerminalDrag(terminalFollow.current);
+            }}
+            onScrollEndDrag={(event) => {
+              terminalFollow.current = endTerminalDrag(
+                terminalFollow.current,
+                event.nativeEvent.contentOffset.y,
+              );
+            }}
+            onMomentumScrollEnd={(event) => {
+              terminalFollow.current = endTerminalDrag(
+                terminalFollow.current,
+                event.nativeEvent.contentOffset.y,
+              );
+            }}
+            scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
           >
             <ScrollView
@@ -217,34 +350,42 @@ export function TerminalGrid({ snapshot, palette, onFit }: TerminalGridProps) {
             >
               <View className="justify-end" style={{ width: contentWidth, height: contentHeight }}>
                 {keyedRows.map(({ key: rowKey, value: row }) => (
-                  <Text
+                  <View
                     key={rowKey}
-                    allowFontScaling={false}
-                    numberOfLines={1}
                     style={{
                       width: contentWidth,
-                      fontSize: cellSize.fontSize,
-                      lineHeight: cellSize.height,
+                      height: cellSize.height,
+                      flexShrink: 0,
                     }}
-                    variant="terminal"
                   >
-                    {withStableKeys(row, runIdentity, "run").map(({ key, value: run }) => (
-                      <Text
-                        key={key}
-                        allowFontScaling={false}
-                        style={terminalRunStyle(
-                          run,
-                          palette,
-                          cellSize,
-                          termForeground,
-                          termBackground,
-                        )}
-                        variant={run.bold ? "terminalBold" : "terminal"}
-                      >
-                        {run.text}
-                      </Text>
-                    ))}
-                  </Text>
+                    <Text
+                      allowFontScaling={false}
+                      numberOfLines={1}
+                      style={{
+                        width: contentWidth,
+                        fontSize: cellSize.fontSize,
+                        lineHeight: cellSize.height,
+                      }}
+                      variant="terminal"
+                    >
+                      {withStableKeys(row, runIdentity, "run").map(({ key, value: run }) => (
+                        <Text
+                          key={key}
+                          allowFontScaling={false}
+                          style={terminalRunStyle(
+                            run,
+                            palette,
+                            cellSize,
+                            termForeground,
+                            termBackground,
+                          )}
+                          variant={run.bold ? "terminalBold" : "terminal"}
+                        >
+                          {preserveTerminalSpaces(run.text)}
+                        </Text>
+                      ))}
+                    </Text>
+                  </View>
                 ))}
                 {snapshot.cursor.visible ? (
                   <View

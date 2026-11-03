@@ -4,12 +4,15 @@ import {
   cellSizeForZoom,
   clampZoom,
   DEFAULT_ZOOM,
+  doubleTapZoom,
   gridThatFits,
   MAX_ZOOM,
   MIN_ZOOM,
-  resetZoom,
+  overviewZoom,
+  readableFitZoom,
   scrollOffsetToBottom,
   zoomFromPinch,
+  zoomRangeForGrid,
 } from "./zoom.ts";
 
 test("clamps zoom to the kit's 8 to 16 point range", () => {
@@ -18,19 +21,45 @@ test("clamps zoom to the kit's 8 to 16 point range", () => {
   expect(clampZoom(Number.NaN)).toBe(DEFAULT_ZOOM);
 });
 
-test("scales relative to the starting zoom during a pinch", () => {
+test("scales relative to the starting zoom during a pinch within the active range", () => {
   expect(zoomFromPinch(12, 1.25)).toBe(15);
   expect(zoomFromPinch(12, 2)).toBe(MAX_ZOOM);
   expect(zoomFromPinch(12, 0.25)).toBe(MIN_ZOOM);
+
+  const overviewRange = zoomRangeForGrid(366, 200);
+  expect(overviewRange).toEqual({ min: 3.05, max: MAX_ZOOM });
+  expect(zoomFromPinch(8, 0.25, overviewRange)).toBe(overviewRange.min);
 });
 
-test("uses the kit's default terminal cell size and resets to its default zoom", () => {
+test("uses the kit's default terminal cell size", () => {
   expect(cellSizeForZoom(DEFAULT_ZOOM)).toEqual({
     fontSize: 10.6,
     width: 6.36,
     height: 16.4,
   });
-  expect(resetZoom()).toBe(DEFAULT_ZOOM);
+});
+
+test("computes the overview size that fits all columns in the viewport", () => {
+  expect(overviewZoom(366, 200)).toBe(3.05);
+  expect(overviewZoom(10_000, 200)).toBe(MAX_ZOOM);
+  expect(overviewZoom(0, 200)).toBe(MIN_ZOOM);
+  expect(zoomRangeForGrid(366, 200)).toEqual({ min: 3.05, max: MAX_ZOOM });
+  expect(zoomRangeForGrid(2_000, 100)).toEqual({ min: MIN_ZOOM, max: MAX_ZOOM });
+});
+
+test("double-tap switches between overview and default when overview is below default", () => {
+  expect(doubleTapZoom(DEFAULT_ZOOM, 366, 200)).toBe(3.05);
+  expect(doubleTapZoom(3.02, 366, 200)).toBe(DEFAULT_ZOOM);
+  expect(doubleTapZoom(12, 2_000, 100)).toBe(DEFAULT_ZOOM);
+});
+
+test("clamps the rendered zoom to a changed range and keeps takeover readable", () => {
+  const changedRange = zoomRangeForGrid(366, 100);
+  expect(clampZoom(2, changedRange)).toBe(changedRange.min);
+  expect(cellSizeForZoom(2, changedRange).fontSize).toBe(changedRange.min);
+  expect(readableFitZoom(3.05, zoomRangeForGrid(366, 200))).toBe(MIN_ZOOM);
+  expect(readableFitZoom(12, zoomRangeForGrid(366, 200))).toBe(12);
+  expect(readableFitZoom(20, zoomRangeForGrid(366, 200))).toBe(MAX_ZOOM);
 });
 
 test("fits the grid to the viewport at the displayed zoom", () => {
