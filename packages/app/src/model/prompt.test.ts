@@ -66,11 +66,39 @@ describe("recognizePrompt", () => {
     ];
 
     const prompt = recognizePrompt(codexCommandApprovalPrompt.status, screen);
-    expect(prompt?.choices).toEqual([
-      { label: "Yes, proceed", keys: ["up", "up", "enter"] },
-      { label: "Yes, and don't ask again for bun test commands", keys: ["up", "enter"] },
-      { label: "No, and tell Codex what to do differently", keys: ["enter"] },
-    ]);
+    expect(prompt).toEqual({
+      question: "Would you like to run the following command?",
+      choices: [
+        { label: "Yes, proceed", keys: ["up", "up", "enter"] },
+        { label: "Yes, and don't ask again for bun test commands", keys: ["up", "enter"] },
+        { label: "No, and tell Codex what to do differently", keys: ["enter"] },
+      ],
+    });
+  });
+
+  test("does not include an earlier wrapped choice in the active Codex question", () => {
+    const screen = [
+      "Would you like to run the following command?",
+      "$ npm install",
+      "  1. Yes, proceed",
+      "› 2. Yes, and don't ask again for npm install",
+      "  3. No, and tell Codex what to do",
+      "     differently",
+      "Would you like to run the following command?",
+      "$ bun test packages/app/src/model",
+      "  1. Yes, proceed",
+      "  2. Yes, and don't ask again for bun test commands",
+      "› 3. No, and tell Codex what to do differently",
+    ];
+
+    expect(recognizePrompt(codexCommandApprovalPrompt.status, screen)).toEqual({
+      question: "Would you like to run the following command?",
+      choices: [
+        { label: "Yes, proceed", keys: ["up", "up", "enter"] },
+        { label: "Yes, and don't ask again for bun test commands", keys: ["up", "enter"] },
+        { label: "No, and tell Codex what to do differently", keys: ["enter"] },
+      ],
+    });
   });
 
   test("does not append blank rows or footer text to existing approval labels", () => {
@@ -85,6 +113,22 @@ describe("recognizePrompt", () => {
       const prompt = recognizePrompt(fixture.status, [...fixture.screen, "", footer]);
       expect(prompt?.choices.at(-1)?.label).toBe(expectedLastLabel);
     }
+  });
+
+  test("does not append an in-box footer to the last choice", () => {
+    const screen = [
+      "╭──────────────────────────────────────────────╮",
+      "│ Do you want to allow this command?           │",
+      "│   1. Yes                                     │",
+      "│ ❯ 2. No                                      │",
+      "│ Press enter to confirm or esc to cancel      │",
+      "╰──────────────────────────────────────────────╯",
+    ];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)?.choices).toEqual([
+      { label: "Yes", keys: ["up", "enter"] },
+      { label: "No", keys: ["enter"] },
+    ]);
   });
 
   test("keeps a four-row wrapped choice in a boxed Claude approval menu", () => {
@@ -134,6 +178,14 @@ describe("recognizePrompt", () => {
     ];
 
     expect(recognizePrompt(claudeCodeApprovalPrompt.status, multipleSelected)).toBeUndefined();
+  });
+
+  test("requires at least two choices and exactly one highlighted row", () => {
+    const singleChoice = ["Do you want to allow this?", "❯ 1. Yes"];
+    const noSelection = ["Do you want to allow this?", "  1. Yes", "  2. No"];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, singleChoice)).toBeUndefined();
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, noSelection)).toBeUndefined();
   });
 
   test("keeps one-time and session-wide approval labels distinct with their own keys", () => {
@@ -198,5 +250,41 @@ describe("recognizePrompt", () => {
     expect(
       recognizePrompt({ state: "working", app: "Claude Code" }, mockupClaudePrompt.screen),
     ).toBeUndefined();
+  });
+
+  test("binds a Claude prompt and detail to the current box", () => {
+    const screen = [
+      "Edit src/a.ts",
+      "- const first = false;",
+      "+ const first = true;",
+      "╭──────────────────────────────────────────────╮",
+      "│ Do you want to make this edit to a.ts?       │",
+      "│ ❯ 1. Yes                                     │",
+      "│   2. No                                      │",
+      "╰──────────────────────────────────────────────╯",
+      "Edit src/b.ts",
+      "- const second = false;",
+      "+ const second = true;",
+      "╭──────────────────────────────────────────────╮",
+      "│ Do you want to make this edit to b.ts?       │",
+      "│   1. Yes                                     │",
+      "│ ❯ 2. No                                      │",
+      "╰──────────────────────────────────────────────╯",
+    ];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toEqual({
+      question: "Do you want to make this edit to b.ts?",
+      detail: "src/b.ts · +1 −1",
+      choices: [
+        { label: "Yes", keys: ["up", "enter"] },
+        { label: "No", keys: ["enter"] },
+      ],
+    });
+  });
+
+  test("rejects a menu without header rows", () => {
+    const screen = ["❯ 1. Yes", "  2. No"];
+
+    expect(recognizePrompt(claudeCodeApprovalPrompt.status, screen)).toBeUndefined();
   });
 });
