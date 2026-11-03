@@ -13,6 +13,7 @@ export interface AgentRow {
   title: string;
   subtitle: string;
   question: string | undefined;
+  pending: boolean;
   program: ProgramInfo;
   state: EffectiveState;
   age: string;
@@ -55,10 +56,23 @@ export function deriveAgents(
   const terminalList = toTerminalList(terminals);
   const locations = buildLocations(layout);
   const rows = terminalList
-    .filter((terminal) => terminal.reported === true || terminal.status != null)
-    .map((terminal) =>
-      makeAgentRow(terminal, locations.get(terminal.address), layout, seen, machineId, now, sort),
-    )
+    .flatMap((terminal) => {
+      const reported = terminal.reported === true || terminal.status != null;
+      const pending = !reported && isPendingTerminal(terminal);
+      if (!reported && !pending) return [];
+      return [
+        makeAgentRow(
+          terminal,
+          locations.get(terminal.address),
+          layout,
+          seen,
+          machineId,
+          now,
+          sort,
+          pending,
+        ),
+      ];
+    })
     .filter((agent) => matchesFilter(agent, filter));
 
   return sort === "space"
@@ -74,17 +88,21 @@ function makeAgentRow(
   machineId: string,
   now: number,
   sort: AgentSort,
+  pending: boolean,
 ): AgentRow {
   const program = getProgram(terminal);
   const labelSpace = layout === undefined ? terminal.labels["herdr.space"] : undefined;
   const labelTab = layout === undefined ? terminal.labels["herdr.tab"] : undefined;
-  const space = nonEmpty(location?.space.name) ?? nonEmpty(labelSpace) ?? "Other";
+  const knownSpace = nonEmpty(location?.space.name) ?? nonEmpty(labelSpace);
+  const space = knownSpace ?? "Other";
   const tab = nonEmpty(location?.tab.name) ?? nonEmpty(labelTab);
   const title = tab ?? nonEmpty(terminal.title) ?? nonEmpty(terminal.name) ?? program.name;
   const turnSeen = isAddressSeen(seen, machineId, terminal.address, terminal.turn);
-  const state = effectiveState(terminal.status, { seen: turnSeen });
+  const state = pending ? "idle" : effectiveState(terminal.status, { seen: turnSeen });
   const statusTimestamp = terminal.status_ms ?? terminal.finished_ms ?? terminal.created_ms;
-  const question = nonEmpty(terminal.status?.msg) ?? nonEmpty(terminal.status?.title);
+  const question = pending
+    ? undefined
+    : (nonEmpty(terminal.status?.msg) ?? nonEmpty(terminal.status?.title));
   const subtitle =
     sort === "priority"
       ? `${space} · ${program.name}`
@@ -98,6 +116,7 @@ function makeAgentRow(
     title,
     subtitle,
     question,
+    pending,
     program,
     state,
     age: formatAge(statusTimestamp, now),
@@ -107,6 +126,15 @@ function makeAgentRow(
     tab,
     tabId: location?.tab.id,
   };
+}
+
+function isPendingTerminal(terminal: Terminal): boolean {
+  return (
+    terminal.state === "live" &&
+    terminal.reported !== true &&
+    terminal.status == null &&
+    (terminal.template != null || getProgram(terminal).iconKey !== "bot")
+  );
 }
 
 function derivePrioritySections(rows: AgentRow[]): AgentSection[] {

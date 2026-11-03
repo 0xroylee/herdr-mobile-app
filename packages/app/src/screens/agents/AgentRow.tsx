@@ -18,7 +18,9 @@ export interface AgentRowProps {
 export function AgentRow({ agent, sort, onPress, onLongPress }: AgentRowProps) {
   const [surface, raised] = useCSSVariable(["--color-surface", "--color-raised"] as const);
   const remoteMachine = machinePrefix(agent.address);
-  const questionCallout = blockedQuestionCallout(sort, agent.state, agent.question);
+  const questionCallout = agent.pending
+    ? "Waiting for status"
+    : blockedQuestionCallout(sort, agent.state, agent.question);
 
   return (
     <Pressable
@@ -46,7 +48,11 @@ export function AgentRow({ agent, sort, onPress, onLongPress }: AgentRowProps) {
           </View>
           {questionCallout ? (
             <View className="pt-1.75">
-              <Text numberOfLines={2} variant="callout" tone="muted">
+              <Text
+                numberOfLines={2}
+                variant={agent.pending ? "caption" : "callout"}
+                tone={agent.pending ? "dim" : "muted"}
+              >
                 {questionCallout}
               </Text>
             </View>
