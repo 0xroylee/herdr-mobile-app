@@ -14,6 +14,7 @@ import {
   ScanLine,
   Search,
   Settings,
+  X,
 } from "lucide-react-native";
 import { useCSSVariable } from "uniwind";
 
@@ -33,6 +34,7 @@ const icons = {
   "scan-line": ScanLine,
   search: Search,
   settings: Settings,
+  x: X,
 } as const;
 
 const sizePresets = {

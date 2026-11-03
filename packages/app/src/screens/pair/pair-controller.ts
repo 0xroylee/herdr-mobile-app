@@ -114,8 +114,6 @@ export class PairingController {
     if (this.state.retryable && this.retryInput) void this.pair(this.retryInput);
   };
 
-  pairAnotherMachine = (): void => this.update({ paired: undefined, banner: undefined });
-
   private async pair(input: PairInput): Promise<void> {
     if (this.state.busy) return;
     this.retryInput = input;
