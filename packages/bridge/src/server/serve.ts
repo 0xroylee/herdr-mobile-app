@@ -12,6 +12,7 @@ import type { Clock } from "../prototype/deadline.ts";
 import { systemClock } from "../prototype/deadline.ts";
 import { bunRunner, type ProcessRunner } from "../prototype/process.ts";
 import { handleAdminApi } from "./admin-routes.ts";
+import { handleAgentsRoutes } from "./agents-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import { handleAppCli } from "./app-cli.ts";
 import type { BridgeConfig } from "./config.ts";
@@ -27,6 +28,7 @@ import { PairingCodes } from "./pairing.ts";
 import { type ApiContext, handleApi } from "./routes.ts";
 import { startSession } from "./session.ts";
 import type { Socket } from "./socket.ts";
+import { AgentStarter } from "./start-agent.ts";
 import { type StaticFs, serveStatic } from "./static.ts";
 
 export const WS_AUTH_TIMEOUT_MS = 10_000;
@@ -51,6 +53,7 @@ export interface WebSocketUpgradeTarget {
 export interface BridgeHttpContext {
   api: ApiContext;
   appCli: AppCliContext;
+  agentStarter?: AgentStarter;
   identity: IdentityConfig;
   whois?: WhoisLookup;
   webDir: string;
@@ -93,6 +96,14 @@ export function createBridgeFetchHandler(context: BridgeHttpContext) {
     }
 
     if (path === "/api" || path.startsWith("/api/")) {
+      if (context.agentStarter) {
+        const agentsResponse = await handleAgentsRoutes(
+          request,
+          context.appCli,
+          context.agentStarter,
+        );
+        if (agentsResponse) return agentsResponse;
+      }
       const appResponse = await handleAppCli(request, context.appCli);
       if (appResponse) return appResponse;
       return (await handleApi(request, context.api)) ?? errorResponse(404, "not_found");
@@ -109,6 +120,7 @@ export interface ServeDependencies {
   runner?: ProcessRunner;
   clock?: Clock;
   staticFs?: StaticFs;
+  stdout?: (text: string) => void;
 }
 
 export interface RunningBridge {
@@ -224,6 +236,19 @@ export async function serveBridge(
     herdrAppPath: config.herdrAppPath,
     clock,
   };
+  const agentStarter = new AgentStarter({
+    runner,
+    programs: config.programs,
+    roots: config.roots,
+    home: config.home,
+    herdrAppPath: config.herdrAppPath,
+    hcPath: config.hcPath,
+    ...(config.session === undefined ? {} : { session: config.session }),
+    env: config.env,
+    cwd: config.cwd,
+    clock,
+    output: dependencies.stdout ?? ((text) => console.log(text)),
+  });
   const api: ApiContext = {
     identity,
     ...(whois === undefined ? {} : { whois }),
@@ -294,6 +319,7 @@ export async function serveBridge(
     const fetchHandler = createBridgeFetchHandler({
       api,
       appCli,
+      agentStarter,
       identity,
       ...(whois === undefined ? {} : { whois }),
       webDir: config.webDir,

@@ -67,6 +67,8 @@ describe("herdr-bridge CLI", () => {
     const help: string[] = [];
     expect(await runCli(["--help"], { stdout: (text) => help.push(text) })).toBe(0);
     expect(help[0]).toContain("herdr-bridge serve");
+    expect(help[0]).toContain("--run-program <name>");
+    expect(help[0]).toContain("--run-root <dir>");
 
     const errors: string[] = [];
     expect(await runCli(["pair", "--invalid"], { env, stderr: (text) => errors.push(text) })).toBe(

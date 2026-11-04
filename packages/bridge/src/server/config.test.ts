@@ -56,6 +56,9 @@ describe("bridge config", () => {
       webDir: "/repo/packages/app/dist",
       hcPath: "hc",
       herdrAppPath: "herdr-app",
+      programs: ["claude", "codex"],
+      roots: ["/Users/bridge"],
+      home: "/Users/bridge",
       stateDir: "/Users/bridge/.local/state/herdr-bridge",
       deviceFilePath: "/Users/bridge/.local/state/herdr-bridge/devices.json",
       adminSocketPath: "/Users/bridge/.local/state/herdr-bridge/admin.sock",
@@ -92,6 +95,16 @@ describe("bridge config", () => {
         "/opt/herdr-app/bin/herdr-app",
         "--session",
         "work",
+        "--run-program",
+        "aider",
+        "--run-program",
+        "opencode",
+        "--run-root",
+        "../shared",
+        "--run-root",
+        "~",
+        "--run-root",
+        "/Users/bridge",
         "--whois",
       ],
       { runner, env, cwd: "/repo" },
@@ -104,8 +117,48 @@ describe("bridge config", () => {
       herdrAppPath: "/opt/herdr-app/bin/herdr-app",
       session: "work",
       whois: true,
+      programs: ["claude", "codex", "aider", "opencode"],
+      roots: ["/Users/bridge", "/shared"],
+      home: "/Users/bridge",
     });
     expect(runner.calls).toEqual([]);
+  });
+
+  test("lists home first and de-duplicates run roots lexically without filesystem resolution", async () => {
+    const config = await createBridgeConfig(
+      [
+        "--owner",
+        "owner@example.com",
+        "--public-url",
+        "https://mac.tailnet.example",
+        "--run-root",
+        "../shared",
+        "--run-root",
+        "~",
+        "--run-root",
+        "/offline",
+        "--run-root",
+        "/offline",
+      ],
+      {
+        runner: new FakeRunner(),
+        env,
+        cwd: "/repo",
+      },
+    );
+
+    expect(config.roots).toEqual(["/Users/bridge", "/shared", "/offline"]);
+  });
+
+  test("does not resolve roots while creating configuration", async () => {
+    const runner = new FakeRunner();
+    const config = await createBridgeConfig(
+      ["--owner", "owner@example.com", "--run-root", "/stalled"],
+      { runner, env, cwd: "/repo" },
+    );
+
+    expect(config.roots).toEqual(["/Users/bridge", "/stalled"]);
+    expect(runner.calls.map(({ argv }) => argv)).toEqual([["tailscale", "status", "--json"]]);
   });
 
   test("rejects invalid owner, flags, port and public URL", () => {
@@ -114,6 +167,9 @@ describe("bridge config", () => {
     expect(() => parseServeFlags(["--owner", "owner", "--unknown"], "/repo")).toThrow(
       "unknown serve option",
     );
+    expect(() =>
+      parseServeFlags(["--owner", "owner", "--run-program", "../claude"], "/repo"),
+    ).toThrow("--run-program");
     expect(() =>
       parseServeFlags(["--owner", "owner", "--public-url", "http://example.com"], "/repo"),
     ).toThrow("HTTPS");
