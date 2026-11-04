@@ -62,11 +62,7 @@ The app's web export uses the same hostname and bridge as the native app. The br
 
 The bridge's `hc connect` child communicates with herdr-core over stdio. The child receives only the configured environment, including an optional `HC_SESSION`. `Gate` checks channel-zero JSON-RPC calls against the paired device's role and forwards allowed core bytes unchanged. Nonzero attachment channels pass through. See [bridge details](bridge.md) for the full policy and API.
 
-`AgentStarter` handles the control-only agent catalog and start routes. It validates the selected
-program or template and folder, then places a start in the open Herdr window or in herdr-core.
-`AllowedRoots` resolves the home and configured roots by real path on first use, with a five-second
-deadline per root. `callCore` makes short-lived `hc connect` calls for `templates.list` and, when the
-window is closed, `terminal.run`.
+`AgentStarter` handles the control-only agent catalog and start routes. It validates the selected program or template and folder, then places a start in the open Herdr window or in herdr-core. `AllowedRoots` resolves the home and configured roots by real path on first use, with a five-second deadline per root. `callCore` makes short-lived `hc connect` calls for `templates.list` and, when the window is closed, `terminal.run`.
 
 ## App layers
 

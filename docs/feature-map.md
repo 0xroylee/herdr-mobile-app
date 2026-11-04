@@ -207,7 +207,7 @@ These are on `main` today.
 - An agent that never sends a status report stays under Idle with `Waiting for status`. It never shows Needs you, Done or a prompt card. `AGENTS-9`, `TERM-8`.
 - The app has no way to pair a second Mac. #47 removed `Pair another Mac`, so Pair opens only on first launch, from `Pair again`, or from a `#pair=` link. `PAIR-5`.
 - The Spaces header's `New space` action remains available while the Mac is offline or unauthorized. The expanded-space `+` pill still opens Start for a control device, but Start and `Empty tab` are disabled until the bridge reconnects. `SPACES-4`, `SPACES-5`, `START-7`.
-- Core-started template first messages use the second `argv` item to `terminal.run`, though Q1 says task text should never go into `argv`. #51. `BRIDGE-7`, `START-4`.
+- When Start opens from a space's `+` pill, the preselection resolves after the first catalog request. If Herdr's layout arrives while that request is pending and lists spaces in a different order, Start selects the first space instead and drops `Empty tab`. The summary still shows the chosen space before Start, so nothing starts unseen. #51. `START-1`, `START-3`, `START-6`, `SPACES-5`.
 - Prompt recognition knows Claude Code and Codex only. Other agents get the composer. `TERM-8`.
 - The Pair snippet copies `herdr-bridge pair`, which works only if the bridge's bin is on `PATH`. From a checkout the command is `bun run bridge pair`. `PAIR-1`.
 - Nobody has run the app on Android yet.
