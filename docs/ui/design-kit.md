@@ -263,11 +263,11 @@ After a tap the buttons give way to the Sent state. If the question isn't recogn
 
 The route `/start` is a modal. It fills the phone screen and appears as a centered card on web. The header has Cancel (`x`) on the left and `Start agent` in the center.
 
-`Run` is a `ListGroup` of templates from `templates.list` and the built-in Claude Code and Codex programs. Each row has a `ProgramIcon` at 18, a name in `headline`, and a description in `subhead` `dim`. Built-ins use `Interactive session`. The selected row shows `check` at 17 in `fg`. When a space is preselected, the last row is `Empty tab` with the `terminal` icon.
+`Run` is a `ListGroup` of templates from `templates.list`, the built-in Claude Code and Codex programs, and programs added with `--run-program <name>`. Each row has a `ProgramIcon` at 18, a name in `headline`, and a description in `subhead` `dim`. Built-ins use `Interactive session`. The selected row shows `check` at 17 in `fg`. When a space is preselected, the last row is `Empty tab` with the `terminal` icon.
 
 `Where` is a `ListGroup` with a Space row and a Folder row. The space picker lists existing spaces and `New space`. An existing space defaults to its folder. A new space needs a folder. The folder picker suggests the selected space's layout `folder` first, then `cwd` values from terminals in that space, then the last five folders this phone used to start agents. Mark the default with a `Tag` reading `space folder`. `Other…` reveals a `TextInput` styled like `ManualEntry.tsx` in `mono` 13. The field accepts only absolute paths or paths that start with `~/`.
 
-`First message` is a multiline field styled like `Composer`, with the placeholder `What should Claude Code do? Optional`. The footer shows the selected program, shortened folder, space and tab, for example `Claude Code · ~/src/herdr · Work › new tab`, above a `Button large` labeled `Start Claude Code`. This line and button confirm the start; do not show a second alert. While starting, disable the inputs and show the spinner in `solid-fg`. If the device has the Watch role, replace the form with an `EmptyState` message.
+`First message` is a multiline field styled like `Composer`, with the placeholder `What should Claude Code do? Optional`. The footer summary is `subhead` `muted` and shows the selected program, shortened folder, space and tab, for example `Claude Code · ~/src/herdr · Work › new tab`, above a `Button large` labeled `Start Claude Code`. This line and button confirm the start; do not show a second alert. While starting, disable the inputs and show the spinner in `solid-fg`. If the device has the Watch role, replace the form with `This device is read-only. Starting agents is available on control devices.`
 
 ### `Button`
 

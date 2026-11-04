@@ -69,6 +69,44 @@ then remove that socket file before restarting. Normal shutdown removes it autom
 calls the configured `herdr-app` executable directly, with a ten-second deadline. A watch-role
 device cannot invoke those actions.
 
+## Start agents from a phone
+
+Only control devices can use `GET /api/agents/catalog` and `POST /api/agents/start`. The catalog
+lists Claude Code (`claude`), Codex (`codex`), programs added with `--run-program <name>`, and
+templates returned by herdr-core. A request names one program or template. It cannot contain shell
+lines or extra program arguments.
+
+The bridge accepts folders under the home folder or a `--run-root <dir>`. It resolves the requested
+folder and checks it by real path. That folder check has a ten-second deadline. `AllowedRoots`
+resolves configured roots lazily on first use, with a five-second deadline per root. A missing or
+stalled root keeps its configured spelling in the catalog. It never delays bridge startup, holds the
+catalog past the root deadline, or prevents another root from authorizing a folder.
+
+When `herdr-app ls` succeeds, the bridge uses `herdr-app do space.new` for a new space or
+`herdr-app do tab.new` for an existing space. Each call passes one JSON object with the folder,
+program and optional first message. The existing-space call also carries the space id. Herdr receives
+the first message through the `task` field.
+
+When the Herdr window is closed, the bridge uses herdr-core's `terminal.run` through a short-lived
+`hc connect` call. It sets `keep: true` and labels the terminal with `herdr.space`, `herdr.tab` and
+`herdr-mobile.origin`. The phone reports `Started in herdr-core. Herdr shows it when it opens.`
+
+Built-in programs, including programs added with `--run-program`, need Herdr open to receive a first
+message. If the window is closed, the bridge refuses that start with HTTP 422 and
+`First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the message empty.`
+Templates use herdr-core's
+template first-message path when they start in core. In this path, `AgentStarter` passes the task as
+the second item in `terminal.run`'s `argv`; scratch verification confirmed that herdr-core delivers
+it as the template's first message. Built-in task text is not added to a program's `argv`.
+
+In the 2026-11-04 scratch verification, `hc templates --help` named
+`~/.config/herdr-core/templates`. The checked format was a `.md` file with front matter fields
+`description` and `command`, followed by a body. herdr-core did not read `.toml` or `.json` files.
+
+After a successful start, the bridge writes one `Agent started` line with JSON fields for time,
+device id, name and role, run, canonical folder, placement, optional address, space and tab. It does
+not include the first message or device token.
+
 ## Launch at login with launchd
 
 Save this as `~/Library/LaunchAgents/dev.herdr.bridge.plist`, replacing `your-user` with the short

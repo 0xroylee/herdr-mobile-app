@@ -27,7 +27,7 @@ Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs 
   - Icons: Lucide through `lucide-react-native`, as in herdr-app.
   - The app is built with the paseo-plan-build-review workflow: GPT-6 Luna at max in Codex fast mode implements, and GPT-6.1 Sol at xhigh reviews, with GPT-6 Astra at xhigh only when a Sol review run fails. Work is tracked in GitHub issues.
 - **2026-11-03: Start agents from the phone.** The phone loads `GET /api/agents/catalog` and submits starts to `POST /api/agents/start`. The bridge chooses the Herdr window or herdr-core path.
-  - **Q1, Run choices.** Allow templates returned by `templates.list` and the built-in `claude` and `codex` programs. The bridge can add built-ins with `--run-program <name>`. Pass the first message to a built-in as its only CLI argument, where the CLI treats it as the initial prompt. Do not accept shell lines or extra arguments.
+  - **Q1, First messages (amended 2026-11-03).** "只在安全通道带消息": send a first message only through Herdr's own delivery. With the window open, `herdr-app do space.new` or `tab.new` receives it as `task`. A template started through herdr-core uses its template first-message path. In the current implementation, `AgentStarter` passes a core template's task as the second item in `terminal.run`'s `argv`; scratch verification confirmed that core delivered it as the template's first message. Do not add a built-in's first message to its `argv`. With the window closed, refuse a first message for `claude`, `codex` or a program added with `--run-program`; return `First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the message empty.` Keep the existing allow-list: templates returned by `templates.list`, `claude`, `codex` and programs added with `--run-program <name>`. Do not accept shell lines or extra program arguments.
   - **Q2, Folder.** Suggest the selected space's layout `folder` by default, terminal `cwd` values from that space, and the last five folders this phone used to start agents. Also accept typed absolute paths and paths that start with `~/`. The bridge resolves `~`, checks that the folder exists, and requires it to be under the home folder or a `--run-root <dir>` root. Do not add a folder browser; `file.read` is never forwarded.
   - **Q3, Window state.** Probe with `herdr-app ls`. Exit 0 means the window is open, so use `herdr-app do`. A failure there is an error, never a fallback. A non-zero probe means the window is closed, so use `terminal.run` with `keep: true` and the `herdr.space` and `herdr.tab` labels. Tell the phone whether Herdr or herdr-core started the terminal.
   - **Q4, Space and tab.** Offer existing spaces and `New space`. Use an existing space's folder by default. Require a folder for a new space. Start the agent in a new tab.
@@ -165,6 +165,43 @@ herdr-app 0.1.10 from the DMG, herdr-core 0.1.16. The window held one space with
 - **`herdr-app ls`** prints JSON with no flags: `spaces[]` with `id`, `name`, `folder`, `machine` (null for this Mac), `active` and `tabs[]`. Each tab has `id`, `name`, `active`, `settled` and `terminals[]`, and each terminal has `terminal`, `pane`, `status`, `app`, `name` and `sub_agents[]`. A `recent[]` list follows.
 - **`herdr-app status`** prints JSON with the selected `space`, `tab` and `focused_pane`, the `layout` name, zoom and font sizes.
 - **CLI usage:** `herdr-app ls | commands | status | shot [file.png] | do <command> [--arg value ... | json]`.
+
+### Scratch verification, 2026-11-04
+
+The coordinator ran section 5 of the U17 plan against code at `3cf1b8a`, using the scratch wrapper
+from [the smoke checklist](smoke-checklist.md#prepare-an-isolated-run). The bridge bound to
+`127.0.0.1:8790`. The core was `hc 0.1.17`;
+`packages/protocol` is pinned to `0.1.16`. The scratch bridge used port 8790, `/usr/bin/false` as
+`--herdr-app`, `printf` as an added program and the scratch home as `--run-root`. Control and watch
+devices were paired one code at a time.
+
+- The control catalog reported `windowOpen: false`, programs `claude`, `codex` and `printf`,
+  template `smokemd`, and the home and extra root at the home's real path.
+- With Herdr closed, `printf` plus a first message returned 422 `run_not_allowed` with
+  `First messages for printf need Herdr open on your Mac. Open Herdr, or leave the message empty.`
+  Without a message it returned 200 at core address `t1`, with `argv: ["printf"]`, the real home
+  as `cwd`, `keep: true` and the three labels `herdr.space`, `herdr.tab` and
+  `herdr-mobile.origin`. `sh`, `/tmp` and the watch token were refused with 422, 422 and 403.
+- `hc templates --help` named `~/.config/herdr-core/templates`. `.md` files with front matter
+  fields `description` and `command` plus a body were read. `.toml` and `.json` files were not.
+  `smokemd` started as a template with command `printf`, using `argv: ["sh", "-c", "printf"]`.
+  `smokeagent`, a scratch fake agent that reports OSC 7501 idle and echoes input, received its
+  template body, then `extra` as its first message.
+- A stand-in `herdr-app` made `ls` succeed and printed `{}` for `do`. The bridge called
+  `space.new` with `{"folder":"<home real path>","argv":["printf"],"task":"hello"}` for the
+  new-space start, then `tab.new` with the same fields and `"space":"sp..."` for the existing-space
+  start. No core terminal was created. Because the stand-in printed `{}`, those replies had empty
+  ids; this did not verify the real CLI's output.
+- The audit had one `Agent started` line for each of five successful starts and no task field.
+  Cleanup listed only this run's terminals, received the scratch `server.stop` acknowledgment and
+  removed the scratch root.
+
+The app was not rerun here because Tailscale was stopped and Serve mapped 8787 to the real bridge.
+The U17-3 browser run on the same app code covered catalog loading, the closed-window refusal,
+core-start notice, space id submission, Empty tab after a layout update, and the watch-device
+screens. The user's own Herdr window is still needed to verify the real `herdr-app do` output and
+space/tab ids, open-window placement and message delivery, Herdr's adoption of core-started
+terminals, and real template starts with and without a message. See [the user-run checks](smoke-checklist.md#your-mac-herdr-window-and-real-agents).
 
 ## Setup
 
