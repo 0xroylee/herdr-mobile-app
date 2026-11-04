@@ -124,7 +124,7 @@ describe("bridge config", () => {
     expect(runner.calls).toEqual([]);
   });
 
-  test("de-duplicates canonical run roots and keeps unavailable roots lexically", async () => {
+  test("lists home first and de-duplicates run roots lexically without filesystem resolution", async () => {
     const config = await createBridgeConfig(
       [
         "--owner",
@@ -132,9 +132,9 @@ describe("bridge config", () => {
         "--public-url",
         "https://mac.tailnet.example",
         "--run-root",
-        "/linked/shared",
+        "../shared",
         "--run-root",
-        "/vol/shared",
+        "~",
         "--run-root",
         "/offline",
         "--run-root",
@@ -144,15 +144,21 @@ describe("bridge config", () => {
         runner: new FakeRunner(),
         env,
         cwd: "/repo",
-        realPath: async (path) => {
-          if (path === "/linked/shared" || path === "/vol/shared") return "/vol/shared";
-          if (path === "/Users/bridge") return path;
-          throw new Error("root is unavailable");
-        },
       },
     );
 
-    expect(config.roots).toEqual(["/Users/bridge", "/vol/shared", "/offline"]);
+    expect(config.roots).toEqual(["/Users/bridge", "/shared", "/offline"]);
+  });
+
+  test("does not resolve roots while creating configuration", async () => {
+    const runner = new FakeRunner();
+    const config = await createBridgeConfig(
+      ["--owner", "owner@example.com", "--run-root", "/stalled"],
+      { runner, env, cwd: "/repo" },
+    );
+
+    expect(config.roots).toEqual(["/Users/bridge", "/stalled"]);
+    expect(runner.calls.map(({ argv }) => argv)).toEqual([["tailscale", "status", "--json"]]);
   });
 
   test("rejects invalid owner, flags, port and public URL", () => {

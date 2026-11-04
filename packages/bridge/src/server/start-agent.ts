@@ -1,5 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { HcRpcError } from "@herdr-mobile/hc-client";
 import type {
   AgentCatalog,
@@ -14,6 +14,7 @@ import { DeadlineError, systemClock, within } from "../prototype/deadline.ts";
 import type { ProcessRunner } from "../prototype/process.ts";
 import { runHerdrApp } from "./app-cli.ts";
 import { type CoreMethod, callCore, HcConnectError } from "./core-call.ts";
+import { AllowedRoots } from "./roots.ts";
 
 const MAX_START_STRING_BYTES = 32 * 1024;
 const FOLDER_CHECK_TIMEOUT_MS = 10_000;
@@ -88,31 +89,6 @@ function errorMessage(error: unknown): string {
 
 function defaultId(prefix: "sp" | "tb"): string {
   return `${prefix}${crypto.randomUUID().replaceAll("-", "")}`;
-}
-
-function isUnder(root: string, path: string): boolean {
-  const pathFromRoot = relative(root, path);
-  return pathFromRoot === "" || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== "..");
-}
-
-function uniqueResolvedRoots(roots: readonly string[]): string[] {
-  return [...new Set(roots.map((root) => resolve(root)))];
-}
-
-async function canonicalRoots(
-  roots: readonly string[],
-  realPath: (path: string) => Promise<string>,
-): Promise<string[]> {
-  const paths = await Promise.all(
-    uniqueResolvedRoots(roots).map(async (root) => {
-      try {
-        return resolve(await realPath(root));
-      } catch {
-        return root;
-      }
-    }),
-  );
-  return [...new Set(paths)];
 }
 
 function validateRequest(request: StartAgentRequest): void {
@@ -234,6 +210,7 @@ function mapCoreError(error: unknown): StartAgentError {
 export class AgentStarter {
   private readonly config: AgentStarterConfig;
   private readonly statFs: StatFs;
+  private readonly roots: AllowedRoots;
   private readonly coreCall: CoreCaller;
   private readonly clock: Clock;
   private readonly idGenerator: StartIdGenerator;
@@ -242,6 +219,13 @@ export class AgentStarter {
   constructor(config: AgentStarterConfig) {
     this.config = config;
     this.statFs = config.statFs ?? nodeStatFs;
+    this.clock = config.clock ?? systemClock;
+    this.roots = new AllowedRoots({
+      home: config.home,
+      roots: config.roots,
+      realPath: (path) => this.statFs.realPath(path),
+      clock: this.clock,
+    });
     this.coreCall =
       config.coreCall ??
       ((method, params) =>
@@ -257,7 +241,6 @@ export class AgentStarter {
           method,
           params,
         ));
-    this.clock = config.clock ?? systemClock;
     this.idGenerator = config.idGenerator ?? defaultId;
     this.output = config.output ?? (() => {});
   }
@@ -266,20 +249,29 @@ export class AgentStarter {
     const [templatesResult, windowOpen, rootsResult] = await Promise.allSettled([
       this.loadTemplates(),
       this.probeWindow(),
-      canonicalRoots(this.config.roots, (root) => this.statFs.realPath(root)),
+      this.roots.listing(),
     ]);
     const templates = templatesResult.status === "fulfilled" ? templatesResult.value : [];
+    const rootListing =
+      rootsResult.status === "fulfilled"
+        ? rootsResult.value
+        : {
+            home: resolve(this.config.home),
+            roots: [
+              ...new Set([
+                resolve(this.config.home),
+                ...this.config.roots.map((root) => resolve(root)),
+              ]),
+            ],
+          };
     return {
       programs: [...this.config.programs],
       templates,
       ...(templatesResult.status === "rejected"
         ? { templatesError: errorMessage(templatesResult.reason) }
         : {}),
-      roots:
-        rootsResult.status === "fulfilled"
-          ? rootsResult.value
-          : uniqueResolvedRoots(this.config.roots),
-      home: resolve(this.config.home),
+      roots: rootListing.roots,
+      home: rootListing.home,
       windowOpen: windowOpen.status === "fulfilled" && windowOpen.value,
     };
   }
@@ -353,68 +345,19 @@ export class AgentStarter {
       return await within(
         "folder verification",
         (async () => {
-          const rootPaths = uniqueResolvedRoots(this.config.roots);
-          const rootResolutions = rootPaths.map((root, index) =>
-            Promise.resolve()
-              .then(() => this.statFs.realPath(root))
-              .then(
-                (path) => ({ kind: "root" as const, index, path }),
-                () => ({ kind: "root" as const, index, path: undefined }),
-              ),
-          );
-          const folderResolution = this.statFs.realPath(resolved).then(
-            (path) => ({ kind: "folder" as const, path }),
-            () => ({ kind: "folder" as const, path: undefined }),
-          );
-          const pendingRoots = new Set(rootPaths.map((_, index) => index));
-          const canonicalRootPaths: string[] = [];
-          let folderSettled = false;
-          let canonicalFolder: string | undefined;
-
-          while (true) {
-            if (folderSettled && canonicalFolder === undefined) {
-              throw new StartAgentError(422, "folder_missing", "That folder does not exist.");
-            }
-            const resolvedFolder = canonicalFolder;
-            if (
-              resolvedFolder !== undefined &&
-              canonicalRootPaths.some((root) => isUnder(root, resolvedFolder))
-            ) {
-              break;
-            }
-            if (folderSettled && pendingRoots.size === 0) {
-              throw new StartAgentError(
-                422,
-                "folder_not_allowed",
-                "That folder is outside the allowed roots.",
-              );
-            }
-
-            const pending = [
-              ...(folderSettled ? [] : [folderResolution]),
-              ...[...pendingRoots].flatMap((index) => {
-                const resolution = rootResolutions[index];
-                return resolution === undefined ? [] : [resolution];
-              }),
-            ];
-            const result = await Promise.race(pending);
-            if (result.kind === "folder") {
-              folderSettled = true;
-              canonicalFolder = result.path;
-            } else {
-              pendingRoots.delete(result.index);
-              if (result.path !== undefined) canonicalRootPaths.push(result.path);
-            }
+          const realFolder = await this.statFs.realPath(resolved);
+          if (!(await this.roots.allows(realFolder))) {
+            throw new StartAgentError(
+              422,
+              "folder_not_allowed",
+              "That folder is outside the allowed roots.",
+            );
           }
-
-          if (canonicalFolder === undefined) {
-            throw new StartAgentError(422, "folder_missing", "That folder does not exist.");
-          }
-          const details = await this.statFs.stat(canonicalFolder);
+          const details = await this.statFs.stat(realFolder);
           if (!details.isDirectory()) {
             throw new StartAgentError(422, "folder_missing", "That folder does not exist.");
           }
-          return canonicalFolder;
+          return realFolder;
         })(),
         FOLDER_CHECK_TIMEOUT_MS,
         this.clock,

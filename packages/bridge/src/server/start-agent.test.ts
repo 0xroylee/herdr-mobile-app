@@ -3,31 +3,50 @@ import { HcRpcError } from "@herdr-mobile/hc-client";
 import type { DeviceRecordView, StartAgentRequest } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
+import { ROOT_RESOLVE_TIMEOUT_MS } from "./roots.ts";
 import { AgentStarter, type CoreCaller, type StatFs } from "./start-agent.ts";
 
 class ManualClock implements Clock {
-  callback: (() => void) | undefined;
-  delayMs: number | undefined;
+  private current = 1_000;
   private nextId = 1;
-  private timerId: number | undefined;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
 
   now(): number {
-    return 1_000;
+    return this.current;
   }
+
   setTimeout(callback: () => void, ms: number): unknown {
-    this.callback = callback;
-    this.delayMs = ms;
-    this.timerId = this.nextId++;
-    return this.timerId;
+    const id = this.nextId++;
+    this.timers.set(id, { at: this.current + ms, callback });
+    return id;
   }
+
   clearTimeout(handle: unknown): void {
-    if (handle === this.timerId) {
-      this.callback = undefined;
-      this.timerId = undefined;
-    }
+    if (typeof handle === "number") this.timers.delete(handle);
   }
-  fire(): void {
-    this.callback?.();
+
+  pending(): number[] {
+    return [...this.timers.values()]
+      .map(({ at }) => at - this.current)
+      .sort((left, right) => left - right);
+  }
+
+  async advance(ms: number): Promise<void> {
+    const target = this.current + ms;
+    await settle();
+    for (;;) {
+      const next = [...this.timers.entries()]
+        .filter(([, timer]) => timer.at <= target)
+        .sort(([leftId, left], [rightId, right]) => left.at - right.at || leftId - rightId)[0];
+      if (!next) break;
+      const [id, timer] = next;
+      this.timers.delete(id);
+      this.current = timer.at;
+      timer.callback();
+      await settle();
+    }
+    this.current = target;
+    await settle();
   }
 }
 
@@ -140,6 +159,7 @@ function setup(
     clock?: Clock;
     statFs?: StatFs;
     roots?: string[];
+    home?: string;
     output?: (line: string) => void;
   } = {},
 ) {
@@ -161,7 +181,7 @@ function setup(
     clock: options.clock,
     programs: ["claude", "codex", "aider"],
     roots: options.roots ?? ["/home/owner", "/workspace"],
-    home: "/home/owner",
+    home: options.home ?? "/home/owner",
     herdrAppPath: "/opt/herdr-app",
     hcPath: "/opt/hc",
     env: { HOME: "/home/owner", PATH: "/usr/bin" },
@@ -477,13 +497,14 @@ describe("AgentStarter", () => {
 
     await expect(starter.start(request(), control)).resolves.toMatchObject({ placement: "core" });
 
-    expect(clock.delayMs).toBe(10_000);
-    expect(clock.callback).toBeUndefined();
+    expect(clock.pending()).toEqual([ROOT_RESOLVE_TIMEOUT_MS]);
     expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
     expect(calls[0]).toMatchObject({
       method: "terminal.run",
       params: { cwd: "/home/owner/project" },
     });
+    await clock.advance(ROOT_RESOLVE_TIMEOUT_MS);
+    expect(clock.pending()).toEqual([]);
   });
 
   test("rejects an outside folder after all roots settle even when one root is missing", async () => {
@@ -525,7 +546,7 @@ describe("AgentStarter", () => {
     expect(calls).toEqual([]);
   });
 
-  test("catalog de-duplicates canonical root aliases and keeps an unavailable root", async () => {
+  test("catalog lists home first, de-duplicates canonical aliases, and keeps unavailable roots", async () => {
     const statFs = new MapFs();
     statFs.canonicalPaths.set("/linked/workspace", "/workspace");
     const { starter } = setup({
@@ -534,8 +555,82 @@ describe("AgentStarter", () => {
     });
 
     await expect(starter.catalog()).resolves.toMatchObject({
-      roots: ["/workspace", "/offline"],
+      roots: ["/home/owner", "/workspace", "/offline"],
+      home: "/home/owner",
     });
+  });
+
+  test("catalog waits at most five seconds for an extra root and lists its configured spelling", async () => {
+    const clock = new ManualClock();
+    const never = new Promise<string>(() => {});
+    const statFs: StatFs = {
+      async realPath(path) {
+        if (path === "/offline") return await never;
+        return path;
+      },
+      async stat() {
+        return { isDirectory: () => true };
+      },
+    };
+    const { starter } = setup({ clock, roots: ["/home/owner", "/offline"], statFs });
+    const catalog = starter.catalog();
+    await settle();
+    expect(clock.pending()).toEqual([ROOT_RESOLVE_TIMEOUT_MS]);
+
+    await clock.advance(ROOT_RESOLVE_TIMEOUT_MS);
+    await expect(catalog).resolves.toMatchObject({
+      roots: ["/home/owner", "/offline"],
+      home: "/home/owner",
+    });
+    await expect(starter.start(request(), control)).resolves.toMatchObject({ placement: "core" });
+    expect(clock.pending()).toEqual([]);
+  });
+
+  test("lists a symlinked home by the same canonical spelling as its root", async () => {
+    const statFs = new MapFs();
+    statFs.canonicalPaths.set("/linked/home", "/home/owner");
+    const { starter } = setup({
+      home: "/linked/home",
+      roots: ["/home/owner"],
+      statFs,
+    });
+
+    await expect(starter.catalog()).resolves.toMatchObject({
+      home: "/home/owner",
+      roots: ["/home/owner"],
+    });
+  });
+
+  test("refuses an outside folder after five seconds when an extra root never settles", async () => {
+    const clock = new ManualClock();
+    const never = new Promise<string>(() => {});
+    const statFs: StatFs = {
+      async realPath(path) {
+        if (path === "/offline") return await never;
+        return path;
+      },
+      async stat() {
+        return { isDirectory: () => true };
+      },
+    };
+    const { starter, runner, calls } = setup({
+      clock,
+      roots: ["/home/owner", "/offline"],
+      statFs,
+    });
+    const starting = starter.start(request({ folder: "/etc" }), control);
+    await settle();
+    expect(clock.pending()).toEqual([ROOT_RESOLVE_TIMEOUT_MS, 10_000]);
+
+    await clock.advance(ROOT_RESOLVE_TIMEOUT_MS);
+    await expect(starting).rejects.toMatchObject({
+      status: 422,
+      code: "folder_not_allowed",
+      message: "That folder is outside the allowed roots.",
+    });
+    expect(clock.pending()).toEqual([]);
+    expect(runner.argv).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   test("rejects a sibling path that only shares the allowed root's prefix", async () => {
@@ -565,15 +660,16 @@ describe("AgentStarter", () => {
     };
     const { starter, runner, calls } = setup({ clock, statFs });
     const pending = starter.start(request(), control);
-    for (let index = 0; index < 12 && clock.callback === undefined; index++) await settle();
-    expect(clock.delayMs).toBe(10_000);
-    clock.fire();
+    for (let index = 0; index < 12 && clock.pending().length === 0; index++) await settle();
+    expect(clock.pending()).toEqual([10_000]);
+    await clock.advance(10_000);
 
     await expect(pending).rejects.toMatchObject({
       status: 422,
       code: "folder_missing",
       message: "That folder did not respond in time.",
     });
+    expect(clock.pending()).toEqual([]);
     expect(runner.argv).toEqual([]);
     expect(calls).toEqual([]);
   });
@@ -590,15 +686,16 @@ describe("AgentStarter", () => {
     };
     const { starter, runner, calls } = setup({ clock, statFs });
     const pending = starter.start(request(), control);
-    for (let index = 0; index < 12 && clock.callback === undefined; index++) await settle();
-    expect(clock.delayMs).toBe(10_000);
-    clock.fire();
+    for (let index = 0; index < 12 && clock.pending().length === 0; index++) await settle();
+    expect(clock.pending()).toEqual([10_000]);
+    await clock.advance(10_000);
 
     await expect(pending).rejects.toMatchObject({
       status: 422,
       code: "folder_missing",
       message: "That folder did not respond in time.",
     });
+    expect(clock.pending()).toEqual([]);
     expect(runner.argv).toEqual([]);
     expect(calls).toEqual([]);
   });
@@ -673,13 +770,13 @@ describe("AgentStarter", () => {
     runner.hangDo = true;
     const promise = starter.start(request(), control);
     for (let index = 0; index < 12 && runner.children.length < 2; index++) await settle();
-    expect(clock.delayMs).toBe(10_000);
+    expect(clock.pending()).toEqual([10_000]);
     expect(runner.argv).toHaveLength(2);
     expect(runner.children[1]).toBeInstanceOf(HangingChild);
-    expect(clock.callback).toBeDefined();
-    clock.fire();
+    await clock.advance(10_000);
 
     await expect(promise).rejects.toMatchObject({ status: 504, code: "herdr_app_timeout" });
+    expect(clock.pending()).toEqual([]);
     expect((runner.children[1] as HangingChild).killed).toBe(true);
   });
 

@@ -1,4 +1,3 @@
-import { realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import type { BridgeMachine } from "@herdr-mobile/protocol";
@@ -38,7 +37,6 @@ export interface ConfigDependencies {
   cwd: string;
   clock?: Clock;
   machine?: BridgeMachine;
-  realPath?: (path: string) => Promise<string>;
 }
 
 export interface BridgeStatePaths {
@@ -277,10 +275,12 @@ export async function createBridgeConfig(
       cwd: dependencies.cwd,
       clock: dependencies.clock,
     }));
-  const roots = await canonicalizeRoots(
-    [home, ...flags.runRoots.map((root) => resolveRunRoot(root, home, dependencies.cwd))],
-    dependencies.realPath ?? realpath,
-  );
+  const roots = [
+    ...new Set([
+      home,
+      ...flags.runRoots.map((root) => resolveRunRoot(root, home, dependencies.cwd)),
+    ]),
+  ];
 
   return {
     ownerLogin: flags.ownerLogin,
@@ -306,23 +306,6 @@ function resolveRunRoot(root: string, home: string, cwd: string): string {
   if (root === "~") return home;
   if (root.startsWith("~/")) return resolve(home, root.slice(2));
   return resolve(cwd, root);
-}
-
-async function canonicalizeRoots(
-  roots: readonly string[],
-  realPath: (path: string) => Promise<string>,
-): Promise<string[]> {
-  const lexicalRoots = [...new Set(roots.map((root) => resolve(root)))];
-  const canonicalRoots = await Promise.all(
-    lexicalRoots.map(async (root) => {
-      try {
-        return resolve(await realPath(root));
-      } catch {
-        return root;
-      }
-    }),
-  );
-  return [...new Set(canonicalRoots)];
 }
 
 /** Refuses a public or wildcard bind before a socket can be opened. */
