@@ -1,7 +1,6 @@
 import type {
   AgentCatalog,
   Layout,
-  Role,
   StartAgentPlacement,
   StartAgentRequest,
   StartAgentRun,
@@ -9,6 +8,7 @@ import type {
   Terminal,
 } from "@herdr-mobile/protocol";
 import { deriveSpaces, type SpaceRow } from "./spaces.ts";
+import { newTabTarget } from "./spaceTarget.ts";
 
 export const NEW_SPACE_KEY = "new";
 
@@ -30,11 +30,6 @@ export interface StartSpaceChoice {
   folder?: string;
 }
 
-export type StartSpaceTargetResolver = (
-  row: SpaceRow,
-  layout: Layout | undefined,
-) => string | undefined;
-
 export interface FolderSuggestion {
   path: string;
   source: "space" | "terminal" | "recent";
@@ -51,14 +46,6 @@ export interface StartDraft {
   folder: string;
   space: StartAgentSpace | undefined;
   task: string;
-}
-
-export function canShowStartEntryPoint(role: Role | undefined): boolean {
-  return role === "control";
-}
-
-export function canStartNow(role: Role | undefined, connected: boolean): boolean {
-  return canShowStartEntryPoint(role) && connected;
 }
 
 export interface StartFieldErrors {
@@ -78,7 +65,7 @@ export function deriveStartOptions(
   terminals: readonly Terminal[] | Readonly<Record<string, Terminal>>,
   recentFolders: readonly string[],
   preselectedSpaceId: string | undefined,
-  resolveTarget: StartSpaceTargetResolver,
+  preselectedSpaceTargetId?: string,
 ): StartOptions {
   const terminalList = toTerminalList(terminals);
   const terminalByAddress = new Map(terminalList.map((terminal) => [terminal.address, terminal]));
@@ -93,7 +80,7 @@ export function deriveStartOptions(
     if (seenDisplayIds.has(space.id)) continue;
     const row = rowById.get(space.id);
     if (!row) continue;
-    const target = resolveTarget(row, layout);
+    const target = newTabTarget(row, layout);
     if (!target || seenTargetIds.has(target)) continue;
     seenDisplayIds.add(space.id);
     seenTargetIds.add(target);
@@ -117,7 +104,7 @@ export function deriveStartOptions(
 
   for (const row of derivedRows) {
     if (seenDisplayIds.has(row.id)) continue;
-    const target = resolveTarget(row, layout);
+    const target = newTabTarget(row, layout);
     if (!target || seenTargetIds.has(target)) continue;
     seenDisplayIds.add(row.id);
     seenTargetIds.add(target);
@@ -162,7 +149,11 @@ export function deriveStartOptions(
     });
   }
 
-  if (preselectedSpaceId && seenDisplayIds.has(preselectedSpaceId)) {
+  const hasPreselectedDisplay =
+    preselectedSpaceId !== undefined && seenDisplayIds.has(preselectedSpaceId);
+  const hasPreselectedTarget =
+    preselectedSpaceTargetId !== undefined && seenTargetIds.has(preselectedSpaceTargetId);
+  if (hasPreselectedDisplay || hasPreselectedTarget) {
     choices.push({
       key: "empty",
       kind: "empty",
@@ -180,9 +171,8 @@ export function findSpaceForTarget(
   targetId: string,
   spaces: readonly SpaceRow[],
   layout: Layout | undefined,
-  resolveTarget: StartSpaceTargetResolver,
 ): SpaceRow | undefined {
-  return spaces.find((space) => resolveTarget(space, layout) === targetId);
+  return spaces.find((space) => newTabTarget(space, layout) === targetId);
 }
 
 export function firstMessageNeedsWindow(

@@ -5,7 +5,6 @@ import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { useConnectionManager } from "../../boot.tsx";
-import { canShowStartEntryPoint } from "../../model/startAgent.ts";
 import type { EffectiveState } from "../../model/status.ts";
 import { routes } from "../../routes.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
@@ -33,6 +32,7 @@ import {
   retryConnection,
 } from "./rowMenu.ts";
 import { SearchField } from "./SearchField.tsx";
+import { showAgentsStartEntryPoint } from "./start-entry.ts";
 import { useAgents } from "./useAgents.ts";
 
 const AgentsList = FlashList as unknown as ComponentType<
@@ -121,7 +121,7 @@ export default function AgentsScreen() {
             if (searchOpen) setQuery("");
           }}
         />
-        {canShowStartEntryPoint(machine?.role) ? (
+        {showAgentsStartEntryPoint(machine?.role) ? (
           <IconButton
             accessibilityLabel="Start agent"
             icon="plus"

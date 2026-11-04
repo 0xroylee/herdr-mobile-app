@@ -2,11 +2,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { AgentCatalog, Layout, Terminal } from "@herdr-mobile/protocol";
-import { newTabTarget } from "../screens/spaces/spaceTarget.ts";
 import { deriveSpaces } from "./spaces.ts";
 import {
-  canShowStartEntryPoint,
-  canStartNow,
   deriveStartOptions,
   findSpaceForTarget,
   firstMessageNeedsWindow,
@@ -15,14 +12,6 @@ import {
 } from "./startAgent.ts";
 
 describe("start agent model", () => {
-  test("shows Start only on control devices and enables it only while connected", () => {
-    expect(canShowStartEntryPoint("control")).toBe(true);
-    expect(canShowStartEntryPoint("watch")).toBe(false);
-    expect(canStartNow("control", true)).toBe(true);
-    expect(canStartNow("control", false)).toBe(false);
-    expect(canStartNow("watch", true)).toBe(false);
-  });
-
   test("derives allowed runs, spaces, and ordered folder suggestions", () => {
     const options = deriveStartOptions(
       catalog(),
@@ -30,7 +19,6 @@ describe("start agent model", () => {
       [terminal("t1", "/Users/roy/src/other"), terminal("t2", "/Users/roy/src/herdr")],
       ["/Users/roy/last", "/Users/roy/src/other"],
       "sp-work",
-      newTabTarget,
     );
 
     expect(options.runChoices.map(({ name }) => name)).toEqual([
@@ -61,7 +49,7 @@ describe("start agent model", () => {
   });
 
   test("offers built-in runs when the catalog could not be loaded", () => {
-    const options = deriveStartOptions(undefined, undefined, [], [], undefined, newTabTarget);
+    const options = deriveStartOptions(undefined, undefined, [], [], undefined);
 
     expect(options.runChoices.map(({ name }) => name)).toEqual(["Claude Code", "Codex"]);
     expect(options.spaceChoices).toEqual([{ selection: { kind: "new" }, name: "New space" }]);
@@ -75,7 +63,6 @@ describe("start agent model", () => {
       [labelTerminal],
       [],
       "label-space:sp1",
-      newTabTarget,
     );
 
     expect(options.spaceChoices).toEqual([
@@ -105,28 +92,20 @@ describe("start agent model", () => {
           },
         ],
         undefined,
-        newTabTarget,
       )?.id,
     ).toBe("label-space:sp1");
   });
 
   test("omits unresolved aggregate spaces as existing destinations", () => {
     const aggregate = { ...terminal("t1", "/Users/roy/src"), labels: {} };
-    const options = deriveStartOptions(
-      undefined,
-      undefined,
-      [aggregate],
-      [],
-      undefined,
-      newTabTarget,
-    );
+    const options = deriveStartOptions(undefined, undefined, [aggregate], [], undefined);
 
     const aggregateRow = deriveSpaces([aggregate], undefined)[0]?.spaces[0];
 
     expect(options.spaceChoices).toEqual([{ selection: { kind: "new" }, name: "New space" }]);
     expect(aggregateRow).toBeDefined();
     expect(
-      findSpaceForTarget("other", aggregateRow ? [aggregateRow] : [], undefined, newTabTarget),
+      findSpaceForTarget("other", aggregateRow ? [aggregateRow] : [], undefined),
     ).toBeUndefined();
   });
 
@@ -140,9 +119,9 @@ describe("start agent model", () => {
     )[0]?.spaces;
 
     expect(labelRows).toBeDefined();
-    expect(
-      findSpaceForTarget("label-space:sp1", labelRows ?? [], undefined, newTabTarget)?.name,
-    ).toBe("label-space:sp1");
+    expect(findSpaceForTarget("label-space:sp1", labelRows ?? [], undefined)?.name).toBe(
+      "label-space:sp1",
+    );
   });
 
   test("requires an open Herdr window for built-in first messages only", () => {

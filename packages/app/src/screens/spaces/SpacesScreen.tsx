@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { View } from "react-native";
 import { useConnectionManager } from "@/boot.tsx";
 import type { MachineSpaceGroup } from "@/model/spaces.ts";
-import { canShowStartEntryPoint, findSpaceForTarget } from "@/model/startAgent.ts";
+import { findSpaceForTarget } from "@/model/startAgent.ts";
 import { routes } from "@/routes.ts";
 import { Banner } from "@/ui/components/Banner.tsx";
 import { EmptyState } from "@/ui/components/EmptyState.tsx";
@@ -16,7 +16,7 @@ import { Text } from "@/ui/text.tsx";
 import type { SpacesBanner } from "./connectionPresentation.ts";
 import { PairAgainBanner } from "./PairAgainBanner.tsx";
 import { SpaceRow } from "./SpaceRow.tsx";
-import { newTabTarget } from "./spaceTarget.ts";
+import { showSpaceStartEntryPoint } from "./start-entry.ts";
 import { useSpaces } from "./useSpaces.ts";
 import { getSpaceExpansionKey, groupHeading, groupTag, spacesFootnote } from "./viewState.ts";
 
@@ -60,7 +60,6 @@ export function SpacesScreen() {
         startedSpaceId,
         groups.flatMap((group) => group.spaces),
         layout,
-        newTabTarget,
       );
       if (!space) return;
       const group = groups.find((candidate) => candidate.spaces.includes(space));
@@ -162,7 +161,7 @@ export function SpacesScreen() {
                   return (
                     <SpaceRow
                       key={space.id}
-                      canStartAgent={canShowStartEntryPoint(machine?.role)}
+                      canStartAgent={showSpaceStartEntryPoint(machine?.role)}
                       expanded={isExpanded(expansionKey)}
                       onStartAgent={() =>
                         router.push({ pathname: routes.start, params: { space: space.id } } as Href)

@@ -7,9 +7,8 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } f
 import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
 import { deriveSpaces } from "../../model/spaces.ts";
+import { newTabTarget } from "../../model/spaceTarget.ts";
 import {
-  canShowStartEntryPoint,
-  canStartNow,
   deriveStartOptions,
   firstMessageNeedsWindow,
   type StartRunChoice,
@@ -27,13 +26,9 @@ import { IconButton } from "../../ui/components/IconButton.tsx";
 import { Spinner } from "../../ui/components/Spinner.tsx";
 import { Text } from "../../ui/text.tsx";
 import { createNewTab } from "../spaces/newItems.ts";
-import { newTabTarget } from "../spaces/spaceTarget.ts";
 import { RunList } from "./RunList.tsx";
-import {
-  createEmptyTabIfAllowed,
-  createStartController,
-  dispatchStartAction,
-} from "./start-controller.ts";
+import { getStartScreenAccess } from "./start-access.ts";
+import { createStartController, dispatchStartAction } from "./start-controller.ts";
 import { WherePicker } from "./WherePicker.tsx";
 
 const bridgeApi = createBridgeApi((input, init) => fetch(input, init));
@@ -57,7 +52,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   );
   const connection = machineCore?.connection ?? "offline";
   const connected = connection === "connected";
-  const canControl = canShowStartEntryPoint(machine?.role);
+  const access = getStartScreenAccess(machine?.role, connected);
   const dim = useCSSVariable("--color-dim");
   const solid = useCSSVariable("--color-solid-fg");
   const placeholderColor = typeof dim === "string" ? dim : undefined;
@@ -95,14 +90,16 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     [machine, router],
   );
   const controller = useMemo(
-    () => createStartController(port, preselectedSpaceId),
-    [port, preselectedSpaceId],
+    () =>
+      createStartController(port, preselectedSpaceId, { role: machine?.role, connected: false }),
+    [machine?.role, port, preselectedSpaceId],
   );
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
+  const preselectedSpaceTargetId = controller.preselectedSpaceTargetId;
   const options = useMemo(
     () =>
       deriveStartOptions(
@@ -111,16 +108,27 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
         machineCore?.terminals ?? {},
         recentFolders,
         preselectedSpaceId,
-        newTabTarget,
+        preselectedSpaceTargetId,
       ),
-    [state.catalog, machineCore?.layout, machineCore?.terminals, recentFolders, preselectedSpaceId],
+    [
+      state.catalog,
+      machineCore?.layout,
+      machineCore?.terminals,
+      recentFolders,
+      preselectedSpaceId,
+      preselectedSpaceTargetId,
+    ],
   );
   const [emptyTabBusy, setEmptyTabBusy] = useState(false);
   const [emptyTabError, setEmptyTabError] = useState<string>();
 
   useEffect(() => {
-    if (canControl) void controller.load();
-  }, [canControl, controller]);
+    controller.setAccess(machine?.role, connected);
+  }, [connected, controller, machine?.role]);
+
+  useEffect(() => {
+    if (!access.readOnly) void controller.load();
+  }, [access.readOnly, controller]);
 
   useEffect(() => {
     if (isEditable(state.status)) controller.applyOptions(options);
@@ -150,14 +158,11 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const emptySelected = selectedRun?.kind === "empty";
 
   async function createEmptyTab() {
-    if (machine?.role !== "control" || !connected || !emptyTabTarget || emptyTabBusy) return;
+    if (!emptyTabTarget || emptyTabBusy) return;
     setEmptyTabError(undefined);
     setEmptyTabBusy(true);
-    const result = await createEmptyTabIfAllowed(
-      machine.role,
-      connected,
-      emptyTabTarget,
-      (target) => createNewTab({ api: bridgeApi, secrets: appSecrets }, machine, target),
+    const result = await controller.createEmptyTabIfAllowed(emptyTabTarget, (target) =>
+      createNewTab({ api: bridgeApi, secrets: appSecrets }, machine, target),
     );
     setEmptyTabBusy(false);
     if (!result) return;
@@ -183,7 +188,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     controller.set("folder", options.foldersBySpace[folderKey]?.[0]?.path ?? "");
   }
 
-  if (!canControl) {
+  if (access.readOnly) {
     return (
       <StartFrame>
         <View className="flex-1 px-3.5">
@@ -217,7 +222,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const ctaLabel = emptySelected ? "Create empty tab" : `Start ${runName ?? "agent"}`;
   const emptyUnavailable = emptySelected && emptyTabTarget === undefined;
   const startDisabled =
-    !canStartNow(machine?.role, connected) ||
+    !access.canStart ||
     busy ||
     !isEditable(state.status) ||
     !selectedRun ||

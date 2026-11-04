@@ -9,12 +9,11 @@ import type {
   Terminal,
 } from "@herdr-mobile/protocol";
 import { deriveSpaces } from "../../model/spaces.ts";
+import { newTabTarget } from "../../model/spaceTarget.ts";
 import { deriveStartOptions } from "../../model/startAgent.ts";
 import { BridgeApiError } from "../../net/bridge-api.ts";
 import { createNewTab } from "../spaces/newItems.ts";
-import { newTabTarget } from "../spaces/spaceTarget.ts";
 import {
-  createEmptyTabIfAllowed,
   createStartController,
   dispatchStartAction,
   type StartAgentPort,
@@ -26,9 +25,7 @@ describe("start controller", () => {
     const controller = createStartController(port.value, "sp1");
 
     await controller.load();
-    controller.applyOptions(
-      deriveStartOptions(catalog(), layout(), [terminal()], [], "sp1", newTabTarget),
-    );
+    controller.applyOptions(deriveStartOptions(catalog(), layout(), [terminal()], [], "sp1"));
     controller.set("task", "Fix the failing test");
     const started = await controller.start();
 
@@ -77,9 +74,7 @@ describe("start controller", () => {
     });
     const controller = createStartController(port.value, "sp1");
     await controller.load();
-    controller.applyOptions(
-      deriveStartOptions(catalog(), layout(), [terminal()], [], "sp1", newTabTarget),
-    );
+    controller.applyOptions(deriveStartOptions(catalog(), layout(), [terminal()], [], "sp1"));
 
     expect(await controller.start()).toBe(false);
     expect(controller.state).toMatchObject({
@@ -106,9 +101,7 @@ describe("start controller", () => {
     });
     const controller = createStartController(port.value);
     await controller.load();
-    controller.applyOptions(
-      deriveStartOptions(undefined, undefined, [], [], undefined, newTabTarget),
-    );
+    controller.applyOptions(deriveStartOptions(undefined, undefined, [], [], undefined));
     controller.set("folder", "/Users/roy/project");
 
     expect(controller.state).toMatchObject({
@@ -133,7 +126,7 @@ describe("start controller", () => {
     const controller = createStartController(port.value, "sp1");
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
 
     const pendingStart = controller.start();
@@ -171,19 +164,12 @@ describe("start controller", () => {
     const controller = createStartController(port.value, "sp1");
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
     controller.set("run", { kind: "program", id: "printf" });
 
     await controller.load();
-    const fallbackOptions = deriveStartOptions(
-      undefined,
-      layout(),
-      [terminal()],
-      [],
-      "sp1",
-      newTabTarget,
-    );
+    const fallbackOptions = deriveStartOptions(undefined, layout(), [terminal()], [], "sp1");
     controller.applyOptions(fallbackOptions);
 
     expect(fallbackOptions.runChoices.map((choice) => choice.selection)).toContainEqual({
@@ -221,7 +207,7 @@ describe("start controller", () => {
     const controller = createStartController(port.value, "sp1");
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
     controller.set("run", { kind: "template", name: "review" });
     controller.set("task", "Keep this first message");
@@ -234,7 +220,7 @@ describe("start controller", () => {
     });
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
 
     expect(controller.state).toMatchObject({
@@ -278,7 +264,7 @@ describe("start controller", () => {
     const controller = createStartController(port.value, "sp1");
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
     controller.set("task", "Keep this first message");
 
@@ -290,7 +276,7 @@ describe("start controller", () => {
     });
     await controller.load();
     controller.applyOptions(
-      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1", newTabTarget),
+      deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
     );
 
     expect(controller.state.catalog?.windowOpen).toBe(true);
@@ -308,14 +294,7 @@ describe("start controller", () => {
       const controller = createStartController(port.value, "sp1");
       await controller.load();
       controller.applyOptions(
-        deriveStartOptions(
-          controller.state.catalog,
-          layout(),
-          [terminal()],
-          [],
-          "sp1",
-          newTabTarget,
-        ),
+        deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
       );
 
       expect(await controller.start()).toBe(true);
@@ -335,14 +314,106 @@ describe("start controller", () => {
       });
       const controller = createStartController(port.value);
       await controller.load();
-      controller.applyOptions(
-        deriveStartOptions(undefined, undefined, [], [], undefined, newTabTarget),
-      );
+      controller.applyOptions(deriveStartOptions(undefined, undefined, [], [], undefined));
       controller.set("folder", "/Users/roy/project");
 
       expect(await controller.start()).toBe(true);
       expect(port.calls.openSpaces).toEqual([{ spaceId: "sp-new", placement }]);
       expect(port.calls.openAgent).toEqual([]);
+    }
+  });
+
+  test("keeps a selected Empty tab when its label-backed space gains a layout row", async () => {
+    const routeSpaceId = "label-space:sp1";
+    const terminals = [terminal()];
+    const port = fakePort();
+    const controller = createStartController(port.value, routeSpaceId);
+    await controller.load();
+    const labelOptions = deriveStartOptions(
+      controller.state.catalog,
+      undefined,
+      terminals,
+      [],
+      routeSpaceId,
+    );
+    expect(labelOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    controller.applyOptions(labelOptions);
+    controller.set("run", { kind: "empty" });
+
+    const matchingLayout = layout();
+    const layoutOptions = deriveStartOptions(
+      controller.state.catalog,
+      matchingLayout,
+      terminals,
+      [],
+      routeSpaceId,
+      controller.preselectedSpaceTargetId,
+    );
+    expect(layoutOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    controller.applyOptions(layoutOptions);
+
+    expect(controller.state.draft).toMatchObject({
+      run: { kind: "empty" },
+      space: { kind: "existing", id: "sp1" },
+    });
+
+    const appDoCalls: Array<{ action: string; args?: Record<string, unknown> }> = [];
+    const dependencies = {
+      api: {
+        appDo: async (
+          _url: string,
+          _token: string,
+          action: "space.new" | "tab.new",
+          args?: Record<string, unknown>,
+        ) => {
+          appDoCalls.push({ action, args });
+        },
+      },
+      secrets: { get: async () => "token" },
+    };
+    const machine = { id: "machine", url: "https://mac.example", role: "control" as const };
+    const selectedChoice = layoutOptions.spaceChoices.find(
+      (choice) => choice.selection.kind === "existing" && choice.selection.id === "sp1",
+    );
+    const selectedRow = deriveSpaces(terminals, matchingLayout)
+      .flatMap((group) => group.spaces)
+      .find((space) => space.id === selectedChoice?.displayId);
+    const target = selectedRow ? newTabTarget(selectedRow, matchingLayout) : undefined;
+
+    const result = await dispatchStartAction(controller.state.draft.run, {
+      start: () => controller.start(),
+      createEmptyTab: () =>
+        controller.createEmptyTabIfAllowed(target, (resolvedTarget) =>
+          createNewTab(dependencies, machine, resolvedTarget),
+        ),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(appDoCalls).toEqual([{ action: "tab.new", args: { space: "sp1" } }]);
+    expect(port.calls.start).toEqual([]);
+  });
+
+  test("refuses agent starts for watch devices and offline Macs without changing the draft", async () => {
+    for (const access of [
+      { role: "watch" as const, connected: true },
+      { role: "control" as const, connected: false },
+    ]) {
+      const port = fakePort();
+      const controller = createStartController(port.value, "sp1");
+      await controller.load();
+      controller.applyOptions(
+        deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
+      );
+      controller.set("task", "Keep this draft");
+      controller.setAccess(access.role, access.connected);
+      const draft = controller.state.draft;
+
+      expect(await controller.start()).toBe(false);
+      expect(controller.state.draft).toEqual(draft);
+      expect(controller.state.status).toBe("editing");
+      expect(port.calls.start).toEqual([]);
+      expect(port.calls.openAgent).toEqual([]);
+      expect(port.calls.openSpaces).toEqual([]);
     }
   });
 
@@ -368,8 +439,9 @@ describe("start controller", () => {
       secrets: { get: async () => "token" },
     };
     const machine = { id: "machine", url: "https://mac.example", role: "control" as const };
+    const controller = createStartController(port.value);
     const createEmptyTab = () =>
-      createEmptyTabIfAllowed(machine.role, true, target, (resolvedTarget) =>
+      controller.createEmptyTabIfAllowed(target, (resolvedTarget) =>
         createNewTab(dependencies, machine, resolvedTarget),
       );
 
@@ -398,8 +470,9 @@ describe("start controller", () => {
     if (!target) throw new Error("Expected a resolved label target");
 
     let attempts = 0;
+    const controller = createStartController(fakePort().value);
     const createEmptyTab = () =>
-      createEmptyTabIfAllowed("control", true, target, async () => {
+      controller.createEmptyTabIfAllowed(target, async () => {
         attempts += 1;
         return attempts === 1 ? { ok: false, message: "Couldn't create the tab." } : { ok: true };
       });
@@ -423,33 +496,38 @@ describe("start controller", () => {
     const target = newTabTarget(space, undefined);
     if (!target) throw new Error("Expected a resolved label target");
     let createCalls = 0;
-    const createEmptyTab = (role: "watch" | "control", connected: boolean) =>
-      createEmptyTabIfAllowed(role, connected, target, async () => {
-        createCalls += 1;
-        return { ok: true };
-      });
-    const start = async () => {
-      throw new Error("Empty tab must not start an agent");
-    };
+    for (const access of [
+      { role: "watch" as const, connected: true },
+      { role: "control" as const, connected: false },
+    ]) {
+      const port = fakePort();
+      const controller = createStartController(port.value, "sp1");
+      await controller.load();
+      controller.applyOptions(
+        deriveStartOptions(controller.state.catalog, layout(), [terminal()], [], "sp1"),
+      );
+      controller.set("task", "Keep this draft");
+      const draft = controller.state.draft;
+      controller.setAccess(access.role, access.connected);
+      const createEmptyTab = () =>
+        controller.createEmptyTabIfAllowed(target, async () => {
+          createCalls += 1;
+          return { ok: true };
+        });
 
-    expect(
-      await dispatchStartAction(
-        { kind: "empty" },
-        {
-          start,
-          createEmptyTab: () => createEmptyTab("watch", true),
-        },
-      ),
-    ).toBeUndefined();
-    expect(
-      await dispatchStartAction(
-        { kind: "empty" },
-        {
-          start,
-          createEmptyTab: () => createEmptyTab("control", false),
-        },
-      ),
-    ).toBeUndefined();
+      expect(
+        await dispatchStartAction(
+          { kind: "empty" },
+          {
+            start: () => controller.start(),
+            createEmptyTab,
+          },
+        ),
+      ).toBeUndefined();
+      expect(controller.state.draft).toEqual(draft);
+      expect(port.calls.start).toEqual([]);
+    }
+
     expect(createCalls).toBe(0);
   });
 });

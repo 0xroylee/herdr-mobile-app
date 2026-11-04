@@ -1,7 +1,7 @@
+import type { SpaceTargetId } from "@/model/spaceTarget.ts";
 import { type BridgeApi, BridgeApiError } from "@/net/bridge-api.ts";
 import type { Machine } from "@/store/machines.ts";
 import type { Secrets } from "@/store/secrets.ts";
-import type { SpaceTargetId } from "./spaceTarget.ts";
 
 export const herdrNotRunningMessage = "Herdr isn't running on your Mac";
 
