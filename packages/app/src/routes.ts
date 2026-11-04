@@ -3,4 +3,5 @@ export const routes = {
   spaces: "/(tabs)/spaces",
   settings: "/(tabs)/settings",
   pair: "/pair",
+  start: "/start",
 } as const;

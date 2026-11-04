@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Modal, Pressable, View } from "react-native";
 import { useConnectionManager } from "../../boot.tsx";
 import type { EffectiveState } from "../../model/status.ts";
+import { routes } from "../../routes.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { HAIRLINE } from "../../ui/components/classes.ts";
 import { EmptyState } from "../../ui/components/EmptyState.tsx";
@@ -31,6 +32,7 @@ import {
   retryConnection,
 } from "./rowMenu.ts";
 import { SearchField } from "./SearchField.tsx";
+import { showAgentsStartEntryPoint } from "./start-entry.ts";
 import { useAgents } from "./useAgents.ts";
 
 const AgentsList = FlashList as unknown as ComponentType<
@@ -119,6 +121,13 @@ export default function AgentsScreen() {
             if (searchOpen) setQuery("");
           }}
         />
+        {showAgentsStartEntryPoint(machine?.role) ? (
+          <IconButton
+            accessibilityLabel="Start agent"
+            icon="plus"
+            onPress={() => router.push(routes.start as Href)}
+          />
+        ) : null}
       </ScreenHeader>
 
       {presentation.banner ? (

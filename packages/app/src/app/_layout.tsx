@@ -47,7 +47,9 @@ function FontGate({ retrying, onRetry }: { retrying: boolean; onRetry: () => voi
   return (
     <AppSafeArea>
       <Boot onReady={reportBootReady}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="start" options={{ presentation: "modal" }} />
+        </Stack>
       </Boot>
     </AppSafeArea>
   );

@@ -13,20 +13,18 @@ const rowClasses = {
 export interface SpaceRowProps {
   space: SpaceData;
   expanded: boolean;
-  canCreateTab: boolean;
-  isCreating: boolean;
+  canStartAgent: boolean;
   onToggle(): void;
-  onNewTab(): void;
+  onStartAgent(): void;
   onOpenTerminal(address: string): void;
 }
 
 export function SpaceRow({
   space,
   expanded,
-  canCreateTab,
-  isCreating,
+  canStartAgent,
   onToggle,
-  onNewTab,
+  onStartAgent,
   onOpenTerminal,
 }: SpaceRowProps) {
   const isIdle = space.state === "idle";
@@ -59,7 +57,7 @@ export function SpaceRow({
           {space.tabs.map((tab) => (
             <TabPill key={tab.id} onOpenTerminal={onOpenTerminal} tab={tab} />
           ))}
-          {canCreateTab ? <TabPill add disabled={isCreating} onPress={onNewTab} /> : null}
+          {canStartAgent ? <TabPill add onPress={onStartAgent} /> : null}
         </View>
       ) : null}
     </View>

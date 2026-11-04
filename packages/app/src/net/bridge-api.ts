@@ -1,8 +1,11 @@
 import type {
+  AgentCatalog,
   DeviceRecordView,
   HttpErrorBody,
   PairReply,
   PairRequest,
+  StartAgentReply,
+  StartAgentRequest,
 } from "@herdr-mobile/protocol";
 
 export class BridgeApiError extends Error {
@@ -31,6 +34,8 @@ export interface BridgeApi {
     action: "space.new" | "tab.new",
     args?: Record<string, unknown>,
   ): Promise<unknown>;
+  agentCatalog(baseUrl: string, token: string): Promise<AgentCatalog>;
+  startAgent(baseUrl: string, token: string, request: StartAgentRequest): Promise<StartAgentReply>;
 }
 
 /** Build bridge calls over the caller's fetch implementation. */
@@ -77,6 +82,25 @@ export function createBridgeApi(fetcher: BridgeFetch): BridgeApi {
           body: JSON.stringify({ action, args }),
         }),
       );
+    },
+    async agentCatalog(baseUrl, token) {
+      const value = await sendJson(fetcher, baseUrl, "/api/agents/catalog", authorized(token));
+      if (!isAgentCatalog(value)) throw new Error("The bridge returned an invalid agent catalog");
+      return value;
+    },
+    async startAgent(baseUrl, token, request) {
+      const value = await sendJson(
+        fetcher,
+        baseUrl,
+        "/api/agents/start",
+        authorized(token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        }),
+      );
+      if (!isStartAgentReply(value)) throw new Error("The bridge returned an invalid start reply");
+      return value;
     },
   };
 }
@@ -154,4 +178,43 @@ function isDeviceRecordView(value: unknown): value is DeviceRecordView {
     typeof record.createdAt === "number" &&
     (record.lastSeenAt === null || typeof record.lastSeenAt === "number")
   );
+}
+
+function isAgentCatalog(value: unknown): value is AgentCatalog {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    Array.isArray(record.programs) &&
+    record.programs.every((program) => typeof program === "string") &&
+    Array.isArray(record.templates) &&
+    record.templates.every(isAgentCatalogTemplate) &&
+    (record.templatesError === undefined || typeof record.templatesError === "string") &&
+    Array.isArray(record.roots) &&
+    record.roots.every((root) => typeof root === "string") &&
+    typeof record.home === "string" &&
+    typeof record.windowOpen === "boolean"
+  );
+}
+
+function isAgentCatalogTemplate(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.name === "string" && typeof record.description === "string";
+}
+
+function isStartAgentReply(value: unknown): value is StartAgentReply {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (record.placement === "window" || record.placement === "core") &&
+    (record.address === undefined || typeof record.address === "string") &&
+    isStartAgentLocation(record.space) &&
+    isStartAgentLocation(record.tab)
+  );
+}
+
+function isStartAgentLocation(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.id === "string" && typeof record.isNew === "boolean";
 }

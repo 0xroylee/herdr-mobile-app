@@ -1,6 +1,7 @@
 import {
   ArrowUp,
   Bot,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -14,6 +15,7 @@ import {
   ScanLine,
   Search,
   Settings,
+  Terminal,
   X,
 } from "lucide-react-native";
 import { useCSSVariable } from "uniwind";
@@ -21,6 +23,7 @@ import { useCSSVariable } from "uniwind";
 const icons = {
   "arrow-up": ArrowUp,
   bot: Bot,
+  check: Check,
   "chevron-down": ChevronDown,
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
@@ -34,6 +37,7 @@ const icons = {
   "scan-line": ScanLine,
   search: Search,
   settings: Settings,
+  terminal: Terminal,
   x: X,
 } as const;
 

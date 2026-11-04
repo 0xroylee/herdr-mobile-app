@@ -1,8 +1,10 @@
-import { type Href, useRouter } from "expo-router";
-import type { ReactNode } from "react";
+import { type Href, useLocalSearchParams, useRouter } from "expo-router";
+import { type ReactNode, useEffect, useState } from "react";
 import { View } from "react-native";
 import { useConnectionManager } from "@/boot.tsx";
 import type { MachineSpaceGroup } from "@/model/spaces.ts";
+import { findSpaceForTarget } from "@/model/startAgent.ts";
+import { routes } from "@/routes.ts";
 import { Banner } from "@/ui/components/Banner.tsx";
 import { EmptyState } from "@/ui/components/EmptyState.tsx";
 import { IconButton } from "@/ui/components/IconButton.tsx";
@@ -14,27 +16,69 @@ import { Text } from "@/ui/text.tsx";
 import type { SpacesBanner } from "./connectionPresentation.ts";
 import { PairAgainBanner } from "./PairAgainBanner.tsx";
 import { SpaceRow } from "./SpaceRow.tsx";
-import { newTabTarget } from "./spaceTarget.ts";
+import { showSpaceStartEntryPoint } from "./start-entry.ts";
 import { useSpaces } from "./useSpaces.ts";
 import { getSpaceExpansionKey, groupHeading, groupTag, spacesFootnote } from "./viewState.ts";
 
 export function SpacesScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    created?: string | string[];
+    space?: string | string[];
+    started?: string | string[];
+  }>();
   const connectionManager = useConnectionManager();
   const {
     canCreate,
     createSpace,
-    createTab,
     expandedSpaceKeys,
     groups,
     isCreating,
     isExpanded,
+    layout,
     machine,
     message,
-    layout,
     presentation,
     toggleSpace,
   } = useSpaces();
+  const startedPlacement = firstParam(params.started);
+  const createdType = firstParam(params.created);
+  const startedSpaceId = firstParam(params.space);
+  const [startedNotice, setStartedNotice] = useState<string>();
+
+  useEffect(() => {
+    if (!startedPlacement && createdType !== "tab") return;
+    setStartedNotice(
+      createdType === "tab"
+        ? "Empty tab created in Herdr."
+        : startedPlacement === "window"
+          ? "Started in Herdr."
+          : "Started in herdr-core. Herdr shows it when it opens.",
+    );
+    if (startedSpaceId) {
+      const space = findSpaceForTarget(
+        startedSpaceId,
+        groups.flatMap((group) => group.spaces),
+        layout,
+      );
+      if (!space) return;
+      const group = groups.find((candidate) => candidate.spaces.includes(space));
+      if (group) {
+        const key = getSpaceExpansionKey(group.id, space.id);
+        if (!isExpanded(key)) toggleSpace(key);
+      }
+    }
+    router.setParams({ created: undefined, space: undefined, started: undefined });
+  }, [
+    createdType,
+    groups,
+    isExpanded,
+    layout,
+    router,
+    startedPlacement,
+    startedSpaceId,
+    toggleSpace,
+  ]);
 
   const bannerRenderers: Record<SpacesBanner["kind"], (message: string) => ReactNode> = {
     reconnecting: (message) => <Banner message={message} state="reconnecting" />,
@@ -69,12 +113,19 @@ export function SpacesScreen() {
           {bannerRenderers[presentation.banner.kind](presentation.banner.message)}
         </View>
       ) : null}
+      {startedNotice ? (
+        <View className="pb-2.5 px-1">
+          <Text variant="subhead" tone="muted">
+            {startedNotice}
+          </Text>
+        </View>
+      ) : null}
 
       <FlashList
         className="flex-1"
         contentContainerClassName="gap-3 pb-4"
         data={groups}
-        extraData={[expandedSpaceKeys, message, canCreate, isCreating, layout]}
+        extraData={[expandedSpaceKeys, message, canCreate, isCreating]}
         keyExtractor={(item) => (item as MachineSpaceGroup).id}
         ListEmptyComponent={
           <View className="min-h-[280px] flex-1">
@@ -107,16 +158,14 @@ export function SpacesScreen() {
               <ListGroup>
                 {group.spaces.map((space) => {
                   const expansionKey = getSpaceExpansionKey(group.id, space.id);
-                  const target = newTabTarget(space, layout);
                   return (
                     <SpaceRow
                       key={space.id}
-                      canCreateTab={canCreate && target !== undefined}
+                      canStartAgent={showSpaceStartEntryPoint(machine?.role)}
                       expanded={isExpanded(expansionKey)}
-                      isCreating={isCreating}
-                      onNewTab={() => {
-                        if (target !== undefined) createTab(target);
-                      }}
+                      onStartAgent={() =>
+                        router.push({ pathname: routes.start, params: { space: space.id } } as Href)
+                      }
                       onOpenTerminal={openAgent}
                       onToggle={() => toggleSpace(expansionKey)}
                       space={space}
@@ -131,4 +180,8 @@ export function SpacesScreen() {
       />
     </View>
   );
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

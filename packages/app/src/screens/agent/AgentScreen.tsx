@@ -1,8 +1,10 @@
+import type { StartAgentPlacement } from "@herdr-mobile/protocol";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, View } from "react-native";
 import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
+import { startPlacementNotice } from "../../model/startAgent.ts";
 import { coreStore, machinesStore, seenStore } from "../../store/platform.ts";
 import { TerminalPane } from "../../terminal/TerminalPane.tsx";
 import type { TerminalFit } from "../../terminal/zoom.ts";
@@ -38,9 +40,14 @@ import { useTerminalInput } from "./useTerminalInput.ts";
 export interface AgentScreenProps {
   address: string;
   requestTakeover?: boolean;
+  startedPlacement?: StartAgentPlacement;
 }
 
-export function AgentScreen({ address, requestTakeover = false }: AgentScreenProps) {
+export function AgentScreen({
+  address,
+  requestTakeover = false,
+  startedPlacement,
+}: AgentScreenProps) {
   const router = useRouter();
   const manager = useConnectionManager();
   const activeId = useStore(machinesStore, (state) => state.activeId);
@@ -55,6 +62,9 @@ export function AgentScreen({ address, requestTakeover = false }: AgentScreenPro
   const [fit, setFit] = useState<TerminalFit | undefined>(undefined);
   const fitRef = useRef<TerminalFit | undefined>(undefined);
   const [moreVisible, setMoreVisible] = useState(false);
+  const [startedNotice, setStartedNotice] = useState(() =>
+    startedPlacement ? startPlacementNotice(startedPlacement) : undefined,
+  );
   const [seenTracker] = useState(() => new OpeningSeenTracker());
   const [autoTakeover] = useState(() => new AutoTakeoverController());
   const actionController = useAgentActionController();
@@ -98,6 +108,12 @@ export function AgentScreen({ address, requestTakeover = false }: AgentScreenPro
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (startedPlacement === undefined) return;
+    setStartedNotice(startPlacementNotice(startedPlacement));
+    router.setParams({ started: undefined });
+  }, [router, startedPlacement]);
 
   useEffect(() => {
     markOpeningTurnSeen(
@@ -186,6 +202,14 @@ export function AgentScreen({ address, requestTakeover = false }: AgentScreenPro
           <View className="h-11 w-11" />
         )}
       </View>
+
+      {startedNotice ? (
+        <View className="pb-2.5 px-1">
+          <Text variant="subhead" tone="muted">
+            {startedNotice}
+          </Text>
+        </View>
+      ) : null}
 
       <StatusStrip
         age={view.age}

@@ -2,6 +2,7 @@ import type { Layout } from "@herdr-mobile/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { deriveSpaces, type MachineSpaceGroup } from "@/model/spaces.ts";
+import type { SpaceTargetId } from "@/model/spaceTarget.ts";
 import { createBridgeApi } from "@/net/bridge-api.ts";
 import type { Machine } from "@/store/machines.ts";
 import { appSecrets, coreStore, machinesStore } from "@/store/platform.ts";
@@ -10,7 +11,6 @@ import {
   type SpacesConnectionPresentation,
 } from "./connectionPresentation.ts";
 import { createNewSpace, createNewTab, type NewItemResult } from "./newItems.ts";
-import type { SpaceTargetId } from "./spaceTarget.ts";
 import { initialExpandedSpaceKeys, toggleExpandedSpace } from "./viewState.ts";
 
 const bridgeApi = createBridgeApi((input, init) => fetch(input, init));

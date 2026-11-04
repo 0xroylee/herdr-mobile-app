@@ -3,10 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Terminal } from "@herdr-mobile/protocol";
 import { deriveSpaces } from "@/model/spaces.ts";
+import { newTabTarget } from "@/model/spaceTarget.ts";
 import { type BridgeApi, BridgeApiError } from "@/net/bridge-api.ts";
 import type { Secrets } from "@/store/secrets.ts";
 import { createNewSpace, createNewTab, herdrNotRunningMessage } from "./newItems.ts";
-import { newTabTarget } from "./spaceTarget.ts";
 
 const machine = { id: "machine-1", url: "https://mac.tailnet.ts.net", role: "control" } as const;
 
