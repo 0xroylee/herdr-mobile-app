@@ -16,6 +16,9 @@ flowchart LR
     subgraph bridge["herdr-bridge: Bun, 127.0.0.1"]
       identity["Owner identity check"]
       api["HTTP API"]
+      starter["AgentStarter"]
+      roots["AllowedRoots"]
+      corecall["callCore"]
       pairing["Pairing codes and device store"]
       static["Web assets and index.html fallback"]
       ws["WebSocket token check"]
@@ -31,6 +34,10 @@ flowchart LR
 
   app -- "HTTPS and WebSocket" --> serve --> identity
   identity --> api
+  api --> starter
+  starter --> roots
+  starter --> herdr
+  starter --> corecall --> hc --> core
   api --> pairing
   identity --> static
   identity --> ws --> session --> gate --> hc --> core
@@ -46,14 +53,16 @@ The app's web export uses the same hostname and bridge as the native app. The br
 
 ## Packages
 
-| Package              | Boundary                                                                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`  | Pinned `schema/hc.openrpc.json` and wire types shared by the bridge and app. `bun run protocol:check` checks generated types.                                 |
-| `packages/hc-client` | Runtime-neutral JSON-RPC, line and frame codecs, attach streams and events. It has no runtime dependencies and imports no Node built-ins.                     |
-| `packages/bridge`    | Bun CLI, loopback HTTP and WebSocket server, Unix admin socket, pairing and device storage, process sessions, gate, herdr-app actions and static web serving. |
-| `packages/app`       | Expo Router client for iOS, Android and web. Expo CLI and Metro run with Node 24.                                                                             |
+| Package              | Boundary                                                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`  | Pinned `schema/hc.openrpc.json` and wire types shared by the bridge and app. `bun run protocol:check` checks generated types.                                                                             |
+| `packages/hc-client` | Runtime-neutral JSON-RPC, line and frame codecs, attach streams and events. It has no runtime dependencies and imports no Node built-ins.                                                                 |
+| `packages/bridge`    | Bun CLI, loopback HTTP and WebSocket server, Unix admin socket, pairing and device storage, process sessions, gate, `AgentStarter`, `AllowedRoots`, `callCore`, herdr-app actions and static web serving. |
+| `packages/app`       | Expo Router client for iOS, Android and web. Expo CLI and Metro run with Node 24.                                                                                                                         |
 
 The bridge's `hc connect` child communicates with herdr-core over stdio. The child receives only the configured environment, including an optional `HC_SESSION`. `Gate` checks channel-zero JSON-RPC calls against the paired device's role and forwards allowed core bytes unchanged. Nonzero attachment channels pass through. See [bridge details](bridge.md) for the full policy and API.
+
+`AgentStarter` handles the control-only agent catalog and start routes. It validates the selected program or template and folder, then places a start in the open Herdr window or in herdr-core. `AllowedRoots` resolves the home and configured roots by real path on first use, with a five-second deadline per root. `callCore` makes short-lived `hc connect` calls for `templates.list` and, when the window is closed, `terminal.run`.
 
 ## App layers
 
@@ -77,6 +86,7 @@ The settings store selects `system`, `graphite` or `paper` before the first rout
 5. **Agents by space.** With `agents.sort` set to `space`, the Agents screen groups the same derived rows by document order and tab order.
 6. **Pairing.** The app reads a `#pair=` fragment, pasted link or typed URL and code. It sends the one-time code to `/api/pair`, saves the returned token through `Secrets`, adds the public machine record and makes it active. `ConnectionManager` then opens the bridge WebSocket. The connection line reports the paired device name and connection state.
 7. **Settings.** Theme and notification preferences persist in the settings store. Notification switches do not send push notifications. The Machines section revokes a device through `/api/devices/self`, then removes local machine data even if the bridge cannot be reached. About shows app and protocol versions and explains web storage.
+8. **Start agent.** The Start screen loads `/api/agents/catalog` and submits `/api/agents/start`. `AgentStarter` checks the request and chooses `herdr-app do` when the window is open or `callCore` and `terminal.run` when it is closed. `AllowedRoots` checks the folder against real paths for home and configured roots. A first message for a built-in requires the window to be open; a template can use herdr-core's first-message path. On success, the app opens the agent when the reply has an address, or Spaces otherwise.
 
 ## Build and verification boundaries
 
