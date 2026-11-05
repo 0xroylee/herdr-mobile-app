@@ -2,17 +2,18 @@ import type { StartAgentSpace } from "@herdr-mobile/protocol";
 import * as Haptics from "expo-haptics";
 import { type Href, useRouter } from "expo-router";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
   TextInput,
   View,
+  type ViewInstance,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
 import { deriveSpaces } from "../../model/spaces.ts";
@@ -50,6 +51,7 @@ export interface StartScreenProps {
 
 export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const router = useRouter();
+  const isPageSheet = Platform.OS === "ios" && router.canGoBack();
   const activeId = useStore(machinesStore, (state) => state.activeId);
   const machine = useStore(machinesStore, (state) =>
     activeId === null ? undefined : state.machines[activeId],
@@ -200,7 +202,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
 
   if (access.readOnly) {
     return (
-      <StartFrame>
+      <StartFrame isPageSheet={isPageSheet}>
         <View className="flex-1 px-3.5">
           <StartHeader onCancel={() => router.back()} />
           <View className="flex-1 items-center justify-center px-6">
@@ -240,7 +242,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     emptyUnavailable;
 
   return (
-    <StartFrame>
+    <StartFrame isPageSheet={isPageSheet}>
       <View className="px-3.5">
         <StartHeader onCancel={() => router.back()} />
       </View>
@@ -255,7 +257,6 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
       ) : (
         <>
           <ScrollView
-            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
             className="min-h-0 flex-1"
             contentContainerClassName="gap-4 px-3.5 pb-4"
             keyboardShouldPersistTaps="handled"
@@ -387,13 +388,35 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   );
 }
 
-function StartFrame({ children }: { children: ReactNode }) {
+function StartFrame({ children, isPageSheet }: { children: ReactNode; isPageSheet: boolean }) {
   const isWeb = Platform.OS === "web";
   const isIos = Platform.OS === "ios";
-  const insets = useSafeAreaInsets();
-  const topInsetClass = modalFrameTopInsetClass(Platform.OS);
+  const topInsetClass = modalFrameTopInsetClass(Platform.OS, isPageSheet);
+  const frameContainerRef = useRef<ViewInstance | null>(null);
+  const frameLocalY = useRef(0);
+  const [keyboardVerticalOffset, setKeyboardVerticalOffset] = useState(0);
+  const measureKeyboardOffset = useCallback(() => {
+    if (!isIos) return;
+
+    frameContainerRef.current?.measureInWindow((_x, containerWindowY) => {
+      const localY = frameLocalY.current;
+      setKeyboardVerticalOffset(
+        pageSheetKeyboardVerticalOffset(Platform.OS, localY, containerWindowY + localY),
+      );
+    });
+  }, [isIos]);
+  const handleFrameLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      frameLocalY.current = event.nativeEvent.layout.y;
+      measureKeyboardOffset();
+    },
+    [measureKeyboardOffset],
+  );
+
   return (
     <View
+      ref={frameContainerRef}
+      onLayout={measureKeyboardOffset}
       className={
         isWeb ? "flex-1 items-center justify-center bg-canvas px-6 py-6" : "flex-1 bg-canvas"
       }
@@ -405,7 +428,8 @@ function StartFrame({ children }: { children: ReactNode }) {
             ? `flex-1 w-full max-w-[620px] overflow-hidden rounded-card border-border bg-canvas ${topInsetClass}`
             : `flex-1 bg-canvas ${topInsetClass}`
         }
-        keyboardVerticalOffset={pageSheetKeyboardVerticalOffset(Platform.OS, insets.top)}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+        onLayout={handleFrameLayout}
         style={isWeb ? { borderWidth: HAIRLINE, maxHeight: 900 } : undefined}
       >
         {children}

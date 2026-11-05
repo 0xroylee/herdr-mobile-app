@@ -1,7 +1,11 @@
-export function modalFrameTopInsetClass(platform: string): string {
-  return platform === "ios" ? "" : "pt-safe";
+export function modalFrameTopInsetClass(platform: string, isPageSheet = true): string {
+  return platform === "ios" && isPageSheet ? "" : "pt-safe";
 }
 
-export function pageSheetKeyboardVerticalOffset(platform: string, topInset: number): number {
-  return platform === "ios" ? topInset : 0;
+export function pageSheetKeyboardVerticalOffset(
+  platform: string,
+  frameLocalY: number,
+  frameWindowY: number,
+): number {
+  return platform === "ios" ? frameWindowY - frameLocalY : 0;
 }
