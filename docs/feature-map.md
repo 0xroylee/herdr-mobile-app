@@ -219,6 +219,7 @@ These are on `main` today.
 
 Newest first. One line per user-visible change, with the PR or commit and the rows it touched.
 
+- 2026-11-04. iOS modal sheets no longer add a second top inset, and the Start, folder-entry and manual-pair controls stay visible when the keyboard opens. `START-1`, `START-3`, `START-4`, `PAIR-3`.
 - 2026-11-04, #50. Agents and Spaces open Start, which supports agent starts and `Empty tab` with role and connection limits. `AGENTS-10`, `SPACES-5`, `START-1` to `START-7`, Roles, Navigation.
 - 2026-11-04, #49. Control devices can start allowed programs and templates in Herdr or herdr-core, with folder limits and a first-message check. `--run-program` and `--run-root` configure choices; roots are resolved lazily, listed by real path when available, and kept in their configured spelling when unavailable without delaying startup, the catalog or a start under another allowed root. Successful starts print `Agent started`. `BRIDGE-7`, `BRIDGE-8`, `BRIDGE-9`.
 - 2026-11-03. Started this map. It describes `main` at 2fc008a.
