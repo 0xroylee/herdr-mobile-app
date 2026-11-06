@@ -7,6 +7,8 @@ export interface ProgramInfo {
   iconKey: ProgramIconKey;
 }
 
+type JavaScriptRuntime = "node" | "bun" | "deno";
+
 /** Choose a display name and the corresponding herdr-app icon key. */
 export function getProgram(
   terminal: Pick<Terminal, "argv" | "foreground" | "status">,
@@ -17,9 +19,42 @@ export function getProgram(
   const terminalArg = terminal.argv[0];
   const candidate = reportedApp || foregroundName || foregroundArg || terminalArg || "Terminal";
   const normalized = normalizeProgram(candidate);
+  if (isJavaScriptRuntime(normalized)) {
+    const scriptProgram = programFromRuntimeArgv(terminal.foreground?.argv ?? [], normalized);
+    if (scriptProgram !== undefined) return scriptProgram;
+  }
   if (normalized === "claude") return { name: "Claude Code", iconKey: "claude" };
   if (normalized === "codex") return { name: "Codex", iconKey: "codex" };
   return { name: displayName(candidate), iconKey: "bot" };
+}
+
+function isJavaScriptRuntime(value: string): value is JavaScriptRuntime {
+  return value === "node" || value === "bun" || value === "deno";
+}
+
+function programFromRuntimeArgv(
+  argv: readonly string[],
+  runtime: JavaScriptRuntime,
+): ProgramInfo | undefined {
+  if (argv[0] === undefined || normalizeProgram(argv[0]) !== runtime) return undefined;
+  const scriptIndex = runtime !== "node" && argv[1] === "run" ? 2 : 1;
+  const script = argv[scriptIndex];
+  if (script === undefined || script.startsWith("-")) return undefined;
+  return programFromEntryScript(script);
+}
+
+function programFromEntryScript(script: string | undefined): ProgramInfo | undefined {
+  if (script === undefined) return undefined;
+  const path = script.replace(/\\/g, "/").toLowerCase();
+  const normalized = basename(path).replace(/\.(js|mjs|cjs)$/i, "");
+
+  if (normalized === "claude" || /(?:^|\/)@anthropic-ai\/claude-code(?:\/|$)/.test(path)) {
+    return { name: "Claude Code", iconKey: "claude" };
+  }
+  if (normalized === "codex" || /(?:^|\/)@openai\/codex(?:\/|$)/.test(path)) {
+    return { name: "Codex", iconKey: "codex" };
+  }
+  return undefined;
 }
 
 function normalizeProgram(value: string): string {

@@ -9,6 +9,7 @@ export interface ComposerProps {
   program: string;
   placeholder?: string;
   sent: boolean;
+  notice?: string;
   readOnly?: boolean;
   disabled?: boolean;
   error?: string;
@@ -19,6 +20,7 @@ export function Composer({
   program,
   placeholder,
   sent,
+  notice,
   readOnly = false,
   disabled = false,
   error,
@@ -35,6 +37,11 @@ export function Composer({
           <Text variant="subhead" tone="muted">
             Sent · waiting for {program}
           </Text>
+        </View>
+      ) : null}
+      {notice ? (
+        <View className="mb-1.5 px-1">
+          <Text variant="subhead">{notice}</Text>
         </View>
       ) : null}
       {error ? (
