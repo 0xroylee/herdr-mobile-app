@@ -2,10 +2,10 @@ export function modalFrameTopInsetClass(platform: string, isPageSheet = true): s
   return platform === "ios" && isPageSheet ? "" : "pt-safe";
 }
 
-export function pageSheetKeyboardVerticalOffset(
+export function startFrameKeyboardPadding(
   platform: string,
-  frameLocalY: number,
-  frameWindowY: number,
+  keyboardHeight: number,
+  reservedBottomInset: number,
 ): number {
-  return platform === "ios" ? frameWindowY - frameLocalY : 0;
+  return platform === "ios" ? Math.max(keyboardHeight - reservedBottomInset, 0) : 0;
 }

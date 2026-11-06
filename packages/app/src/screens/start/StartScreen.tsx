@@ -2,18 +2,18 @@ import type { StartAgentSpace } from "@herdr-mobile/protocol";
 import * as Haptics from "expo-haptics";
 import { type Href, useRouter } from "expo-router";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  type LayoutChangeEvent,
+  Keyboard,
+  type KeyboardEvent,
   Platform,
   Pressable,
   ScrollView,
   TextInput,
   View,
-  type ViewInstance,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
 import { deriveSpaces } from "../../model/spaces.ts";
@@ -34,7 +34,7 @@ import { Banner } from "../../ui/components/Banner.tsx";
 import { buttonClasses, HAIRLINE } from "../../ui/components/classes.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
 import { Spinner } from "../../ui/components/Spinner.tsx";
-import { modalFrameTopInsetClass, pageSheetKeyboardVerticalOffset } from "../../ui/modal-frame.ts";
+import { modalFrameTopInsetClass, startFrameKeyboardPadding } from "../../ui/modal-frame.ts";
 import { Text } from "../../ui/text.tsx";
 import { createNewTab } from "../spaces/newItems.ts";
 import { RunList } from "./RunList.tsx";
@@ -391,49 +391,61 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
 function StartFrame({ children, isPageSheet }: { children: ReactNode; isPageSheet: boolean }) {
   const isWeb = Platform.OS === "web";
   const isIos = Platform.OS === "ios";
+  const { bottom } = useSafeAreaInsets();
   const topInsetClass = modalFrameTopInsetClass(Platform.OS, isPageSheet);
-  const frameContainerRef = useRef<ViewInstance | null>(null);
-  const frameLocalY = useRef(0);
-  const [keyboardVerticalOffset, setKeyboardVerticalOffset] = useState(0);
-  const measureKeyboardOffset = useCallback(() => {
+  const [keyboardHeight, setKeyboardHeight] = useState(() =>
+    isIos ? (Keyboard.metrics()?.height ?? 0) : 0,
+  );
+
+  useEffect(() => {
     if (!isIos) return;
 
-    frameContainerRef.current?.measureInWindow((_x, containerWindowY) => {
-      const localY = frameLocalY.current;
-      setKeyboardVerticalOffset(
-        pageSheetKeyboardVerticalOffset(Platform.OS, localY, containerWindowY + localY),
-      );
+    let keyboardVisible = Keyboard.isVisible();
+    const updateHeight = (event: KeyboardEvent, height: number) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setKeyboardHeight(height);
+    };
+    const show = Keyboard.addListener("keyboardWillShow", (event) => {
+      keyboardVisible = true;
+      updateHeight(event, event.endCoordinates.height);
     });
+    const changeFrame = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
+      // A dismissal can also send a frame event with the keyboard's nonzero height.
+      if (keyboardVisible) updateHeight(event, event.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", (event) => {
+      keyboardVisible = false;
+      updateHeight(event, 0);
+    });
+
+    return () => {
+      show.remove();
+      changeFrame.remove();
+      hide.remove();
+    };
   }, [isIos]);
-  const handleFrameLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      frameLocalY.current = event.nativeEvent.layout.y;
-      measureKeyboardOffset();
-    },
-    [measureKeyboardOffset],
-  );
+
+  // iPhone sheets and full-screen entries share the bottom edge; the footer reserves pb-safe.
+  const paddingBottom = startFrameKeyboardPadding(Platform.OS, keyboardHeight, bottom);
 
   return (
     <View
-      ref={frameContainerRef}
-      onLayout={measureKeyboardOffset}
       className={
         isWeb ? "flex-1 items-center justify-center bg-canvas px-6 py-6" : "flex-1 bg-canvas"
       }
     >
-      <KeyboardAvoidingView
-        behavior={isIos ? "padding" : undefined}
+      <View
         className={
           isWeb
             ? `flex-1 w-full max-w-[620px] overflow-hidden rounded-card border-border bg-canvas ${topInsetClass}`
             : `flex-1 bg-canvas ${topInsetClass}`
         }
-        keyboardVerticalOffset={keyboardVerticalOffset}
-        onLayout={handleFrameLayout}
-        style={isWeb ? { borderWidth: HAIRLINE, maxHeight: 900 } : undefined}
+        style={
+          isWeb ? { borderWidth: HAIRLINE, maxHeight: 900 } : isIos ? { paddingBottom } : undefined
+        }
       >
         {children}
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
