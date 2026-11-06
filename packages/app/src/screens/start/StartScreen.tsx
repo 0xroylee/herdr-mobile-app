@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Keyboard,
-  type KeyboardEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -34,7 +33,8 @@ import { Banner } from "../../ui/components/Banner.tsx";
 import { buttonClasses, HAIRLINE } from "../../ui/components/classes.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
 import { Spinner } from "../../ui/components/Spinner.tsx";
-import { modalFrameTopInsetClass, startFrameKeyboardPadding } from "../../ui/modal-frame.ts";
+import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
+import { createStartKeyboardTracker } from "../../ui/start-keyboard.ts";
 import { Text } from "../../ui/text.tsx";
 import { createNewTab } from "../spaces/newItems.ts";
 import { RunList } from "./RunList.tsx";
@@ -393,40 +393,22 @@ function StartFrame({ children, isPageSheet }: { children: ReactNode; isPageShee
   const isIos = Platform.OS === "ios";
   const { bottom } = useSafeAreaInsets();
   const topInsetClass = modalFrameTopInsetClass(Platform.OS, isPageSheet);
-  const [keyboardHeight, setKeyboardHeight] = useState(() =>
-    isIos ? (Keyboard.metrics()?.height ?? 0) : 0,
+  // iPhone sheets and full-screen entries share the bottom edge; the footer reserves pb-safe.
+  const [paddingBottom, setPaddingBottom] = useState(0);
+  const [keyboardTracker] = useState(() =>
+    createStartKeyboardTracker(Keyboard, bottom, (padding, animationEvent) => {
+      if (animationEvent) Keyboard.scheduleLayoutAnimation(animationEvent);
+      setPaddingBottom(padding);
+    }),
   );
 
   useEffect(() => {
-    if (!isIos) return;
+    keyboardTracker.setBottomInset(bottom);
+  }, [bottom, keyboardTracker]);
 
-    let keyboardVisible = Keyboard.isVisible();
-    const updateHeight = (event: KeyboardEvent, height: number) => {
-      Keyboard.scheduleLayoutAnimation(event);
-      setKeyboardHeight(height);
-    };
-    const show = Keyboard.addListener("keyboardWillShow", (event) => {
-      keyboardVisible = true;
-      updateHeight(event, event.endCoordinates.height);
-    });
-    const changeFrame = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
-      // A dismissal can also send a frame event with the keyboard's nonzero height.
-      if (keyboardVisible) updateHeight(event, event.endCoordinates.height);
-    });
-    const hide = Keyboard.addListener("keyboardWillHide", (event) => {
-      keyboardVisible = false;
-      updateHeight(event, 0);
-    });
-
-    return () => {
-      show.remove();
-      changeFrame.remove();
-      hide.remove();
-    };
-  }, [isIos]);
-
-  // iPhone sheets and full-screen entries share the bottom edge; the footer reserves pb-safe.
-  const paddingBottom = startFrameKeyboardPadding(Platform.OS, keyboardHeight, bottom);
+  useEffect(() => {
+    if (isIos) return keyboardTracker.subscribe();
+  }, [isIos, keyboardTracker]);
 
   return (
     <View
