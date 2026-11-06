@@ -246,18 +246,18 @@ Keys are hidden while watching an agent that is not yours to type into; they sho
 
 ### `Composer`
 
-A `surface` field with a hairline and radius `field`, 9 padding (15 on the left), above the home indicator. Placeholder in `body` `dim`: `Message Claude Code…`, with the program's name. The send button is a 32 circle in `solid` with `arrow-up` 17 at stroke 2.2 in `solid-fg`, disabled at 40 % opacity while the field is empty. Send uses `terminal.send`. While sending, the button shows the spinner in `solid-fg`; then the field clears and a Sent line appears above it in `subhead`: `Sent · waiting for Claude Code`.
+A `surface` field with a hairline and radius `field`, 9 padding (15 on the left), above the home indicator. Placeholder in `body` `dim`: `Message Claude Code…`, with the program's name. When options are offered, the placeholder changes to `Type an option number…`. Other text stays in the field and shows `Tap an option above, or type its number.` in `subhead` `dim`. A number for the same menu is refused while its answer is pending or Sent; the composer shows `An answer for this menu is already being sent.` or `This menu has already been answered.` A changed menu accepts a new answer. The send button is a 32 circle in `solid` with `arrow-up` 17 at stroke 2.2 in `solid-fg`, disabled at 40 % opacity while the field is empty. Ordinary sends use `terminal.send`. While sending, the button shows the spinner in `solid-fg`; then the field clears and a Sent line appears above it in `subhead`: `Sent · waiting for Claude Code`.
 
 ### `PromptCard`
 
-Shown when a blocked agent's question is one the app recognizes. `prompt-bg` background, `prompt-border` hairline, radius `card`, 13 × 14 padding, 10 from the screen edges.
+Shown when Claude Code or Codex has an unambiguous numbered menu on screen, even without a status report. A `working` status hides it. `prompt-bg` background, `prompt-border` hairline, radius `card`, 13 × 14 padding, 10 from the screen edges.
 
 1. Header line, `subhead`: the `blocked` pill, the program name, and the time on the right.
 2. The question in `headline`, wrapped.
 3. Optional detail in `mono` 11.5: the file and its change, such as `docs/nav.md · +3 −1`.
-4. Buttons, 8 apart, wrapping: the first choice as `Button solid`, the others as `Button outline`. Each sends that choice's keys.
+4. A `ListGroup` of full-width rows, minimum height 44, with a numbered `mono` `dim` index and the wrapped choice label in `body`. The group scrolls inside the card at a maximum height of 40% of the window. A control device also gets `Type instead` in the header. It hides the rows for this menu and restores the ordinary composer. A watch device sees disabled rows and no `Type instead` button.
 
-After a tap the buttons give way to the Sent state. If the question isn't recognized, no card shows; the composer's placeholder becomes `Answer Claude Code…`.
+After a tap the rows give way to the Sent state. A typed option number sends the same keys as a tap. Other text stays in the composer with the hint above it. If the menu isn't recognized, no card shows. A blocked status keeps the composer's placeholder `Answer Claude Code…`.
 
 ### `StartForm`
 
@@ -334,7 +334,7 @@ Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Pap
 - **Order.** Priority view: Needs you, Done, Working, Idle; within a section, the most recent state change first. By-space view: spaces in the `herdr-app` document's order, agents in tab order.
 - **Seen.** Done means it finished while nobody looked. Opening the agent on the phone shows it as idle from then on, until its next turn. The phone keeps this per terminal and turn in the kv store under `seen.<machine>.<terminal>`.
 - **Watching.** Every attach is `observe: true`. Take over asks first, then attaches without `observe`, which makes the phone the active viewer and resizes the Mac's terminal to the phone.
-- **Sending.** The composer uses `terminal.send`, which pastes and presses Enter once nobody has typed for about 3 s. Keys use `terminal.keys`.
+- **Sending.** Ordinary composer text uses `terminal.send`, which pastes and presses Enter once nobody has typed for about 3 s. A menu choice, whether tapped or typed as its number, uses `terminal.keys` and never `terminal.send`; the same prompt key guards pending and Sent answers. Key bar input also uses `terminal.keys`.
 - **Spaces.** Read from the `herdr-app` document with `doc.get`, falling back to the `herdr.space` and `herdr.tab` labels. The Spaces header `+` and `Empty tab` still use `herdr-app do` on the Mac, so they need Herdr running there; say so under the list. Agent starts support both window states: use `herdr-app do` when Herdr is open, and `terminal.run` with the `herdr.space` and `herdr.tab` labels when it is closed.
 - **Offline.** Keep the last snapshot on screen, dimmed to 60 %, with the `Banner`. Never show a stale state as live.
 

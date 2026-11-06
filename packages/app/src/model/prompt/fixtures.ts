@@ -24,6 +24,11 @@ export const mockupClaudePrompt: PromptFixture = {
   ],
 };
 
+export const menuWithoutStatus = {
+  status: undefined,
+  screen: mockupClaudePrompt.screen,
+};
+
 // Representative Claude Code file approval dialog from its terminal permission menu; capture on the first native run is still pending.
 export const claudeCodeApprovalPrompt: PromptFixture = {
   status: { state: "blocked", kind: "permission", app: "claude" },
@@ -51,6 +56,16 @@ export const codexCommandApprovalPrompt: PromptFixture = {
     "  3. No, and tell Codex what to do differently",
   ],
 };
+
+export const codexMenuWithoutStatus = {
+  status: null,
+  screen: codexCommandApprovalPrompt.screen,
+};
+
+export const blockedWithoutApp = {
+  status: { state: "blocked", kind: "permission" },
+  screen: codexCommandApprovalPrompt.screen,
+} as const;
 
 export const mockupClaudePromptWithMsg: PromptFixture = {
   status: { ...mockupClaudePrompt.status, msg: "May I edit nav.md?" },

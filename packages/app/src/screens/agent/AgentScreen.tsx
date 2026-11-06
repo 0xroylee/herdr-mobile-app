@@ -21,6 +21,7 @@ import {
 } from "./actions.ts";
 import { createAgentActionPort } from "./agent-effects.ts";
 import { Composer } from "./Composer.tsx";
+import { promptAnswerBlockNotice, routeComposerText } from "./composer-routing.ts";
 import { KeyBar } from "./KeyBar.tsx";
 import { MoreMenu } from "./MoreMenu.tsx";
 import { PromptCard } from "./PromptCard.tsx";
@@ -62,6 +63,11 @@ export function AgentScreen({
   const [fit, setFit] = useState<TerminalFit | undefined>(undefined);
   const fitRef = useRef<TerminalFit | undefined>(undefined);
   const [moreVisible, setMoreVisible] = useState(false);
+  const [dismissedKey, setDismissedKey] = useState<string | undefined>();
+  const [answeredKey, setAnsweredKey] = useState<string | undefined>();
+  const answeringPromptKeyRef = useRef<string | undefined>(undefined);
+  const answeredPromptKeyRef = useRef<string | undefined>(undefined);
+  const [composerNotice, setComposerNotice] = useState<string | undefined>();
   const [startedNotice, setStartedNotice] = useState(() =>
     startedPlacement ? startPlacementNotice(startedPlacement) : undefined,
   );
@@ -87,13 +93,26 @@ export function AgentScreen({
         activeId,
         machine,
         machineCore,
+        dismissedPromptKey: dismissedKey,
         seen,
         now,
         snapshot: attachment.snapshot,
         attachment,
       }),
-    [activeId, address, attachment, machine, machineCore, now, seen],
+    [activeId, address, attachment, dismissedKey, machine, machineCore, now, seen],
   );
+
+  useEffect(() => {
+    setDismissedKey((currentKey) => (currentKey === view.promptKey ? currentKey : undefined));
+    setComposerNotice(undefined);
+  }, [view.promptKey]);
+
+  useEffect(() => {
+    if (sent.sent) return;
+    answeredPromptKeyRef.current = undefined;
+    setAnsweredKey(undefined);
+  }, [sent.sent]);
+
   const port = useMemo<AgentActionPort>(
     () => createAgentActionPort(manager, { takeOver: attachmentTakeOver }),
     [attachmentTakeOver, manager],
@@ -150,23 +169,68 @@ export function AgentScreen({
     }
   }, [autoTakeover, fit, requestTakeover, runTakeOver, view.canControl, view.connected]);
 
-  const submitMessage = useCallback(
-    async (text: string): Promise<boolean> => {
-      const result = await actionController.run(() =>
-        sendMessage(port, address, text, view.state === "blocked"),
-      );
-      if (!result.ok || !result.value) return false;
-      sent.markSent();
-      return true;
+  const submitPromptAnswer = useCallback(
+    async (keys: readonly string[], key = view.promptKey): Promise<boolean> => {
+      if (key === undefined) return false;
+      const notice = promptAnswerBlockNotice(key, {
+        pendingPromptKey: answeringPromptKeyRef.current,
+        sentPromptKey: answeredPromptKeyRef.current,
+      });
+      if (notice !== undefined) {
+        setComposerNotice(notice);
+        return false;
+      }
+
+      answeringPromptKeyRef.current = key;
+      try {
+        if (!(await answerPrompt(keys))) return false;
+        answeredPromptKeyRef.current = key;
+        setAnsweredKey(key);
+        setComposerNotice(undefined);
+        sent.markSent();
+        return true;
+      } finally {
+        if (answeringPromptKeyRef.current === key) answeringPromptKeyRef.current = undefined;
+      }
     },
-    [actionController.run, address, port, sent, view.state],
+    [answerPrompt, sent, view.promptKey],
   );
 
-  const submitPromptAnswer = useCallback(
-    async (keys: readonly string[]) => {
-      if (await answerPrompt(keys)) sent.markSent();
+  const submitMessage = useCallback(
+    async (text: string): Promise<boolean> => {
+      const route = routeComposerText(text, view.prompt, view.optionsOffered, {
+        pendingPromptKey: answeringPromptKeyRef.current,
+        sentPromptKey: answeredPromptKeyRef.current,
+      });
+      if (route.kind === "refuse") {
+        setComposerNotice(route.notice);
+        return false;
+      }
+
+      if (route.kind === "answer") return submitPromptAnswer(route.keys, view.promptKey);
+
+      if (route.kind === "send") {
+        const result = await actionController.run(() =>
+          sendMessage(port, address, text, view.state === "blocked"),
+        );
+        if (!result.ok || !result.value) return false;
+        setComposerNotice(undefined);
+        sent.markSent();
+        return true;
+      }
+      return false;
     },
-    [answerPrompt, sent],
+    [
+      actionController.run,
+      address,
+      port,
+      sent,
+      submitPromptAnswer,
+      view.optionsOffered,
+      view.prompt,
+      view.promptKey,
+      view.state,
+    ],
   );
 
   const runInterrupt = () => void actionController.run(() => interruptAgent(port, address));
@@ -250,7 +314,12 @@ export function AgentScreen({
           program={view.program.name}
           prompt={view.prompt}
           readOnly={!view.showPromptChoices}
-          sent={sent.sent}
+          optionsOffered={view.optionsOffered}
+          onDismiss={() => {
+            setDismissedKey(view.promptKey);
+            setComposerNotice(undefined);
+          }}
+          sent={sent.sent && answeredKey === view.promptKey}
         />
       ) : null}
 
@@ -260,6 +329,7 @@ export function AgentScreen({
       <Composer
         disabled={view.disabled}
         error={actionController.error ?? attachment.error}
+        notice={composerNotice}
         onSend={submitMessage}
         placeholder={view.placeholder}
         program={view.program.name}

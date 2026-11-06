@@ -26,19 +26,18 @@ export interface ProgramAdapter {
 const MAX_QUESTION_CHARS = 300;
 const adapters: readonly ProgramAdapter[] = [claudeAdapter, codexAdapter];
 
-/** Recognize the active program's supported blocked dialog, if any. */
+/** Recognize the active program's supported numbered menu, if any. */
 export function recognizePrompt(
   status: Status | null | undefined,
   screen: readonly string[],
+  program: string,
 ): Prompt | undefined {
-  if (status?.state !== "blocked") return undefined;
-  const adapter = adapters.find(({ matches }) => matches(status.app ?? ""));
-  if (adapter === undefined) return undefined;
-
   const dialog = readScreen(screen);
   if (dialog === undefined) return undefined;
+  const adapter = adapters.find(({ matches }) => matches(program));
+  if (adapter === undefined || status?.state === "working") return undefined;
 
-  const question = programQuestion(status);
+  const question = status?.state === "blocked" ? programQuestion(status) : undefined;
   const fallback = dialog.question ?? (adapter.acceptsStatement ? dialog.statement : undefined);
   const acceptedFallback =
     fallback !== undefined && fallback.length <= MAX_QUESTION_CHARS && adapter.isApproval(fallback)
@@ -51,10 +50,18 @@ export function recognizePrompt(
   }));
 
   const detail = adapter.detail?.(dialog.context);
-  const promptQuestion = question ?? acceptedFallback ?? neutralQuestion(adapter.name, status.kind);
+  const promptQuestion =
+    question ??
+    acceptedFallback ??
+    neutralQuestion(adapter.name, status?.state === "blocked" ? status.kind : undefined);
   return detail === undefined
     ? { question: promptQuestion, choices }
     : { question: promptQuestion, detail, choices };
+}
+
+/** Identifies a menu independently of the currently highlighted row. */
+export function promptKey(prompt: Prompt): string {
+  return [prompt.question, ...prompt.choices.map(({ label }) => label)].join("\u0000");
 }
 
 function programQuestion(status: Status): string | undefined {

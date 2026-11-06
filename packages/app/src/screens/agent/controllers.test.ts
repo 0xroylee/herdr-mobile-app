@@ -2,7 +2,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Terminal } from "@herdr-mobile/protocol";
+import { type Prompt, promptKey } from "../../model/prompt.ts";
+import type { ScreenSnapshot } from "../../terminal/snapshot.ts";
 import { ComposerController } from "./composer-controller.ts";
+import { routeComposerText } from "./composer-routing.ts";
+import { KeyQueue } from "./key-queue.ts";
+import { PromptAnswer } from "./prompt-answer.ts";
 import {
   AgentActionController,
   AutoTakeoverController,
@@ -50,6 +55,15 @@ function finishedScreen(details: Partial<Terminal> = {}, phase: "closed" | "conn
     },
     attachment: { mode: "watching", phase },
   });
+}
+
+function screenSnapshot(lines: readonly string[]): ScreenSnapshot {
+  const color = { kind: "default" } as const;
+  return {
+    cols: 80,
+    rows: lines.map((text) => [{ text, fg: color, bg: color, bold: false, inverse: false }]),
+    cursor: { x: 0, y: 0, visible: true },
+  };
 }
 
 describe("agent screen controllers", () => {
@@ -150,6 +164,84 @@ describe("agent screen controllers", () => {
     expect(view.subtitle).toBe("Other · Mac");
   });
 
+  test("offers recognized menu choices only on control devices and honors dismissal", () => {
+    const lines = [
+      "Edit docs/nav.md",
+      "  + - API",
+      "  +   - Authentication",
+      "  +   - Rate limits",
+      "╭────────────────────────────────────────╮",
+      "│ Do you want to make this edit to       │",
+      "│ nav.md?                                │",
+      "│ ❯ 1. Yes                               │",
+      "│   2. Yes, and don't ask again this     │",
+      "│      session                           │",
+      "│   3. No, and tell Claude what to do    │",
+      "╰────────────────────────────────────────╯",
+    ];
+    const selectPrompt = (
+      role: "control" | "watch",
+      status?: Terminal["status"],
+      dismissedPromptKey?: string,
+    ) => {
+      const terminal: Terminal = {
+        address: "t7",
+        argv: ["claude"],
+        cols: 80,
+        created_ms: 100,
+        cwd: "/work",
+        labels: {},
+        rows: 24,
+        screen: "exact",
+        state: "live",
+        status,
+      };
+      return selectAgentScreen({
+        address: "t7",
+        activeId: "machine-1",
+        machine: {
+          id: "machine-1",
+          name: "Mac",
+          url: "https://machine.example.ts.net",
+          role,
+          deviceId: "phone",
+        },
+        machineCore: {
+          connection: "connected",
+          terminals: { t7: terminal },
+          layout: undefined,
+          snapshotAt: 100,
+        },
+        dismissedPromptKey,
+        seen: {},
+        now: 100,
+        snapshot: screenSnapshot(lines),
+        attachment: { mode: "watching", phase: "connected" },
+      });
+    };
+
+    const control = selectPrompt("control");
+    expect(control.prompt?.choices).toEqual([
+      { label: "Yes", keys: ["enter"] },
+      { label: "Yes, and don't ask again this session", keys: ["down", "enter"] },
+      { label: "No, and tell Claude what to do", keys: ["down", "down", "enter"] },
+    ]);
+    expect(control.promptKey).toBeDefined();
+    expect(control.optionsOffered).toBe(true);
+    expect(control.placeholder).toBe("Type an option number…");
+
+    const watch = selectPrompt("watch");
+    expect(watch.prompt).toBeDefined();
+    expect(watch.showPromptChoices).toBe(false);
+    expect(watch.optionsOffered).toBe(false);
+
+    expect(selectPrompt("control", { state: "working" }).prompt).toBeUndefined();
+
+    const dismissed = selectPrompt("control", undefined, control.promptKey);
+    expect(dismissed.optionsOffered).toBe(false);
+    expect(dismissed.placeholder).toBeUndefined();
+  });
+
   test("reports the exit code when a finished terminal stream closes", () => {
     expect(finishedScreen({ exit_code: 0, signal: 15 }).bannerMessage).toBe(
       "The program exited with code 0.",
@@ -242,6 +334,80 @@ describe("composer controller", () => {
 
     expect(await controller.submit(false, async () => true)).toBe(true);
     expect(controller.getSnapshot()).toEqual({ value: "", pending: false });
+  });
+
+  test("sends a numeric answer once during Sent and allows a changed prompt", async () => {
+    const firstPrompt: Prompt = {
+      question: "Choose one",
+      choices: [
+        { label: "First", keys: ["up", "enter"] },
+        { label: "Second", keys: ["down", "enter"] },
+      ],
+    };
+    const nextPrompt: Prompt = {
+      question: "Choose another one",
+      choices: firstPrompt.choices,
+    };
+    const composer = new ComposerController();
+    const promptAnswer = new PromptAnswer(new KeyQueue());
+    const sent = new SentController();
+    const sentKeys: string[][] = [];
+    let answeringKey: string | undefined;
+    let answeredKey: string | undefined;
+    let pasteCount = 0;
+    let notice: string | undefined;
+
+    const submit = (prompt: Prompt) =>
+      composer.submit(false, async (text) => {
+        const key = promptKey(prompt);
+        const route = routeComposerText(text, prompt, true, {
+          pendingPromptKey: answeringKey,
+          sentPromptKey: answeredKey,
+        });
+        if (route.kind === "refuse") {
+          notice = route.notice;
+          return false;
+        }
+        if (route.kind === "send") {
+          pasteCount += 1;
+          return true;
+        }
+
+        answeringKey = key;
+        try {
+          const accepted = await promptAnswer.answer(route.keys, async (keys) => {
+            sentKeys.push([...keys]);
+            return true;
+          });
+          if (!accepted) return false;
+          answeredKey = key;
+          sent.mark({ state: "blocked" }, 1_500 + sentKeys.length);
+          return true;
+        } finally {
+          answeringKey = undefined;
+        }
+      });
+
+    composer.setValue("2");
+    expect(await submit(firstPrompt)).toBe(true);
+    expect(sent.getSnapshot()).toEqual({ sentAt: 1_501 });
+    expect(sentKeys).toEqual([["down", "enter"]]);
+
+    composer.setValue("2");
+    expect(await submit(firstPrompt)).toBe(false);
+    expect(composer.getSnapshot()).toEqual({ value: "2", pending: false });
+    expect(notice).toBe("This menu has already been answered.");
+    expect(sentKeys).toEqual([["down", "enter"]]);
+    expect(pasteCount).toBe(0);
+
+    expect(promptKey(nextPrompt)).not.toBe(promptKey(firstPrompt));
+    expect(await submit(nextPrompt)).toBe(true);
+    expect(sentKeys).toEqual([
+      ["down", "enter"],
+      ["down", "enter"],
+    ]);
+    expect(sent.getSnapshot()).toEqual({ sentAt: 1_502 });
+    expect(pasteCount).toBe(0);
   });
 });
 
