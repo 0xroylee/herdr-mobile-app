@@ -2,7 +2,7 @@ import type { Status } from "@herdr-mobile/protocol";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { type AgentRow, deriveAgents } from "../../model/agents.ts";
 import { getProgram, type ProgramInfo } from "../../model/program.ts";
-import { type Prompt, recognizePrompt } from "../../model/prompt.ts";
+import { promptKey as getPromptKey, type Prompt, recognizePrompt } from "../../model/prompt.ts";
 import { isSeen, type SeenState } from "../../model/seen.ts";
 import { type EffectiveState, effectiveState } from "../../model/status.ts";
 import { formatAge } from "../../model/time.ts";
@@ -36,6 +36,7 @@ export interface AgentScreenSelectionInput {
   activeId: string | null;
   machine?: Machine;
   machineCore?: MachineCoreState;
+  dismissedPromptKey?: string;
   seen: SeenState;
   now: number;
   snapshot: ScreenSnapshot;
@@ -57,6 +58,8 @@ export interface AgentScreenSelection extends AgentCapabilities {
   title: string;
   subtitle: string;
   prompt: Prompt | undefined;
+  promptKey: string | undefined;
+  optionsOffered: boolean;
   age: string;
   connected: boolean;
   showBanner: boolean;
@@ -67,7 +70,17 @@ export interface AgentScreenSelection extends AgentCapabilities {
 }
 
 export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreenSelection {
-  const { address, activeId, machine, machineCore, seen, now, snapshot, attachment } = input;
+  const {
+    address,
+    activeId,
+    machine,
+    machineCore,
+    seen,
+    now,
+    snapshot,
+    attachment,
+    dismissedPromptKey,
+  } = input;
   const terminal = selectTerminal(machineCore, address);
   const agentRow = selectAgentRow(machineCore, seen, activeId, address, now);
   const capabilities = selectAgentCapabilities(machine?.role);
@@ -87,7 +100,10 @@ export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreen
     [agentRow?.space ?? terminal?.labels["herdr.space"]?.trim(), machine?.name]
       .filter((part): part is string => Boolean(part))
       .join(" · ") || "Connecting";
-  const prompt = recognizePrompt(terminal?.status, screenTextRows(snapshot));
+  const prompt = recognizePrompt(terminal?.status, screenTextRows(snapshot), program.name);
+  const promptKey = prompt === undefined ? undefined : getPromptKey(prompt);
+  const optionsOffered =
+    prompt !== undefined && capabilities.showPromptChoices && promptKey !== dismissedPromptKey;
   const age =
     agentRow?.age ??
     formatAge(terminal?.status_ms ?? terminal?.finished_ms ?? terminal?.created_ms, now);
@@ -111,8 +127,11 @@ export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreen
         : reconnecting
           ? `Reconnecting to ${machine?.name ?? "machine"}…`
           : "Can't reach the bridge. Check that Tailscale is on.";
-  const placeholder =
-    terminal?.status?.state === "blocked" && !prompt ? `Answer ${program.name}…` : undefined;
+  const placeholder = optionsOffered
+    ? "Type an option number…"
+    : terminal?.status?.state === "blocked" && !prompt
+      ? `Answer ${program.name}…`
+      : undefined;
 
   return {
     ...capabilities,
@@ -123,6 +142,8 @@ export function selectAgentScreen(input: AgentScreenSelectionInput): AgentScreen
     title,
     subtitle,
     prompt,
+    promptKey,
+    optionsOffered,
     age,
     connected,
     showBanner,

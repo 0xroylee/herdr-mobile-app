@@ -50,6 +50,42 @@ No simulator, physical device or browser run has been completed for this build. 
 - [ ] Open the app on the test device and connect to the bridge. Confirm the connection is Connected and the Agents screen is empty before anything runs in this scratch core. If agents already appear, stop the smoke run and do not interact with them. This first check uses the wrapper's fresh session and does not inspect the default core.
 - [ ] Space and tab creation are pending until an isolated `herdr-app` target is verified. The current app actions use the bridge's full environment and have no isolated target. Do not create a space or tab against the user's Herdr window.
 
+## Your Mac: Herdr window and real agents
+
+Run these checks yourself on your Mac with your own Herdr window, installed agents and phone. They
+start real terminals and change your Herdr spaces. They are separate from the isolated run above.
+Use a control device, keep the bridge log open, and choose folders under home or a configured
+`--run-root`.
+
+- [ ] With Herdr open, start Claude Code with a short first message in an existing space. Confirm
+  that Herdr adds a tab to that space with the selected folder, and that the message reaches Claude
+  through Herdr's own delivery. Confirm that the app opens the agent screen or Spaces according to
+  the reply.
+- [ ] With Herdr open, start a configured interactive program in a new space and choose a folder.
+  Confirm the new space and tab appear in Herdr with that folder. If you enter a first message,
+  confirm Herdr delivers it. Confirm that the app opens the agent screen or Spaces according to the
+  reply.
+- [ ] For both open-window starts, note whether the bridge calls `herdr-app do tab.new` or
+  `herdr-app do space.new`. If you can safely capture the child stdout, record what its JSON output
+  contains. Compare any returned space, tab and address ids with the matching `Agent started` line
+  and what Herdr shows. The bridge captures the command's output rather than echoing it, so the
+  normal bridge log does not show the raw JSON.
+- [ ] Close Herdr. Start Codex without a first message. Confirm that the phone opens its agent screen
+  and says `Started in herdr-core. Herdr shows it when it opens.`
+- [ ] With Herdr still closed, try a built-in program with a first message. Confirm that it is
+  refused with `First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the
+  message empty.` and that the message remains in the form.
+- [ ] Open Herdr. Find the Codex terminal in the space and tab named by its `herdr.space` and
+  `herdr.tab` labels. Compare those ids with its `Agent started` line.
+- [ ] With Herdr closed, start one template from `~/.config/herdr-core/templates` without a first
+  message, then start a template with a first message. Confirm both start and that herdr-core
+  delivers the latter through the template's first-message path.
+- [ ] On a watch device, confirm there is no Start action in Agents or Spaces. Open `/start` directly
+  and confirm it shows `This device is read-only. Starting agents is available on control devices.`
+- [ ] Check the bridge log. Each successful start should have one `Agent started` line. Confirm the
+  lines contain no first-message text or device token. A refused start should not add an
+  `Agent started` line.
+
 ## iOS and Android simulator
 
 Repeat these checks on both simulators.
