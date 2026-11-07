@@ -3,7 +3,16 @@ import * as Haptics from "expo-haptics";
 import { type Href, useRouter } from "expo-router";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
 import { deriveSpaces } from "../../model/spaces.ts";
@@ -24,6 +33,8 @@ import { Banner } from "../../ui/components/Banner.tsx";
 import { buttonClasses, HAIRLINE } from "../../ui/components/classes.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
 import { Spinner } from "../../ui/components/Spinner.tsx";
+import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
+import { createStartKeyboardTracker } from "../../ui/start-keyboard.ts";
 import { Text } from "../../ui/text.tsx";
 import { createNewTab } from "../spaces/newItems.ts";
 import { RunList } from "./RunList.tsx";
@@ -40,6 +51,7 @@ export interface StartScreenProps {
 
 export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const router = useRouter();
+  const isPageSheet = Platform.OS === "ios" && router.canGoBack();
   const activeId = useStore(machinesStore, (state) => state.activeId);
   const machine = useStore(machinesStore, (state) =>
     activeId === null ? undefined : state.machines[activeId],
@@ -190,7 +202,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
 
   if (access.readOnly) {
     return (
-      <StartFrame>
+      <StartFrame isPageSheet={isPageSheet}>
         <View className="flex-1 px-3.5">
           <StartHeader onCancel={() => router.back()} />
           <View className="flex-1 items-center justify-center px-6">
@@ -230,7 +242,7 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     emptyUnavailable;
 
   return (
-    <StartFrame>
+    <StartFrame isPageSheet={isPageSheet}>
       <View className="px-3.5">
         <StartHeader onCancel={() => router.back()} />
       </View>
@@ -376,8 +388,28 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   );
 }
 
-function StartFrame({ children }: { children: ReactNode }) {
+function StartFrame({ children, isPageSheet }: { children: ReactNode; isPageSheet: boolean }) {
   const isWeb = Platform.OS === "web";
+  const isIos = Platform.OS === "ios";
+  const { bottom } = useSafeAreaInsets();
+  const topInsetClass = modalFrameTopInsetClass(Platform.OS, isPageSheet);
+  // iPhone sheets and full-screen entries share the bottom edge; the footer reserves pb-safe.
+  const [paddingBottom, setPaddingBottom] = useState(0);
+  const [keyboardTracker] = useState(() =>
+    createStartKeyboardTracker(Keyboard, bottom, (padding, animationEvent) => {
+      if (animationEvent) Keyboard.scheduleLayoutAnimation(animationEvent);
+      setPaddingBottom(padding);
+    }),
+  );
+
+  useEffect(() => {
+    keyboardTracker.setBottomInset(bottom);
+  }, [bottom, keyboardTracker]);
+
+  useEffect(() => {
+    if (isIos) return keyboardTracker.subscribe();
+  }, [isIos, keyboardTracker]);
+
   return (
     <View
       className={
@@ -387,10 +419,12 @@ function StartFrame({ children }: { children: ReactNode }) {
       <View
         className={
           isWeb
-            ? "flex-1 w-full max-w-[620px] overflow-hidden rounded-card border-border bg-canvas pt-safe"
-            : "flex-1 bg-canvas pt-safe"
+            ? `flex-1 w-full max-w-[620px] overflow-hidden rounded-card border-border bg-canvas ${topInsetClass}`
+            : `flex-1 bg-canvas ${topInsetClass}`
         }
-        style={isWeb ? { borderWidth: HAIRLINE, maxHeight: 900 } : undefined}
+        style={
+          isWeb ? { borderWidth: HAIRLINE, maxHeight: 900 } : isIos ? { paddingBottom } : undefined
+        }
       >
         {children}
       </View>

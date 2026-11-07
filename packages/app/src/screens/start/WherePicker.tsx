@@ -1,10 +1,11 @@
 import type { StartAgentSpace } from "@herdr-mobile/protocol";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import type { FolderSuggestion, StartSpaceChoice } from "../../model/startAgent.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
 import { ListGroup } from "../../ui/components/ListGroup.tsx";
 import { Icon } from "../../ui/icon.tsx";
+import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
 import { Text } from "../../ui/text.tsx";
 import { FolderPicker } from "./FolderPicker.tsx";
 
@@ -88,7 +89,7 @@ export function WherePicker({
         presentationStyle="pageSheet"
         visible={spacePickerVisible}
       >
-        <View className="flex-1 bg-canvas px-3.5 pt-safe">
+        <View className={`flex-1 bg-canvas px-3.5 ${modalFrameTopInsetClass(Platform.OS)}`}>
           <View className="flex-row items-center pb-2.5">
             <IconButton
               accessibilityLabel="Close space picker"

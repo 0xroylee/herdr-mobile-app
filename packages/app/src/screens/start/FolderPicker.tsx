@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useCSSVariable } from "uniwind";
 import type { FolderSuggestion } from "../../model/startAgent.ts";
 import { shortenHomeFolder } from "../../terminal/folder.ts";
@@ -9,6 +9,7 @@ import { IconButton } from "../../ui/components/IconButton.tsx";
 import { ListGroup } from "../../ui/components/ListGroup.tsx";
 import { Tag } from "../../ui/components/Tag.tsx";
 import { Icon } from "../../ui/icon.tsx";
+import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
 import { Text } from "../../ui/text.tsx";
 
 const rowClasses = {
@@ -94,7 +95,7 @@ export function FolderPicker({
         presentationStyle="pageSheet"
         visible={visible}
       >
-        <View className="flex-1 bg-canvas px-3.5 pt-safe">
+        <View className={`flex-1 bg-canvas px-3.5 ${modalFrameTopInsetClass(Platform.OS)}`}>
           <View className="flex-row items-center pb-2.5">
             <IconButton
               accessibilityLabel="Close folder picker"
@@ -103,7 +104,12 @@ export function FolderPicker({
             />
             <Text variant="title">Choose folder</Text>
           </View>
-          <ScrollView className="flex-1" contentContainerClassName="gap-3 pb-5">
+          <ScrollView
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+            className="flex-1"
+            contentContainerClassName="gap-3 pb-5"
+            keyboardShouldPersistTaps="handled"
+          >
             {suggestions.length > 0 ? (
               <ListGroup>
                 {suggestions.map((suggestion) => {

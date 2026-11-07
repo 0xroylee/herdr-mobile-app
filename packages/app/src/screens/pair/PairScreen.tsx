@@ -49,7 +49,11 @@ export function PairScreen() {
   }, [router, state.paired]);
 
   return (
-    <ScrollView className="flex-1 bg-canvas" keyboardShouldPersistTaps="handled">
+    <ScrollView
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      className="flex-1 bg-canvas"
+      keyboardShouldPersistTaps="handled"
+    >
       <View className="gap-5 px-3.5 pb-8 pt-safe">
         <View className="gap-2 pt-3">
           <Text variant="pairTitle">Connect to your Mac</Text>
