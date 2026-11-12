@@ -28,7 +28,7 @@ flowchart LR
     end
     cli["herdr-bridge CLI"]
     hc["hc connect"]
-    core["herdr-core"]
+    core["herdr-core 0.1.17"]
     herdr["herdr-app CLI and window"]
   end
 

@@ -29,7 +29,7 @@ export const STAGE_MS = 10_000;
 export const WORKFLOW_MS = 30_000;
 export const CLEANUP_MS = 10_000;
 /** The hc version the schema in packages/protocol is pinned to. */
-export const PINNED_VERSION = "0.1.16";
+export const PINNED_VERSION = "0.1.17";
 /** Marks the fixture as this run's. */
 export const RUN_LABEL = "herdr-mobile.prototype";
 const COLS = 80;
