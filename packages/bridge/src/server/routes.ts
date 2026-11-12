@@ -1,5 +1,6 @@
 import type {
   BridgeMachine,
+  BridgeRoutes,
   DeviceRecordView,
   HttpErrorBody,
   PairReply,
@@ -17,6 +18,8 @@ export interface ApiContext {
   devices: DeviceStore;
   pairing: PairingCodes;
   machine: BridgeMachine;
+  routes?: () => BridgeRoutes;
+  bridgeKey?: () => string;
 }
 
 function json<T>(value: T, status = 200): Response {
@@ -82,6 +85,10 @@ export async function handleApi(request: Request, ctx: ApiContext): Promise<Resp
     }
     if (!isPairRequest(body)) return failure(400, "bad_request");
 
+    const routes = ctx.routes?.();
+    const bridgeKey = ctx.bridgeKey?.();
+    if (!routes || !bridgeKey) return failure(500, "bridge_identity_unavailable");
+
     const grant = ctx.pairing.redeem(body.code);
     if (!grant) return failure(400, "bad_code");
     const token = createToken();
@@ -96,6 +103,8 @@ export async function handleApi(request: Request, ctx: ApiContext): Promise<Resp
       token,
       role: grant.role,
       machine: ctx.machine,
+      routes,
+      bridgeKey,
     };
     return json(reply, 201);
   }

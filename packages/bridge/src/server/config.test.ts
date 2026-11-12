@@ -172,7 +172,52 @@ describe("bridge config", () => {
     ).toThrow("--run-program");
     expect(() =>
       parseServeFlags(["--owner", "owner", "--public-url", "http://example.com"], "/repo"),
-    ).toThrow("HTTPS");
+    ).toThrow("loopback");
+  });
+
+  test("accepts loopback-only HTTP direct origins and private-network HTTP secure origins", async () => {
+    const config = await createBridgeConfig(
+      [
+        "--owner",
+        "owner@example.com",
+        "--port",
+        "8790",
+        "--public-url",
+        "http://127.0.0.1:8790",
+        "--secure-port",
+        "9443",
+        "--secure-url",
+        "http://192.168.1.5:9443/",
+      ],
+      { runner: new FakeRunner(), env, cwd: "/repo" },
+    );
+
+    expect(config.publicUrl).toBe("http://127.0.0.1:8790");
+    expect(config.secure).toEqual({ port: 9443, url: "http://192.168.1.5:9443" });
+  });
+
+  test("requires a distinct secure port and pairs --secure-url with --secure-port", () => {
+    expect(() =>
+      parseServeFlags(["--owner", "owner", "--port", "9443", "--secure-port", "9443"], "/repo"),
+    ).toThrow("different from --port");
+    expect(() =>
+      parseServeFlags(["--owner", "owner", "--secure-url", "https://bridge.example.test"], "/repo"),
+    ).toThrow("requires --secure-port");
+    expect(() =>
+      parseServeFlags(
+        ["--owner", "owner", "--secure-port", "9443", "--secure-url", "http://example.test"],
+        "/repo",
+      ),
+    ).toThrow("loopback or private-network");
+  });
+
+  test("rejects private-network and public HTTP direct origins", () => {
+    expect(() =>
+      parseServeFlags(["--owner", "owner", "--public-url", "http://192.168.1.5:8790"], "/repo"),
+    ).toThrow("loopback");
+    expect(() =>
+      parseServeFlags(["--owner", "owner", "--public-url", "http://example.test"], "/repo"),
+    ).toThrow("loopback");
   });
 
   test("refuses to bind any host other than 127.0.0.1", () => {

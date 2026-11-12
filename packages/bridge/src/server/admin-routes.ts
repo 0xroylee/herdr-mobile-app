@@ -1,5 +1,8 @@
 import type { BridgeMachine, Role } from "@herdr-mobile/protocol";
+import { normalizeOrigin } from "@herdr-mobile/protocol";
+import type { AdvertisedRoutes } from "./advertised-routes.ts";
 import type { DeviceStore } from "./devices.ts";
+import { encodePublicKey, type IdentityKeyStore } from "./identity-key.ts";
 import type { PairingCodes } from "./pairing.ts";
 
 /** What the running server reports on the admin socket. U4 provides it. */
@@ -11,12 +14,19 @@ export interface AdminStatus {
   listen: string;
   /** Phone sessions open now. */
   sessions: number;
+  bridgeKey: string;
+  secure: { port?: number; url?: string };
 }
+
+export type AdminBaseStatus = Omit<AdminStatus, "bridgeKey" | "secure">;
 
 export interface AdminApiContext {
   devices: DeviceStore;
   pairing: PairingCodes;
-  status: () => AdminStatus;
+  routes: AdvertisedRoutes;
+  identity: IdentityKeyStore;
+  securePort?: number;
+  status: () => AdminBaseStatus;
 }
 
 function json(value: unknown, status = 200): Response {
@@ -94,7 +104,48 @@ export async function handleAdminApi(
 
   if (path === "/status") {
     if (request.method !== "GET") return methodNotAllowed("GET");
-    return json({ ...ctx.status(), devices: ctx.devices.list().length });
+    const routes = ctx.routes.snapshot();
+    return json({
+      ...ctx.status(),
+      bridgeKey: encodePublicKey(ctx.identity.current().publicKey),
+      secure: {
+        ...(ctx.securePort === undefined ? {} : { port: ctx.securePort }),
+        ...(routes.secure === undefined ? {} : { url: routes.secure }),
+      },
+      devices: ctx.devices.list().length,
+    });
+  }
+
+  if (path === "/secure-url") {
+    if (request.method === "PUT") {
+      if (ctx.securePort === undefined) return failure(409, "secure_port_disabled");
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return failure(400, "bad_request");
+      }
+      if (!isObject(body) || typeof body.url !== "string") return failure(400, "bad_request");
+      let url: string;
+      try {
+        url = normalizeOrigin(body.url, { allowPlainHttp: "loopback-and-private" });
+      } catch {
+        return failure(400, "bad_request");
+      }
+      ctx.routes.setSecure(url);
+      return json({ url });
+    }
+    if (request.method === "DELETE") {
+      ctx.routes.setSecure(undefined);
+      return new Response(null, { status: 204 });
+    }
+    return methodNotAllowed("PUT, DELETE");
+  }
+
+  if (path === "/identity/rotate") {
+    if (request.method !== "POST") return methodNotAllowed("POST");
+    const keyPair = await ctx.identity.rotate();
+    return json({ bridgeKey: encodePublicKey(keyPair.publicKey) });
   }
 
   return undefined;

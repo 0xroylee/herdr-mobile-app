@@ -41,6 +41,8 @@ class FakeClock implements Clock {
 
 const OWNER = "owner@example.ts.net";
 const MACHINE = { id: "machine-1", name: "Mac" };
+const ROUTES = { direct: "https://mac.tailnet.ts.net", secure: "https://bridge.example.test" };
+const BRIDGE_KEY = "a".repeat(43);
 
 async function setup() {
   const fs = new MapFs();
@@ -51,6 +53,8 @@ async function setup() {
     devices,
     pairing,
     machine: MACHINE,
+    routes: () => ROUTES,
+    bridgeKey: () => BRIDGE_KEY,
   };
   return { fs, devices, pairing, context };
 }
@@ -116,7 +120,12 @@ describe("handleApi", () => {
     const response = await handleApi(incoming, context);
     expect(response?.status).toBe(201);
     const reply = (await response?.json()) as PairReply;
-    expect(reply).toMatchObject({ role: "control", machine: MACHINE });
+    expect(reply).toMatchObject({
+      role: "control",
+      machine: MACHINE,
+      routes: ROUTES,
+      bridgeKey: BRIDGE_KEY,
+    });
     expect(reply.token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(await devices.findByToken(reply.token)).toMatchObject({
       id: reply.deviceId,

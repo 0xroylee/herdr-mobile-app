@@ -8,6 +8,12 @@ export interface BridgeMachine {
   name: string;
 }
 
+/** Origins the bridge advertises to paired devices. */
+export interface BridgeRoutes {
+  direct?: string;
+  secure?: string;
+}
+
 /** Redeem a one-time pairing code for a new device token. */
 export interface PairRequest {
   code: string;
@@ -20,6 +26,31 @@ export interface PairReply {
   token: string;
   role: Role;
   machine: BridgeMachine;
+  routes: BridgeRoutes;
+  bridgeKey: string;
+}
+
+/** First text record sent by a device pairing over the secure channel. */
+export interface PairMessage {
+  v: 1;
+  pair: PairRequest;
+}
+
+/** HTTP request multiplexed through the secure channel. */
+export interface ChannelRequest {
+  t: "req";
+  id: number;
+  method: string;
+  path: string;
+  body?: string;
+}
+
+/** HTTP response multiplexed through the secure channel. */
+export interface ChannelResponse {
+  t: "res";
+  id: number;
+  status: number;
+  body?: string;
 }
 
 /** First text message sent after the WebSocket upgrade. */
@@ -34,6 +65,8 @@ export interface AuthReply {
   ok: true;
   role: Role;
   machine: BridgeMachine;
+  routes?: BridgeRoutes;
+  bridgeKey?: string;
 }
 
 /** Device details safe to return from the bridge's device-list endpoint. */
@@ -121,6 +154,12 @@ export interface StartAgentErrorBody extends HttpErrorBody {
 
 /** WebSocket close codes used by the bridge. */
 export const BRIDGE_WS_CLOSE_CODES = {
+  HANDSHAKE_PROTOCOL: 1002,
+  IDENTITY_ROTATED: 1012,
+  BUSY: 1013,
+  RECORD_PROTOCOL: 1008,
+  KEY_MISMATCH: 4003,
   BAD_TOKEN: 4401,
+  BAD_PAIR_CODE: 4402,
   CHILD_EXITED: 1011,
 } as const;

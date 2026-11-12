@@ -1,5 +1,5 @@
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   type AuthMessage,
   type AuthReply,
@@ -12,6 +12,7 @@ import type { Clock } from "../prototype/deadline.ts";
 import { systemClock } from "../prototype/deadline.ts";
 import { bunRunner, type ProcessRunner } from "../prototype/process.ts";
 import { handleAdminApi } from "./admin-routes.ts";
+import { createAdvertisedRoutes } from "./advertised-routes.ts";
 import { handleAgentsRoutes } from "./agents-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import { handleAppCli } from "./app-cli.ts";
@@ -24,6 +25,7 @@ import {
   type IdentityConfig,
   type WhoisLookup,
 } from "./identity.ts";
+import { encodePublicKey, nodeIdentityKeyFs, openIdentityKey } from "./identity-key.ts";
 import { PairingCodes } from "./pairing.ts";
 import { type ApiContext, handleApi } from "./routes.ts";
 import { startSession } from "./session.ts";
@@ -209,16 +211,28 @@ export async function serveBridge(
   const stateDir = resolve(config.stateDir);
   const adminSocketPath = resolve(config.adminSocketPath);
   const deviceFilePath = resolve(config.deviceFilePath);
+  const identityFilePath = join(stateDir, "identity.json");
   if (dirname(adminSocketPath) !== stateDir || basename(adminSocketPath) !== "admin.sock") {
     throw new Error("admin socket must be admin.sock inside the private bridge state directory");
   }
   if (dirname(deviceFilePath) !== stateDir || basename(deviceFilePath) !== "devices.json") {
     throw new Error("device file must be devices.json inside the private bridge state directory");
   }
+  if (dirname(identityFilePath) !== stateDir || basename(identityFilePath) !== "identity.json") {
+    throw new Error(
+      "identity file must be identity.json inside the private bridge state directory",
+    );
+  }
   await ensurePrivateDirectory(stateDir);
   await assertSocketPathAvailable(adminSocketPath);
 
   const devices = await DeviceStore.open(nodeStoreFs, deviceFilePath, clock);
+  const identityKey = await openIdentityKey(identityFilePath, nodeIdentityKeyFs, clock);
+  const advertisedRoutes = createAdvertisedRoutes({
+    direct: config.publicUrl,
+    ...(config.secure?.url === undefined ? {} : { secure: config.secure.url }),
+  });
+  const bridgeKey = () => encodePublicKey(identityKey.current().publicKey);
 
   const pairing = new PairingCodes(clock);
   const identity: IdentityConfig = { ownerLogin: config.ownerLogin };
@@ -255,6 +269,8 @@ export async function serveBridge(
     devices,
     pairing,
     machine,
+    routes: () => advertisedRoutes.snapshot(),
+    bridgeKey,
   };
 
   let sessions = 0;
@@ -263,6 +279,9 @@ export async function serveBridge(
   const adminApi = {
     devices,
     pairing,
+    routes: advertisedRoutes,
+    identity: identityKey,
+    ...(config.secure === undefined ? {} : { securePort: config.secure.port }),
     status: () => ({
       machine,
       publicUrl: config.publicUrl,

@@ -1,6 +1,7 @@
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import type { BridgeMachine } from "@herdr-mobile/protocol";
+import { normalizeOrigin } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import { systemClock, within } from "../prototype/deadline.ts";
 import type { ProcessRunner } from "../prototype/process.ts";
@@ -15,6 +16,7 @@ export interface BridgeConfig {
   host: string;
   port: number;
   publicUrl: string;
+  secure?: { port: number; url?: string };
   webDir: string;
   hcPath: string;
   herdrAppPath: string;
@@ -49,6 +51,8 @@ interface ParsedFlags {
   ownerLogin: string;
   port: number;
   publicUrl?: string;
+  securePort?: number;
+  secureUrl?: string;
   webDir: string;
   hcPath: string;
   herdrAppPath: string;
@@ -67,33 +71,22 @@ function flagValue(args: readonly string[], index: number, flag: string): string
   return value;
 }
 
-function parsePort(value: string): number {
-  if (!/^\d+$/u.test(value)) throw new Error("--port must be an integer from 1 to 65535");
+function parsePort(value: string, flag = "--port"): number {
+  if (!/^\d+$/u.test(value)) throw new Error(`${flag} must be an integer from 1 to 65535`);
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("--port must be an integer from 1 to 65535");
+    throw new Error(`${flag} must be an integer from 1 to 65535`);
   }
   return port;
 }
 
 function normalizePublicUrl(value: string): string {
-  let url: URL;
   try {
-    url = new URL(value);
-  } catch {
-    throw new Error("--public-url must be a valid HTTPS URL");
+    return normalizeOrigin(value, { allowPlainHttp: "loopback-only" });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`--public-url: ${reason}`);
   }
-  if (
-    url.protocol !== "https:" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.search !== "" ||
-    url.hash !== "" ||
-    (url.pathname !== "" && url.pathname !== "/")
-  ) {
-    throw new Error("--public-url must be an HTTPS origin without a path, query, or fragment");
-  }
-  return url.origin;
 }
 
 /** Parses the `serve` options and applies filesystem defaults without starting child processes. */
@@ -101,6 +94,8 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
   let ownerLogin: string | undefined;
   let port = DEFAULT_PORT;
   let publicUrl: string | undefined;
+  let securePort: number | undefined;
+  let secureUrl: string | undefined;
   let webDir = resolve(cwd, "packages/app/dist");
   let hcPath = "hc";
   let herdrAppPath = "herdr-app";
@@ -118,6 +113,16 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
         break;
       case "--port":
         port = parsePort(flagValue(args, index, flag));
+        index++;
+        break;
+      case "--secure-port":
+        securePort = parsePort(flagValue(args, index, flag), flag);
+        index++;
+        break;
+      case "--secure-url":
+        secureUrl = normalizeOrigin(flagValue(args, index, flag), {
+          allowPlainHttp: "loopback-and-private",
+        });
         index++;
         break;
       case "--public-url":
@@ -163,10 +168,18 @@ export function parseServeFlags(args: readonly string[], cwd: string): ParsedFla
   }
 
   if (!ownerLogin) throw new Error("serve requires --owner <login>");
+  if (securePort !== undefined && securePort === port) {
+    throw new Error("--secure-port must be different from --port");
+  }
+  if (secureUrl !== undefined && securePort === undefined) {
+    throw new Error("--secure-url requires --secure-port");
+  }
   return {
     ownerLogin,
     port,
     ...(publicUrl === undefined ? {} : { publicUrl }),
+    ...(securePort === undefined ? {} : { securePort }),
+    ...(secureUrl === undefined ? {} : { secureUrl }),
     webDir,
     hcPath,
     herdrAppPath,
@@ -287,6 +300,14 @@ export async function createBridgeConfig(
     host: DEFAULT_HOST,
     port: flags.port,
     publicUrl,
+    ...(flags.securePort === undefined
+      ? {}
+      : {
+          secure: {
+            port: flags.securePort,
+            ...(flags.secureUrl === undefined ? {} : { url: flags.secureUrl }),
+          },
+        }),
     webDir: flags.webDir,
     hcPath: flags.hcPath,
     herdrAppPath: flags.herdrAppPath,
