@@ -16,6 +16,7 @@
   "dependencies": {
     "@herdr-mobile/hc-client": "*",
     "@herdr-mobile/protocol": "*",
+    "@noble/curves": "^2.4.0",
     "@xterm/headless": "6.0.0",
     "qrcode": "^1.5"
   },
