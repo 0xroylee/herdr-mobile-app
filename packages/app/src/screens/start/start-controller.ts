@@ -48,19 +48,21 @@ export class StartController {
   private snapshot: StartControllerState;
   private readonly listeners = new Set<() => void>();
   private readonly port: StartAgentPort;
-  private readonly preselectedSpaceId: string | undefined;
-  private resolvedPreselectedSpaceTargetId: string | undefined;
+  private readonly preselectedSpaceTargetId: string | undefined;
   private availableRuns: StartRunSelection[] | undefined;
+  private foldersBySpace: StartOptions["foldersBySpace"] = {};
+  private userChoseSpace = false;
+  private userSetFolder = false;
   private role: Role | undefined;
   private connected: boolean;
 
   constructor(
     port: StartAgentPort,
-    preselectedSpaceId?: string,
+    preselectedSpaceTargetId?: string,
     access: StartControllerAccess = { role: "control", connected: true },
   ) {
     this.port = port;
-    this.preselectedSpaceId = preselectedSpaceId;
+    this.preselectedSpaceTargetId = preselectedSpaceTargetId;
     this.role = access.role;
     this.connected = access.connected;
     this.snapshot = {
@@ -71,10 +73,6 @@ export class StartController {
 
   get state(): StartControllerState {
     return this.snapshot;
-  }
-
-  get preselectedSpaceTargetId(): string | undefined {
-    return this.resolvedPreselectedSpaceTargetId;
   }
 
   setAccess(role: Role | undefined, connected: boolean): void {
@@ -118,36 +116,42 @@ export class StartController {
     }
   }
 
-  /** Fill only untouched defaults after spaces, folders, and the catalog are available. */
+  /** Reconcile defaults and the preselection as spaces, folders, and catalog data arrive. */
   applyOptions(options: StartOptions): void {
     if (!isEditable(this.snapshot.status)) return;
     const draft = this.snapshot.draft;
+    this.foldersBySpace = options.foldersBySpace;
     const selectableRuns = options.runChoices.filter((choice) => choice.kind !== "empty");
     this.availableRuns = selectableRuns.map((choice) => choice.selection);
     const visibleRun = options.runChoices.find((choice) => sameRun(choice.selection, draft.run));
     const run = visibleRun?.selection ?? selectableRuns[0]?.selection;
-    const preselectedByDisplay = options.spaceChoices.find(
-      (choice) =>
-        choice.selection.kind === "existing" && choice.displayId === this.preselectedSpaceId,
-    );
-    if (
-      this.resolvedPreselectedSpaceTargetId === undefined &&
-      preselectedByDisplay?.selection.kind === "existing"
-    ) {
-      this.resolvedPreselectedSpaceTargetId = preselectedByDisplay.selection.id;
-    }
     const currentSpace = options.spaceChoices.find((choice) =>
       spaceSelectionMatches(choice.selection, draft.space),
     )?.selection;
     const preselectedSpace = options.spaceChoices.find(
       (choice) =>
         choice.selection.kind === "existing" &&
-        choice.selection.id === this.resolvedPreselectedSpaceTargetId,
+        choice.selection.id === this.preselectedSpaceTargetId,
     )?.selection;
-    const space = currentSpace ?? preselectedSpace ?? options.spaceChoices[0]?.selection;
-    const folderKey = startSpaceKey(space);
-    const folder = draft.folder || options.foldersBySpace[folderKey ?? ""]?.[0]?.path || "";
-    this.setSnapshot({ ...this.snapshot, draft: { ...draft, run, space, folder } });
+    const firstSpace = options.spaceChoices[0]?.selection;
+    const space = this.userChoseSpace
+      ? (currentSpace ?? firstSpace)
+      : (preselectedSpace ?? currentSpace ?? firstSpace);
+    const spaceChanged = !spaceSelectionMatches(draft.space, space);
+    const suggestedFolder = this.firstSuggestedFolder(space);
+    const folder = this.userSetFolder
+      ? draft.folder
+      : spaceChanged || !draft.folder
+        ? suggestedFolder
+        : draft.folder;
+    const { fieldErrors, ...state } = this.snapshot;
+    const remainingErrors = { ...fieldErrors };
+    if (folder !== draft.folder) delete remainingErrors.folder;
+    this.setSnapshot({
+      ...state,
+      ...(Object.keys(remainingErrors).length > 0 ? { fieldErrors: remainingErrors } : {}),
+      draft: { ...draft, run, space, folder },
+    });
   }
 
   set(field: "run", value: StartRunSelection): void;
@@ -160,8 +164,21 @@ export class StartController {
     if (field === "run") {
       this.updateDraft({ run: value as StartRunSelection }, "run");
     } else if (field === "space") {
-      this.updateDraft({ space: value as StartAgentSpace }, "space");
+      if (!isEditable(this.snapshot.status)) return;
+      this.userChoseSpace = true;
+      const space = value as StartAgentSpace;
+      const draft = this.snapshot.draft;
+      const spaceChanged = !spaceSelectionMatches(draft.space, space);
+      const folder =
+        !this.userSetFolder && (spaceChanged || !draft.folder)
+          ? this.firstSuggestedFolder(space)
+          : draft.folder;
+      const fields: (keyof StartFieldErrors)[] = ["space"];
+      if (folder !== draft.folder) fields.push("folder");
+      this.updateDraft({ space, folder }, ...fields);
     } else if (field === "folder") {
+      if (!isEditable(this.snapshot.status)) return;
+      this.userSetFolder = true;
       this.updateDraft({ folder: value as string }, "folder");
     } else {
       this.updateDraft({ task: value as string });
@@ -244,11 +261,11 @@ export class StartController {
     return createTab(target);
   }
 
-  private updateDraft(changes: Partial<StartDraft>, field?: keyof StartFieldErrors): void {
+  private updateDraft(changes: Partial<StartDraft>, ...fields: (keyof StartFieldErrors)[]): void {
     if (!isEditable(this.snapshot.status)) return;
     const { fieldErrors, ...state } = this.snapshot;
     const remainingErrors = { ...fieldErrors };
-    if (field) delete remainingErrors[field];
+    for (const field of fields) delete remainingErrors[field];
     this.setSnapshot({
       ...state,
       status: "editing",
@@ -256,6 +273,11 @@ export class StartController {
       ...(Object.keys(remainingErrors).length > 0 ? { fieldErrors: remainingErrors } : {}),
       draft: { ...this.snapshot.draft, ...changes },
     });
+  }
+
+  private firstSuggestedFolder(space: StartAgentSpace | undefined): string {
+    const folderKey = startSpaceKey(space);
+    return this.foldersBySpace[folderKey ?? ""]?.[0]?.path ?? "";
   }
 
   private setSnapshot(snapshot: StartControllerState): void {
@@ -270,13 +292,17 @@ function isEditable(status: StartControllerState["status"]): boolean {
 
 export function createStartController(
   port: StartAgentPort,
-  preselectedSpaceId?: string,
+  preselectedSpaceTargetId?: string,
   access?: StartControllerAccess,
 ): StartController {
-  return new StartController(port, preselectedSpaceId, access);
+  return new StartController(port, preselectedSpaceTargetId, access);
 }
 
-function spaceSelectionMatches(left: StartAgentSpace, right: StartAgentSpace | undefined): boolean {
+function spaceSelectionMatches(
+  left: StartAgentSpace | undefined,
+  right: StartAgentSpace | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return false;
   return (
     right !== undefined &&
     left.kind === right.kind &&

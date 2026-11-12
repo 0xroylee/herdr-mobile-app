@@ -64,7 +64,6 @@ export function deriveStartOptions(
   layout: Layout | undefined,
   terminals: readonly Terminal[] | Readonly<Record<string, Terminal>>,
   recentFolders: readonly string[],
-  preselectedSpaceId: string | undefined,
   preselectedSpaceTargetId?: string,
 ): StartOptions {
   const terminalList = toTerminalList(terminals);
@@ -149,11 +148,9 @@ export function deriveStartOptions(
     });
   }
 
-  const hasPreselectedDisplay =
-    preselectedSpaceId !== undefined && seenDisplayIds.has(preselectedSpaceId);
   const hasPreselectedTarget =
     preselectedSpaceTargetId !== undefined && seenTargetIds.has(preselectedSpaceTargetId);
-  if (hasPreselectedDisplay || hasPreselectedTarget) {
+  if (hasPreselectedTarget) {
     choices.push({
       key: "empty",
       kind: "empty",
