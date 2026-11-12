@@ -6,7 +6,7 @@
 
 1. Makes a scratch root, `/tmp/hmp-XXXXXX`, with its own `home`, `run`, `state`, `config` and `cwd` directories, and a fresh session name, `hmp-` plus 8 hex digits.
 2. Starts `hc connect` with only these variables: `PATH` and the locale from the caller, then `HC_SESSION`, `HOME`, `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME` pointing into the scratch root. `hc connect` starts the scratch core. Every spawn is checked first, and refused if `HC_SOCKET`, `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, `HC_SCOPE` or `HC_RUNTIME` is set, if a directory is outside the scratch root, or if any other variable is present.
-3. Says `hello` with generation 1 and `framed: true`, and requires hc 0.1.16, the version the schema is pinned to.
+3. Says `hello` with generation 1 and `framed: true`, and requires hc 0.1.17, the version the schema is pinned to.
 4. Runs a fixture with `terminal.run`: `/bin/sh` in the scratch `cwd`, with no parent, `wait: false`, `keep: false` and the label `herdr-mobile.prototype` set to the session name. The fixture prints `paint-<session>`, waits for the gate file, reports `working` through OSC 7501, prints `live-<session>`, and reports `done`.
 5. Subscribes with exactly `{"terminal": <fixture>, "labels": {"herdr-mobile.prototype": <session>}}` and checks that the snapshot holds the fixture and nothing else.
 6. Attaches with `observe: true`, renders every DATA payload into `@xterm/headless`, and returns CREDIT only once a write is on the screen. It never sends keys or RESIZE.

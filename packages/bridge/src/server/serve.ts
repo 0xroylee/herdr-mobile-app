@@ -1,20 +1,18 @@
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
-  type AuthMessage,
   type AuthReply,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_WS_CLOSE_CODES,
   type BridgeMachine,
-  type DeviceRecordView,
 } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import { systemClock } from "../prototype/deadline.ts";
 import { bunRunner, type ProcessRunner } from "../prototype/process.ts";
 import { handleAdminApi } from "./admin-routes.ts";
-import { handleAgentsRoutes } from "./agents-routes.ts";
+import { createAdvertisedRoutes } from "./advertised-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
-import { handleAppCli } from "./app-cli.ts";
+import { headerCaller, headerPairingAuthorization } from "./caller.ts";
 import type { BridgeConfig } from "./config.ts";
 import { assertLoopbackHost } from "./config.ts";
 import { DeviceStore, nodeStoreFs } from "./devices.ts";
@@ -24,12 +22,15 @@ import {
   type IdentityConfig,
   type WhoisLookup,
 } from "./identity.ts";
+import { encodePublicKey, nodeIdentityKeyFs, openIdentityKey } from "./identity-key.ts";
 import { PairingCodes } from "./pairing.ts";
-import { type ApiContext, handleApi } from "./routes.ts";
+import { type ApiContext, dispatchApi } from "./routes.ts";
+import { type SecureListenerDependencies, startSecureListener } from "./secure-listener.ts";
 import { startSession } from "./session.ts";
 import type { Socket } from "./socket.ts";
 import { AgentStarter } from "./start-agent.ts";
 import { type StaticFs, serveStatic } from "./static.ts";
+import { authenticateFirstRecord } from "./ws-auth.ts";
 
 export const WS_AUTH_TIMEOUT_MS = 10_000;
 
@@ -69,6 +70,12 @@ function errorResponse(status: number, error: string): Response {
 
 /** Creates the pure HTTP dispatch used by Bun and handler-level tests. */
 export function createBridgeFetchHandler(context: BridgeHttpContext) {
+  const resolveCaller = headerCaller(context.identity, context.whois, context.api.devices);
+  const dispatchContext = {
+    api: context.api,
+    appCli: context.appCli,
+    agentStarter: context.agentStarter,
+  };
   return async (
     request: Request,
     server?: WebSocketUpgradeTarget,
@@ -96,17 +103,10 @@ export function createBridgeFetchHandler(context: BridgeHttpContext) {
     }
 
     if (path === "/api" || path.startsWith("/api/")) {
-      if (context.agentStarter) {
-        const agentsResponse = await handleAgentsRoutes(
-          request,
-          context.appCli,
-          context.agentStarter,
-        );
-        if (agentsResponse) return agentsResponse;
-      }
-      const appResponse = await handleAppCli(request, context.appCli);
-      if (appResponse) return appResponse;
-      return (await handleApi(request, context.api)) ?? errorResponse(404, "not_found");
+      return (
+        (await dispatchApi(request, resolveCaller, dispatchContext)) ??
+        errorResponse(404, "not_found")
+      );
     }
 
     if (!(await checkIdentity(request.headers, context.identity, context.whois))) {
@@ -158,20 +158,6 @@ async function assertSocketPathAvailable(path: string): Promise<void> {
   throw new Error(`admin socket path already exists and is not a socket: ${path}`);
 }
 
-function isAuthMessage(value: unknown): value is AuthMessage {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    "v" in value &&
-    value.v === BRIDGE_PROTOCOL_VERSION &&
-    "token" in value &&
-    typeof value.token === "string" &&
-    value.token.length > 0 &&
-    value.token.length <= 128
-  );
-}
-
 function clearAuthenticationTimer(data: ConnectionData, clock: Clock): void {
   if (data.authTimer !== undefined) clock.clearTimeout(data.authTimer);
   data.authTimer = undefined;
@@ -180,13 +166,14 @@ function clearAuthenticationTimer(data: ConnectionData, clock: Clock): void {
 function rejectAuthentication(
   ws: Bun.ServerWebSocket<ConnectionData>,
   clock: Clock,
+  code: number,
   reason: string,
 ): void {
   const data = ws.data;
   if (data.closed || data.failed) return;
   data.failed = true;
   clearAuthenticationTimer(data, clock);
-  ws.close(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN, reason);
+  ws.close(code, reason);
 }
 
 function asBytes(message: string | Uint8Array): Uint8Array | undefined {
@@ -209,16 +196,28 @@ export async function serveBridge(
   const stateDir = resolve(config.stateDir);
   const adminSocketPath = resolve(config.adminSocketPath);
   const deviceFilePath = resolve(config.deviceFilePath);
+  const identityFilePath = join(stateDir, "identity.json");
   if (dirname(adminSocketPath) !== stateDir || basename(adminSocketPath) !== "admin.sock") {
     throw new Error("admin socket must be admin.sock inside the private bridge state directory");
   }
   if (dirname(deviceFilePath) !== stateDir || basename(deviceFilePath) !== "devices.json") {
     throw new Error("device file must be devices.json inside the private bridge state directory");
   }
+  if (dirname(identityFilePath) !== stateDir || basename(identityFilePath) !== "identity.json") {
+    throw new Error(
+      "identity file must be identity.json inside the private bridge state directory",
+    );
+  }
   await ensurePrivateDirectory(stateDir);
   await assertSocketPathAvailable(adminSocketPath);
 
   const devices = await DeviceStore.open(nodeStoreFs, deviceFilePath, clock);
+  const identityKey = await openIdentityKey(identityFilePath, nodeIdentityKeyFs, clock);
+  const advertisedRoutes = createAdvertisedRoutes({
+    direct: config.publicUrl,
+    ...(config.secure?.url === undefined ? {} : { secure: config.secure.url }),
+  });
+  const bridgeKey = () => encodePublicKey(identityKey.current().publicKey);
 
   const pairing = new PairingCodes(clock);
   const identity: IdentityConfig = { ownerLogin: config.ownerLogin };
@@ -227,9 +226,6 @@ export async function serveBridge(
     : undefined;
   const machine: BridgeMachine = config.machine;
   const appCli: AppCliContext = {
-    identity,
-    ...(whois === undefined ? {} : { whois }),
-    devices,
     runner,
     env: config.env,
     cwd: config.cwd,
@@ -250,24 +246,31 @@ export async function serveBridge(
     output: dependencies.stdout ?? ((text) => console.log(text)),
   });
   const api: ApiContext = {
-    identity,
-    ...(whois === undefined ? {} : { whois }),
     devices,
     pairing,
     machine,
+    routes: () => advertisedRoutes.snapshot(),
+    bridgeKey,
+    authorizePairing: headerPairingAuthorization(identity, whois),
   };
 
   let sessions = 0;
   let currentPort = config.port;
+  let secureListener: Awaited<ReturnType<typeof startSecureListener>> | undefined;
   const activeSockets = new Set<Bun.ServerWebSocket<ConnectionData>>();
   const adminApi = {
     devices,
     pairing,
+    routes: advertisedRoutes,
+    identity: identityKey,
+    get securePort() {
+      return secureListener?.port ?? config.secure?.port;
+    },
     status: () => ({
       machine,
       publicUrl: config.publicUrl,
       listen: `${config.host}:${currentPort}`,
-      sessions,
+      sessions: sessions + (secureListener?.sessions ?? 0),
     }),
   };
 
@@ -295,6 +298,28 @@ export async function serveBridge(
       endSocket(socket);
       socket.close(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN, "device revoked");
     }
+    secureListener?.closeRevokedSessions(liveDeviceIds);
+  };
+
+  const handleAdminRequest = async (request: Request): Promise<Response | undefined> => {
+    const response = await handleAdminApi(request, adminApi);
+    if (new URL(request.url).pathname !== "/status" || !response) return response;
+    const body = (await response.json()) as Record<string, unknown>;
+    const secure =
+      typeof body.secure === "object" && body.secure !== null
+        ? (body.secure as Record<string, unknown>)
+        : {};
+    return new Response(
+      JSON.stringify({
+        ...body,
+        secure: {
+          ...secure,
+          sessions: secureListener?.sessions ?? 0,
+          handshakeFailuresLastHour: secureListener?.handshakeFailuresLastHour ?? 0,
+        },
+      }),
+      { status: response.status, headers: { "Content-Type": "application/json; charset=utf-8" } },
+    );
   };
 
   try {
@@ -306,12 +331,12 @@ export async function serveBridge(
           /^\/devices\/[^/]+$/u.test(new URL(request.url).pathname)
         ) {
           try {
-            return (await handleAdminApi(request, adminApi)) ?? errorResponse(404, "not_found");
+            return (await handleAdminRequest(request)) ?? errorResponse(404, "not_found");
           } finally {
             closeRevokedSessions();
           }
         }
-        return (await handleAdminApi(request, adminApi)) ?? errorResponse(404, "not_found");
+        return (await handleAdminRequest(request)) ?? errorResponse(404, "not_found");
       },
     });
     await chmod(adminSocketPath, 0o600);
@@ -346,7 +371,12 @@ export async function serveBridge(
         open(ws) {
           ws.data.authTimer = clock.setTimeout(() => {
             if (!ws.data.authenticated) {
-              rejectAuthentication(ws, clock, "authentication required");
+              rejectAuthentication(
+                ws,
+                clock,
+                BRIDGE_WS_CLOSE_CODES.BAD_TOKEN,
+                "authentication required",
+              );
             }
           }, WS_AUTH_TIMEOUT_MS);
         },
@@ -354,39 +384,34 @@ export async function serveBridge(
           const data = ws.data;
           if (data.closed || data.failed) return;
           if (!data.authenticated) {
-            if (data.authenticating || typeof message !== "string" || message.length > 1_024) {
+            if (
+              data.authenticating ||
+              typeof message !== "string" ||
+              new TextEncoder().encode(message).byteLength > 1_024
+            ) {
               data.authenticating = true;
-              rejectAuthentication(ws, clock, "invalid authentication message");
+              rejectAuthentication(
+                ws,
+                clock,
+                BRIDGE_WS_CLOSE_CODES.BAD_TOKEN,
+                "invalid authentication message",
+              );
               return;
             }
             data.authenticating = true;
             void (async () => {
-              let parsed: unknown;
-              try {
-                parsed = JSON.parse(message) as unknown;
-              } catch {
-                rejectAuthentication(ws, clock, "invalid authentication message");
+              const result = await authenticateFirstRecord(message, api);
+              if (result.kind === "reject") {
+                rejectAuthentication(ws, clock, result.code, result.reason);
                 return;
               }
-              if (!isAuthMessage(parsed)) {
-                rejectAuthentication(ws, clock, "invalid authentication message");
-                return;
-              }
-
-              let device: DeviceRecordView | undefined;
-              try {
-                device = await devices.findByToken(parsed.token);
-              } catch {
-                rejectAuthentication(ws, clock, "invalid token");
-                return;
-              }
+              const device = result.device;
               if (
-                !device ||
                 data.closed ||
                 data.failed ||
                 !devices.list().some((listed) => listed.id === device.id)
               ) {
-                rejectAuthentication(ws, clock, "invalid token");
+                rejectAuthentication(ws, clock, BRIDGE_WS_CLOSE_CODES.BAD_TOKEN, "invalid token");
                 return;
               }
 
@@ -396,16 +421,26 @@ export async function serveBridge(
               data.counted = true;
               sessions++;
               activeSockets.add(ws);
-              const reply: AuthReply = {
-                v: BRIDGE_PROTOCOL_VERSION,
-                ok: true,
-                role: device.role,
-                machine,
-              };
+              const reply =
+                result.kind === "pair"
+                  ? result.reply
+                  : ({
+                      v: BRIDGE_PROTOCOL_VERSION,
+                      ok: true,
+                      role: device.role,
+                      machine,
+                      routes: api.routes(),
+                      bridgeKey: api.bridgeKey(),
+                    } satisfies AuthReply);
               try {
                 ws.send(JSON.stringify(reply));
               } catch {
-                rejectAuthentication(ws, clock, "authentication failed");
+                rejectAuthentication(
+                  ws,
+                  clock,
+                  BRIDGE_WS_CLOSE_CODES.BAD_TOKEN,
+                  "authentication failed",
+                );
                 return;
               }
 
@@ -436,7 +471,14 @@ export async function serveBridge(
               } catch {
                 ws.close(BRIDGE_WS_CLOSE_CODES.CHILD_EXITED, "could not start hc connect");
               }
-            })();
+            })().catch(() => {
+              rejectAuthentication(
+                ws,
+                clock,
+                BRIDGE_WS_CLOSE_CODES.BAD_TOKEN,
+                "authentication failed",
+              );
+            });
             return;
           }
 
@@ -455,7 +497,27 @@ export async function serveBridge(
       },
     });
     currentPort = webServer.port ?? config.port;
+    if (config.secure) {
+      const secureDependencies: SecureListenerDependencies = {
+        identity: identityKey,
+        devices,
+        pairing,
+        machine,
+        routes: () => advertisedRoutes.snapshot(),
+        bridgeKey,
+        dispatch: { api, appCli, agentStarter },
+        runner,
+        env: config.env,
+        hc: config.hcPath,
+        ...(config.session === undefined ? {} : { session: config.session }),
+        clock,
+        onDeviceRevocation: closeRevokedSessions,
+        ...(dependencies.stdout === undefined ? {} : { stdout: dependencies.stdout }),
+      };
+      secureListener = await startSecureListener({ port: config.secure.port }, secureDependencies);
+    }
   } catch (error) {
+    secureListener?.stop();
     webServer?.stop(true);
     adminServer?.stop(true);
     await unlink(adminSocketPath).catch(() => {});
@@ -469,6 +531,7 @@ export async function serveBridge(
     devices,
     async stop() {
       for (const socket of activeSockets) socket.close(1001, "bridge stopping");
+      secureListener?.stop();
       webServer?.stop(true);
       adminServer?.stop(true);
       await unlink(adminSocketPath).catch(() => {});

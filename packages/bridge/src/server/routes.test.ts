@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { PairReply } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
+import { headerCaller, headerPairingAuthorization } from "./caller.ts";
 import type { StoreFs } from "./devices.ts";
 import { DeviceStore } from "./devices.ts";
 import { PairingCodes } from "./pairing.ts";
@@ -41,18 +42,30 @@ class FakeClock implements Clock {
 
 const OWNER = "owner@example.ts.net";
 const MACHINE = { id: "machine-1", name: "Mac" };
+const ROUTES = { direct: "https://mac.tailnet.ts.net", secure: "https://bridge.example.test" };
+const BRIDGE_KEY = "a".repeat(43);
 
 async function setup() {
   const fs = new MapFs();
   const devices = await DeviceStore.open(fs, "/state/devices.json", new FakeClock());
   const pairing = new PairingCodes(new FakeClock());
   const context: ApiContext = {
-    identity: { ownerLogin: OWNER },
     devices,
     pairing,
     machine: MACHINE,
+    routes: () => ROUTES,
+    bridgeKey: () => BRIDGE_KEY,
+    authorizePairing: headerPairingAuthorization({ ownerLogin: OWNER }, undefined),
   };
   return { fs, devices, pairing, context };
+}
+
+async function callApi(request: Request, context: ApiContext): Promise<Response | undefined> {
+  return handleApi(
+    request,
+    context,
+    headerCaller({ ownerLogin: OWNER }, undefined, context.devices),
+  );
 }
 
 function ownerHeaders(extra?: Record<string, string>): Headers {
@@ -82,7 +95,7 @@ describe("handleApi", () => {
       },
     });
 
-    const response = await handleApi(incoming, context);
+    const response = await callApi(incoming, context);
     expect(response?.status).toBe(403);
     expect(bodyRead).toBe(false);
     expect(await response?.json()).toEqual({ error: "forbidden" });
@@ -99,7 +112,7 @@ describe("handleApi", () => {
         return {};
       },
     });
-    const mismatchResponse = await handleApi(mismatched, context);
+    const mismatchResponse = await callApi(mismatched, context);
     expect(mismatchResponse?.status).toBe(403);
     expect(bodyRead).toBe(false);
   });
@@ -113,10 +126,15 @@ describe("handleApi", () => {
       body: JSON.stringify({ code: issued.code }),
     });
 
-    const response = await handleApi(incoming, context);
+    const response = await callApi(incoming, context);
     expect(response?.status).toBe(201);
     const reply = (await response?.json()) as PairReply;
-    expect(reply).toMatchObject({ role: "control", machine: MACHINE });
+    expect(reply).toMatchObject({
+      role: "control",
+      machine: MACHINE,
+      routes: ROUTES,
+      bridgeKey: BRIDGE_KEY,
+    });
     expect(reply.token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(await devices.findByToken(reply.token)).toMatchObject({
       id: reply.deviceId,
@@ -125,7 +143,7 @@ describe("handleApi", () => {
     });
     expect(fs.files.get("/state/devices.json")).not.toContain(reply.token);
 
-    const replay = await handleApi(
+    const replay = await callApi(
       request("/api/pair", {
         method: "POST",
         headers: ownerHeaders(),
@@ -141,10 +159,10 @@ describe("handleApi", () => {
     const { devices, context } = await setup();
     const device = await devices.add({ token: "phone-token", role: "watch", name: "Phone" });
 
-    const missing = await handleApi(request("/api/health", { headers: ownerHeaders() }), context);
+    const missing = await callApi(request("/api/health", { headers: ownerHeaders() }), context);
     expect(missing?.status).toBe(401);
 
-    const response = await handleApi(
+    const response = await callApi(
       request("/api/devices", {
         headers: ownerHeaders({ Authorization: "Bearer phone-token" }),
       }),
@@ -162,7 +180,7 @@ describe("handleApi", () => {
     const { devices, context } = await setup();
     const caller = await devices.add({ token: "self-token", role: "watch" });
 
-    const revoked = await handleApi(
+    const revoked = await callApi(
       request("/api/devices/self", {
         method: "DELETE",
         headers: ownerHeaders({ Authorization: "Bearer self-token" }),
@@ -171,7 +189,7 @@ describe("handleApi", () => {
     );
     expect(revoked?.status).toBe(204);
 
-    const health = await handleApi(
+    const health = await callApi(
       request("/api/health", {
         headers: ownerHeaders({ Authorization: "Bearer self-token" }),
       }),
@@ -186,7 +204,7 @@ describe("handleApi", () => {
     const watch = await devices.add({ token: "watch-token", role: "watch" });
     const target = await devices.add({ token: "target-token", role: "watch" });
 
-    const denied = await handleApi(
+    const denied = await callApi(
       request(`/api/devices/${target.id}`, {
         method: "DELETE",
         headers: ownerHeaders({ Authorization: "Bearer watch-token" }),
@@ -197,7 +215,7 @@ describe("handleApi", () => {
     expect(await devices.findByToken("target-token")).toBeDefined();
 
     const control = await devices.add({ token: "control-token", role: "control" });
-    const allowed = await handleApi(
+    const allowed = await callApi(
       request(`/api/devices/${target.id}`, {
         method: "DELETE",
         headers: ownerHeaders({ Authorization: "Bearer control-token" }),
@@ -214,8 +232,8 @@ describe("handleApi", () => {
     const { devices, context } = await setup();
     await devices.add({ token: "known-token", role: "watch" });
 
-    expect(await handleApi(request("/index.html"), context)).toBeUndefined();
-    const unknown = await handleApi(
+    expect(await callApi(request("/index.html"), context)).toBeUndefined();
+    const unknown = await callApi(
       request("/api/unknown", {
         headers: ownerHeaders({ Authorization: "Bearer known-token" }),
       }),

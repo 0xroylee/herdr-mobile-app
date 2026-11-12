@@ -1,20 +1,20 @@
 # herdr mobile app research
 
-Researched 2026-10-30. The goal is a phone and web client for herdr that matches what Paseo gives you today: remote access through an end-to-end encrypted relay, a mobile app, and push notifications when an agent needs you.
+Researched 2026-10-30. The goal is a phone and web client for herdr that matches what Paseo gives you today: remote access, a mobile app, and push notifications when an agent needs you. Tailscale remains the direct route. A Cloudflare Tunnel with an end-to-end Noise channel is the chosen route for phones without Tailscale; the Durable Object relay remains an alternative.
 
 ## Summary
 
-Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs on herdr-core, which doesn't share sessions with the old 0.9 TUI. A client built on the old API can't see agents started in the app. By 2026-11-01, Ovis, Collie, Pairfob and Shepherdr all read herdr-core, and Ovis already ships phone apps and push over Tailscale; see [Existing herdr phone clients](#existing-herdr-phone-clients). This project targets herdr-core with a native app. v1 uses Tailscale as well; Paseo's relay design is the upgrade path if that stops being enough.
+Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs on herdr-core, which doesn't share sessions with the old 0.9 TUI. A client built on the old API can't see agents started in the app. By 2026-11-01, Ovis, Collie, Pairfob and Shepherdr all read herdr-core, and Ovis already ships phone apps and push over Tailscale; see [Existing herdr phone clients](#existing-herdr-phone-clients). This project targets herdr-core with a native app. Tailscale remains the direct route. The secure route uses Cloudflare Tunnel with Noise; the Durable Object relay remains an alternative.
 
 ## Decisions
 
-- **2026-10-31: Tailscale for the v1 transport.** The phone reaches the bridge over the user's tailnet through `tailscale serve`. There is no relay in v1. The bridge keeps its transport behind one interface, so the Durable Object relay in [Relay on Cloudflare](#relay-on-cloudflare) can be added later without changing the protocol. What follows from it:
-  - No Noise layer. WireGuard already encrypts traffic device to device, and Tailscale's DERP relays only see WireGuard packets.
+- **2026-10-31: Tailscale for the direct transport.** The phone reaches the bridge over the user's tailnet through `tailscale serve`. There is no relay in v1. The bridge keeps its transport behind one interface, so the Durable Object relay in [Relay on Cloudflare](#relay-on-cloudflare) can be added later without changing the protocol. What follows from that direct-route decision:
+  - The direct route has no Noise layer. WireGuard already encrypts traffic device to device, and Tailscale's DERP relays only see WireGuard packets.
   - The bridge listens on `127.0.0.1` only. `tailscale serve` gives it HTTPS at `<machine>.<tailnet>.ts.net` and adds a `Tailscale-User-Login` header. It strips that header from incoming requests, so tailnet clients can't forge it. The bridge checks it against the owner's login, can confirm the peer with `tailscale whois`, and then checks a per-device token from pairing. Local processes can forge the header, but they can reach herdr-core directly anyway.
   - Tagged devices and Funnel traffic get no identity header. Never run `tailscale funnel` on the bridge; it would put the bridge on the public internet.
-  - Pairing is a QR code carrying the bridge URL and a one-time code, not a public key.
-  - The bridge serves the web build on the same HTTPS hostname.
-  - Push still goes through Expo, so it reaches the phone with Tailscale off. Opening the details needs Tailscale on.
+  - Direct pairing is a QR code carrying the bridge URL and a one-time code. Pair offers for the secure route also carry the bridge's public key.
+  - The direct listener serves the web build on the same HTTPS hostname.
+  - Push still goes through Expo, so it reaches the phone with Tailscale off. The phone can open the details through either route.
   - On iOS, Tailscale takes the only VPN slot, so it can't run beside a proxy app.
   - Enabling HTTPS certificates publishes the machine names and the tailnet's DNS name in the public Certificate Transparency logs.
 - **2026-11-01: Bun workspaces with the hoisted linker.** Bun installs the monorepo and runs the bridge, scripts and tests, and `bun build --compile` can ship the bridge as one binary. Expo's CLI and Metro still run on Node. `bunfig.toml` sets `linker = "hoisted"`, the setting [Tamagui](https://github.com/tamagui/tamagui) uses to run Expo SDK 58 on Bun 1.4. The first `bun install` took 47 s; the same tree took about 15 minutes with npm on this network. If Bun breaks the Expo install, fall back to pnpm with `nodeLinker: hoisted`.
@@ -36,6 +36,29 @@ Build on herdr-core, not the herdr 0.9 socket API. herdr's new desktop app runs 
   - **Q7, Entry points.** Put a `plus` button in the Agents header to open Start. The `+` pill in a space opens Start with that space preselected and `Empty tab` as the last choice. Keep the Spaces header `+` for creating an empty space.
   - **Q8, Confirmation.** Keep the first message visible and show the program, folder, space and tab in the summary before Start. The summary and Start button are the confirmation. Do not add a second alert.
   - **Safety and audit.** Only control devices can start agents. Allow only templates and the named programs, with no shell lines or extra arguments. Restrict folders to the approved roots. Label core-started terminals with `herdr-mobile.origin=<device id>` and log each start on the bridge.
+- **2026-11-07: Cloudflare Tunnel with an end-to-end Noise channel.** The user chose option B and a quick tunnel first, with a named tunnel and domain later. The build was approved on 2026-11-12. Tailscale remains the direct route. This replaces the Summary's earlier relay-upgrade recommendation and the `Recommendation` below that selected a Durable Object relay. Option A, a Cloudflare Durable Object relay, would replace `cloudflared` as the carrier and require deployed relay code. It also needs relay-side bridge authentication, connection and buffer limits, and message batching. Keep it as an alternative.
+  - **Two listeners.** Keep the direct listener on `127.0.0.1:8787` behind `tailscale serve`. It checks `Tailscale-User-Login` and the paired device token. Add a secure listener on `127.0.0.1:8788` behind `cloudflared`. It accepts `GET /ws` only, trusts no headers, and returns `404` for every other path, including `/api`. API calls on this route travel inside the channel. There is no `--secure-web` flag.
+  - **Channel.** The channel is named `herdr secure channel v1`. It uses `Noise_NK_25519_ChaChaPoly_SHA256`, revision 34. The prologue is the ASCII bytes for `herdr-bridge-e2ee/1` followed by version byte `0x01`. All frames are WebSocket binary frames. The initiator sends `0x01` followed by Noise message 1 with an empty payload, 49 bytes total. The responder sends Noise message 2 with an empty payload, 48 bytes total. Both sides then call `split()`. This replaces the older note under [What to take from Paseo](#what-to-take-from-paseo): Noise applies to the secure route, while the direct route uses WireGuard.
+  - **Record format.** Each post-split frame carries exactly one complete record, composed of one or more encrypted chunks. Each chunk's plaintext is `kind(1) || flags(1) || totalLength(u32 BE) || data`. The wire format is `wire = (u16 BE ciphertextLength || ciphertext)+`; each length-prefixed ciphertext is a chunk. A chunk carries at most 65,513 data bytes. Associated data is empty. Counters are 64-bit and never wrap. The receive counter advances only after the authentication tag verifies.
+  - **Close codes.** The bridge and app use this table:
+
+    | Code   | Name                 | When                                                                                                      | Who closes                                                     |
+    | ------ | -------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+    | `1002` | `HANDSHAKE_PROTOCOL` | Wrong version byte, message length other than 49 or 48, text frame, or out-of-turn frame before `split()` | Either side on the invalid frame                               |
+    | `1008` | `RECORD_PROTOCOL`    | Bad tag, duplicate or reordered record, malformed chunk, or oversize record after `split()`               | Either side                                                    |
+    | `4003` | `KEY_MISMATCH`       | Message 1 failed under the responder's key, or message 2 failed under the initiator's pinned key          | Responder on message 1 failure; initiator on message 2 failure |
+    | `1013` | `BUSY`               | 64 handshakes already in progress; refuse the next upgrade                                                | Responder at upgrade                                           |
+    | `1012` | `IDENTITY_ROTATED`   | The identity key was rotated and secure sessions were closed                                              | Bridge                                                         |
+    | `4401` | `BAD_TOKEN`          | Bad token, no first record within 10 seconds, or device revoked                                           | Responder                                                      |
+    | `4402` | `BAD_PAIR_CODE`      | Pairing code is bad or expired                                                                            | Responder                                                      |
+    | `1011` | `CHILD_EXITED`       | The core child exited                                                                                     | Responder                                                      |
+
+    If the initiator receives `4003` before message 2, it rejects with `KeyMismatchError`. If message 2 fails verification, the initiator closes with `4003` and rejects with `KeyMismatchError`.
+  - **Pinning and rotation.** Pair links and QR codes carry the bridge public key as `k`. An `AuthReply` over the direct route can also establish the key because Tailscale authenticates that route. The app pins the key per machine and does not trust a key on first use. A mismatch over the secure route maps to `identity_changed`; the app asks the user to pair again. A different `bridgeKey` in an `AuthReply` over the direct route replaces the pin. `herdr-bridge identity rotate` writes a new key and closes every secure session with `1012`. Direct devices learn the new key on their next connection; secure-only devices pair again. Revocation also closes secure sessions.
+  - **Pair offers and fresh links.** A v2 offer carries optional direct URL `u`, optional secure URL `s`, pinned key `k`, one-time code `c`, and optional machine name `n`; at least one route is present. A fresh link whose `k` matches a stored machine's pin changes only `routes.secure.url`, using `s`; it keeps the token and key, makes that machine active, and does not redeem the code. It never changes `routes.direct`. `routes.direct` changes only from an `AuthReply` or `PairReply` received over an authenticated route. A typed URL and code without `k` can pair over the direct route only. A device paired before U19 keeps its old URL as `routes.direct` during migration.
+  - **URL rules.** `normalizeOrigin(value, {allowPlainHttp: "loopback-and-private" | "any"})` is the single URL validator in `packages/protocol/src/pair-offer.ts`. A route URL is an `http://` or `https://` origin without credentials, path, query, or fragment. The WebSocket scheme follows the route scheme. The pair-offer parser and app accept both schemes for `u` and `s`. `--secure-url` and `secure url` accept HTTPS for any host, and HTTP only for loopback (`127.0.0.0/8`, `::1`, `localhost`) or private hosts (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, and link-local). `--public-url` accepts HTTPS for any host and HTTP only for loopback (`127.0.0.0/8`, `::1`, `localhost`). It rejects private-network HTTP because the direct route would send the token across the LAN in plaintext.
+  - **Quick tunnel.** Start with `cloudflared tunnel --url http://127.0.0.1:8788 --metrics 127.0.0.1:20241 --protocol http2 --edge-ip-version 4`. `herdr-bridge secure url --from-cloudflared` reads the quick-tunnel hostname from the local metrics endpoint on `127.0.0.1:20241` through `20245` and updates the advertised secure URL. A named tunnel can use `--secure-url` in its launch configuration. No code change is needed when moving from the quick tunnel to the named tunnel.
+  - **No bridge-side per-IP limiter.** A quick-tunnel hostname is random and unpublished, and its wildcard certificate does not make the hostname discoverable through certificate logs. A connection without the bridge's public key costs one X25519 operation and one close, with no retained state. Pairing codes allow five tries over ten minutes and are reachable only after message 1 succeeds. The 64-handshake cap and 10-second deadlines bound memory, while `cloudflared` limits the quick tunnel to 200 in-flight requests. Logs and `handshakeFailuresLastHour` expose failures. If the counter shows abuse, add a per-IP bucket inside `SecureListener`.
 
 ## What herdr looks like now
 
@@ -87,9 +110,9 @@ Paths are relative to the root of the [Paseo repository](https://github.com/getp
 
 | Piece          | How Paseo does it                                                                                                                                                                                                                                   | Use for herdr                                                                                                                                |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Encryption     | Noise NK. The phone gets the daemon's public key from the pairing QR, so the relay only sees ciphertext. Code is in `packages/relay/src/secure-channel.ts`, `noise/` and `protected-records.ts`. The design is in `docs/relay-endpoint-security.md` | Not needed over Tailscale. Reuse it if a relay is added                                                                                      |
+| Encryption     | Noise NK. The phone gets the daemon's public key from the pairing QR, so the relay only sees ciphertext. Code is in `packages/relay/src/secure-channel.ts`, `noise/` and `protected-records.ts`. The design is in `docs/relay-endpoint-security.md` | The secure route uses Noise over Cloudflare Tunnel. Reuse Paseo's Noise and protected-record code; the direct Tailscale route uses WireGuard |
 | Relay server   | The production relay is [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay), written in Elixir. The Cloudflare relay in `packages/relay` is legacy and no longer deployed                                                               | Deferred, see [Decisions](#decisions) and [Relay on Cloudflare](#relay-on-cloudflare). Don't use `relay.paseo.sh`, that's Paseo's own server |
-| Pairing        | A QR or link `https://app.paseo.sh/#offer=<base64url>` holding the server id, public key and relay address. The part after `#` never reaches a server. Format is in `packages/protocol/src/connection-offer.ts`                                     | Reuse the QR flow to carry the bridge URL and a one-time pairing code                                                                        |
+| Pairing        | A QR or link `https://app.paseo.sh/#offer=<base64url>` holding the server id, public key and relay address. The part after `#` never reaches a server. Format is in `packages/protocol/src/connection-offer.ts`                                     | Carry bridge routes, the one-time pairing code, and the pinned bridge key                                                                    |
 | Push           | The daemon calls Expo's push service. Tokens expire after 48 h unless renewed. See `packages/server/src/server/push/` and `docs/notifications.md`                                                                                                   | Same, triggered by agent status changes                                                                                                      |
 | Phone terminal | `@xterm/headless` parses the output and native React Native views draw it, in `packages/app/src/terminal/native-renderer/`. The web build uses xterm.js                                                                                             | Feed it herdr-core's terminal stream                                                                                                         |
 | App            | Expo 57, React Native 0.86, expo-router, zustand, react-query, expo-sqlite, expo-camera for QR, EAS for builds                                                                                                                                      | Same stack                                                                                                                                   |
@@ -99,32 +122,31 @@ One part doesn't carry over. Paseo runs agents through their SDKs, so its main s
 ## Proposed architecture
 
 ```
-Phone / browser: Expo app on iOS, Android, web, with Tailscale on
-      │  HTTPS and WebSocket to https://<machine>.<tailnet>.ts.net
-      │  WireGuard inside the tailnet, direct or through Tailscale's DERP relays
-      ▼
-tailscale serve on the agent machine: TLS, adds Tailscale-User-Login
-      │  http://127.0.0.1:<port>
-      ▼
-herdr-bridge: new code, runs where the agents run
-  • checks Tailscale-User-Login, then the device token from pairing
-  • pairing, device list and revoke, QR with the bridge URL and a one-time code
-  • per phone session: start `hc connect` and pass messages through
-  • per-device permissions, e.g. a watch-only device can list, read and observe
-  • watch core events → push via Expo on blocked, done, error, unless that phone is already watching
-  • serves the web build
-  • later: transcript readers for a chat view
-      │  stdin/stdout
-      ▼
+Phone with Tailscale                 Phone without Tailscale
+      │                                      │
+      ▼                                      ▼
+tailscale serve                    Cloudflare edge → cloudflared
+      │                                      │
+      ▼                                      ▼
+127.0.0.1:8787                     127.0.0.1:8788
+direct listener                    secure listener
+identity header + token            GET /ws only; Noise; no trusted headers
+      └──────────────────┬───────────────────┘
+                         ▼
+herdr-bridge: starts `hc connect`, pairs devices, checks permissions and watches core events
+                         │  stdin/stdout
+                         ▼
 herdr-core  ◄── herdr-app desktop window, same terminals and spaces
 ```
+
+The direct listener also serves the web build. The secure listener returns `404` for every path except `/ws`.
 
 Recommended decisions:
 
 1. **Pass core's protocol through instead of designing a new API.** The phone talks to herdr-core directly. The bridge adds a few calls of its own for push, devices and history. Core's API is add-only, and a test fails on any change that would break existing clients. That makes the phone another core client, like herdr-app. The bridge checks the method name of each call against the device's permissions and forwards the rest.
 2. **Read spaces and tabs defensively.** herdr-app documents `herdr.space` and `herdr.tab` labels on terminals. The app's stored layout has names and order, but its format is private to the app. Nenu's author asked upstream which one clients should use in [herdr-app#43](https://github.com/herdrdev/herdr-app/issues/43), with no answer as of 2026-10-30. [Supporting herdr-app](#supporting-herdr-app) has the plan.
 3. **Run the bridge on a machine that stays awake.** A sleeping MacBook means the phone shows nothing.
-4. **Keep message text out of push payloads, or encrypt it.** Paseo puts message previews in the push, which Expo, Apple and Google can read. Either send a generic alert and load details over the tailnet, or encrypt the payload and decrypt it on the phone with an iOS Notification Service Extension.
+4. **Keep message text out of push payloads, or encrypt it.** Paseo puts message previews in the push, which Expo, Apple and Google can read. Either send a generic alert and load details over an available route, or encrypt the payload and decrypt it on the phone with an iOS Notification Service Extension.
 
 ## Supporting herdr-app
 
@@ -185,11 +207,11 @@ Accounts and hosting:
 - Apple Developer Program, for TestFlight and push keys
 - Google Play Console, or distribute APK files yourself
 - An Expo account with an EAS project, plus a Firebase project for Android push
-- A Tailscale account. The free Personal plan covers 6 users with unlimited devices, for non-commercial use. In the admin console's DNS page, turn on MagicDNS, then Enable HTTPS under HTTPS Certificates
+- A Tailscale account for the direct route. The free Personal plan covers 6 users with unlimited devices, for non-commercial use. In the admin console's DNS page, turn on MagicDNS, then Enable HTTPS under HTTPS Certificates
 
 Local:
 
-- **Tailscale** on the agent machine and on the phone, signed in to the same tailnet. On 2026-10-31 this Mac didn't have it installed.
+- **Tailscale** on the agent machine for the direct route. Install it on the phone only if you want to use that route. On 2026-10-31 this Mac didn't have it installed.
 - **herdr-app**, which also installs herdr-core: `curl -fsSL https://releases.herdr.dev/app/install.sh | sh`. Read the script first, it downloads and runs code.
 - **API types.** Save the API with `hc schema > hc.openrpc.json` and generate TypeScript types from it.
 - **Test isolation.** Run tests against a throwaway core with `HC_SESSION=test` and separate `XDG_STATE_HOME` and `XDG_CONFIG_HOME`. herdr-core's own docs say tests must stay off your real core.
@@ -211,7 +233,7 @@ herdr-mobile-app/
 2. **First app over Tailscale.** Bridge on `127.0.0.1` behind `tailscale serve`, with the identity header check and a pairing token. App with an agent list sorted blocked, done, working, idle, which matches the desktop app. Add a watch-mode terminal, a text box that uses `terminal.send`, a key bar that uses `terminal.keys`, and push on blocked, done and error.
 3. **Web build.** The bridge serves the Expo web build on the same hostname, so any browser on the tailnet works.
 4. **Extras.** Spaces and tabs, starting agents from the phone with `terminal.run` and the space and tab labels, more machines, a chat view built from transcripts, prompts as buttons.
-5. **Relay, only if Tailscale stops being enough.** See [Relay on Cloudflare](#relay-on-cloudflare).
+5. **Secure route for phones without Tailscale.** Start with a TryCloudflare quick tunnel and the Noise channel. Move to a named tunnel on a custom domain later. Keep the Durable Object relay as an alternative in [Relay on Cloudflare](#relay-on-cloudflare).
 
 Risks:
 
@@ -249,7 +271,7 @@ Fix these before putting it on the internet:
 
 ### Option 2: Cloudflare Tunnel
 
-Skip the relay. The bridge listens on localhost, and `cloudflared` publishes it at a hostname on your domain. The phone connects straight to that hostname.
+Skip the relay. The bridge's secure listener runs on localhost, and `cloudflared` publishes its Noise-protected WebSocket at a hostname on your domain. The phone connects to that hostname.
 
 Advantages:
 
@@ -291,7 +313,7 @@ The relay can be free; the app can't be entirely. iOS distribution needs the App
 
 ### Recommendation
 
-Start with the Durable Object relay on the Workers Free plan, the budget above, and the five fixes. If the cap gets in the way, move to Workers Paid at $5 a month; nothing else changes. Use a tunnel for a quick personal setup with no relay code.
+Use Cloudflare Tunnel with the Noise channel for phones without Tailscale. Start with a TryCloudflare quick tunnel, then move to a named tunnel and a custom domain. This replaces the 2026-10-31 recommendation to start with the Durable Object relay. Keep that relay as Option A for comparison; it requires deployed relay code and the authentication, connection and buffer limits, and batching work listed above.
 
 ## Appendix: protocol notes
 

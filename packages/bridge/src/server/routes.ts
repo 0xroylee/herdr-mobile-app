@@ -1,22 +1,33 @@
 import type {
   BridgeMachine,
+  BridgeRoutes,
   DeviceRecordView,
   HttpErrorBody,
   PairReply,
   PairRequest,
 } from "@herdr-mobile/protocol";
+import { handleAgentsRoutes } from "./agents-routes.ts";
+import { type AppCliContext, handleAppCli } from "./app-cli.ts";
+import type { ResolveCaller } from "./caller.ts";
+import { resolveCallerResult } from "./caller.ts";
 import type { DeviceStore } from "./devices.ts";
-import type { IdentityConfig, WhoisLookup } from "./identity.ts";
-import { checkIdentity } from "./identity.ts";
 import type { PairingCodes } from "./pairing.ts";
+import type { AgentStarter } from "./start-agent.ts";
 import { createToken } from "./tokens.ts";
 
 export interface ApiContext {
-  identity: IdentityConfig;
-  whois?: WhoisLookup;
   devices: DeviceStore;
   pairing: PairingCodes;
   machine: BridgeMachine;
+  routes: () => BridgeRoutes;
+  bridgeKey: () => string;
+  authorizePairing: (request: Request) => Promise<boolean>;
+}
+
+export interface ApiDispatchContext {
+  api: ApiContext;
+  appCli: AppCliContext;
+  agentStarter?: AgentStarter;
 }
 
 function json<T>(value: T, status = 200): Response {
@@ -43,33 +54,29 @@ function isPairRequest(value: unknown): value is PairRequest {
   );
 }
 
-function bearerToken(headers: Headers): string | undefined {
-  const authorization = headers.get("Authorization");
-  if (!authorization) return undefined;
-  const match = /^Bearer ([A-Za-z0-9_-]+)$/u.exec(authorization);
-  return match?.[1];
-}
-
 function methodNotAllowed(allow: string): Response {
   return failure(405, "method_not_allowed", `Use ${allow}.`);
 }
 
 /** Handles the bridge HTTP API without opening a server or reading an unauthenticated body. */
-export async function handleApi(request: Request, ctx: ApiContext): Promise<Response | undefined> {
+export async function handleApi(
+  request: Request,
+  ctx: ApiContext,
+  resolveCaller: ResolveCaller,
+): Promise<Response | undefined> {
   const url = new URL(request.url);
   const path = url.pathname;
   if (path !== "/api" && !path.startsWith("/api/")) return undefined;
 
-  if (!(await checkIdentity(request.headers, ctx.identity, ctx.whois))) {
-    return failure(403, "forbidden");
-  }
-
   const pairingRoute = path === "/api/pair";
   let caller: DeviceRecordView | undefined;
-  if (!pairingRoute) {
-    const token = bearerToken(request.headers);
-    caller = token ? await ctx.devices.findByToken(token) : undefined;
-    if (!caller) return failure(401, "unauthorized");
+  if (pairingRoute) {
+    if (!(await ctx.authorizePairing(request))) return failure(403, "forbidden");
+  } else {
+    const result = await resolveCallerResult(request, resolveCaller);
+    if (!result.ok)
+      return failure(result.status, result.status === 403 ? "forbidden" : "unauthorized");
+    caller = result.caller.device;
   }
 
   if (path === "/api/pair") {
@@ -81,6 +88,9 @@ export async function handleApi(request: Request, ctx: ApiContext): Promise<Resp
       return failure(400, "bad_request");
     }
     if (!isPairRequest(body)) return failure(400, "bad_request");
+
+    const routes = ctx.routes();
+    const bridgeKey = ctx.bridgeKey();
 
     const grant = ctx.pairing.redeem(body.code);
     if (!grant) return failure(400, "bad_code");
@@ -96,6 +106,8 @@ export async function handleApi(request: Request, ctx: ApiContext): Promise<Resp
       token,
       role: grant.role,
       machine: ctx.machine,
+      routes,
+      bridgeKey,
     };
     return json(reply, 201);
   }
@@ -126,4 +138,19 @@ export async function handleApi(request: Request, ctx: ApiContext): Promise<Resp
   }
 
   return failure(404, "not_found");
+}
+
+/** Dispatches all direct and channel API paths through the same route handlers. */
+export async function dispatchApi(
+  request: Request,
+  resolveCaller: ResolveCaller,
+  context: ApiDispatchContext,
+): Promise<Response | undefined> {
+  if (context.agentStarter) {
+    const agentsResponse = await handleAgentsRoutes(request, context.agentStarter, resolveCaller);
+    if (agentsResponse) return agentsResponse;
+  }
+  const appResponse = await handleAppCli(request, context.appCli, resolveCaller);
+  if (appResponse) return appResponse;
+  return handleApi(request, context.api, resolveCaller);
 }

@@ -1,12 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FakeCore, flush, frame, line } from "@herdr-mobile/hc-client/testing";
 import { BRIDGE_WS_CLOSE_CODES, type DeviceRecordView } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
 import type { AppCliContext } from "./app-cli.ts";
+import { headerPairingAuthorization } from "./caller.ts";
 import { runCli } from "./cli.ts";
 import type { BridgeConfig } from "./config.ts";
 import type { StoreFs } from "./devices.ts";
@@ -200,6 +201,7 @@ interface FakeServe {
   calls: FakeServeOptions[];
   admin?: FakeServeOptions;
   web?: FakeServeOptions;
+  secure?: FakeServeOptions;
   restore(): void;
 }
 
@@ -215,6 +217,10 @@ function fakeServe(): FakeServe {
       writeFileSync(options.unix, "fake admin socket");
       captured.admin = options;
       return { stop() {} };
+    }
+    if (options.port === 8788) {
+      captured.secure = options;
+      return { port: options.port, stop() {} };
     }
     captured.web = options;
     return { port: options.port, stop() {} };
@@ -239,7 +245,7 @@ interface BridgeHarness {
   dispose(): Promise<void>;
 }
 
-async function startHarness(): Promise<BridgeHarness> {
+async function startHarness(secure?: { port: number; url?: string }): Promise<BridgeHarness> {
   const scratch = join(process.cwd(), ".unshit");
   await mkdir(scratch, { recursive: true });
   const root = await mkdtemp(join(scratch, "serve-u4-"));
@@ -252,6 +258,7 @@ async function startHarness(): Promise<BridgeHarness> {
     host: "127.0.0.1",
     port: 8787,
     publicUrl: "https://mac.tailnet.ts.net",
+    ...(secure === undefined ? {} : { secure }),
     webDir: join(root, "web"),
     hcPath: "/fake/hc",
     herdrAppPath: "/fake/herdr-app",
@@ -330,8 +337,11 @@ async function adminStatus(harness: BridgeHarness): Promise<{ sessions: number }
   return { sessions: status.sessions };
 }
 
-async function withHarness<T>(work: (harness: BridgeHarness) => Promise<T>): Promise<T> {
-  const harness = await startHarness();
+async function withHarness<T>(
+  work: (harness: BridgeHarness) => Promise<T>,
+  secure?: { port: number; url?: string },
+): Promise<T> {
+  const harness = await startHarness(secure);
   try {
     return await work(harness);
   } finally {
@@ -376,8 +386,6 @@ async function setup() {
   const staticFs = new FakeStaticFs();
   const identity = { ownerLogin: "owner@example.com" };
   const appCli: AppCliContext = {
-    identity,
-    devices,
     runner: new FakeRunner(),
     env: {},
     cwd: "/",
@@ -403,7 +411,14 @@ async function setup() {
     coreCall: async () => ({ templates: [] }),
   });
   const handler = createBridgeFetchHandler({
-    api: { identity, devices, pairing, machine: { id: "mac-1", name: "Mac" } },
+    api: {
+      devices,
+      pairing,
+      machine: { id: "mac-1", name: "Mac" },
+      routes: () => ({ direct: "https://mac.tailnet.ts.net" }),
+      bridgeKey: () => "a".repeat(43),
+      authorizePairing: headerPairingAuthorization(identity, undefined),
+    },
     appCli,
     agentStarter,
     identity,
@@ -462,9 +477,13 @@ describe("bridge HTTP dispatch", () => {
       }),
     );
     expect(paired?.status).toBe(201);
+    const pairedBody = (await paired?.json()) as { token: string };
+    expect(pairedBody).toMatchObject({
+      routes: { direct: "https://mac.tailnet.ts.net" },
+      bridgeKey: "a".repeat(43),
+    });
     expect(await devices.list()).toHaveLength(1);
 
-    const pairedBody = (await paired?.json()) as { token: string };
     const catalog = await handler(
       new Request("http://bridge/api/agents/catalog", {
         headers: { ...ownerHeaders, Authorization: `Bearer ${pairedBody.token}` },
@@ -569,6 +588,91 @@ describe("bridge HTTP dispatch", () => {
 });
 
 describe("bridge WebSocket lifecycle", () => {
+  test("wires the identity and advertised routes into admin status and pair replies", async () => {
+    await withHarness(async (harness) => {
+      const adminFetch = harness.serve.admin?.fetch;
+      const webFetch = harness.serve.web?.fetch;
+      if (!adminFetch || !webFetch)
+        throw new Error("fake Bun servers did not receive fetch handlers");
+
+      const statusResponse = await adminFetch(new Request("http://admin/status"));
+      const statusText = statusResponse ? await statusResponse.clone().text() : "";
+      const status = (await statusResponse?.json()) as {
+        bridgeKey: string;
+        secure: {
+          port?: number;
+          url?: string;
+          sessions: number;
+          handshakeFailuresLastHour: number;
+        };
+      };
+      expect(status.bridgeKey).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      expect(status.secure).toEqual({ sessions: 0, handshakeFailuresLastHour: 0 });
+
+      const issuedResponse = await adminFetch(
+        new Request("http://admin/pair-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "control", name: "Phone" }),
+        }),
+      );
+      const issued = (await issuedResponse?.json()) as { code: string };
+      const pairResponse = await webFetch(
+        new Request("http://bridge/api/pair", {
+          method: "POST",
+          headers: {
+            ...ownerHeaders,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code: issued.code }),
+        }),
+      );
+      const pairText = pairResponse ? await pairResponse.clone().text() : "";
+      const pair = (await pairResponse?.json()) as {
+        bridgeKey: string;
+        routes: { direct?: string; secure?: string };
+      };
+
+      expect(pair.bridgeKey).toBe(status.bridgeKey);
+      expect(pair.routes).toEqual({ direct: "https://mac.tailnet.ts.net" });
+      const identity = JSON.parse(
+        await readFile(join(harness.root, "state", "identity.json"), "utf8"),
+      ) as { secretKey: string };
+      expect(statusText).not.toContain(identity.secretKey);
+      expect(pairText).not.toContain(identity.secretKey);
+      expect(harness.output.join("\n")).not.toContain(identity.secretKey);
+    });
+  });
+
+  test("reports the secure listener URL and channel counters in admin status", async () => {
+    await withHarness(
+      async (harness) => {
+        expect(harness.serve.calls).toHaveLength(3);
+        expect(harness.serve.secure?.hostname).toBe("127.0.0.1");
+        const status = await adminStatus(harness);
+        expect(status).toEqual({ sessions: 0 });
+        const fetch = harness.serve.admin?.fetch;
+        if (!fetch) throw new Error("fake Bun server did not receive the admin handler");
+        const response = await fetch(new Request("http://admin/status"));
+        const body = (await response?.json()) as {
+          secure: {
+            port: number;
+            url: string;
+            sessions: number;
+            handshakeFailuresLastHour: number;
+          };
+        };
+        expect(body.secure).toEqual({
+          port: 8788,
+          url: "https://bridge.example.test",
+          sessions: 0,
+          handshakeFailuresLastHour: 0,
+        });
+      },
+      { port: 8788, url: "https://bridge.example.test" },
+    );
+  });
+
   test("starts with mocked Bun servers, authenticates roles, and updates session counts", async () => {
     await withHarness(async (harness) => {
       expect(harness.serve.calls).toHaveLength(2);
@@ -634,22 +738,65 @@ describe("bridge WebSocket lifecycle", () => {
     });
   });
 
+  test("accepts PairMessage on the direct listener and stores the paired device", async () => {
+    await withHarness(async (harness) => {
+      const adminFetch = harness.serve.admin?.fetch;
+      if (!adminFetch) throw new Error("fake Bun server did not receive the admin handler");
+      const issuedResponse = await adminFetch(
+        new Request("http://admin/pair-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "control", name: "Phone" }),
+        }),
+      );
+      const issued = (await issuedResponse?.json()) as { code: string };
+      const socket = await openSocket(harness);
+      websocketCallbacks(harness).message(
+        socket,
+        JSON.stringify({ v: 1, pair: { code: issued.code, name: "Direct phone" } }),
+      );
+      await settle();
+
+      const reply = JSON.parse(String(socket.sent[0])) as {
+        deviceId: string;
+        token: string;
+        role: string;
+        routes: { direct: string };
+        bridgeKey: string;
+      };
+      expect(reply).toMatchObject({
+        role: "control",
+        routes: { direct: "https://mac.tailnet.ts.net" },
+      });
+      expect(reply.bridgeKey).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      expect(await harness.bridge.devices.findByToken(reply.token)).toMatchObject({
+        id: reply.deviceId,
+        name: "Direct phone",
+        role: "control",
+      });
+      expect(await adminStatus(harness)).toEqual({ sessions: 1 });
+    });
+  });
+
   test("rejects malformed, binary, and missing authentication and clears the fake-clock deadline", async () => {
     await withHarness(async (harness) => {
       const callbacks = websocketCallbacks(harness);
       const malformed = await openSocket(harness);
       expect(harness.clock.pending).toBe(1);
       callbacks.message(malformed, "not-json");
+      await settle();
       expect(malformed.closes[0]?.code).toBe(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN);
       expect(harness.clock.pending).toBe(0);
 
       const invalidShape = await openSocket(harness);
       callbacks.message(invalidShape, JSON.stringify({ v: 2, token: "control-token" }));
+      await settle();
       expect(invalidShape.closes[0]?.code).toBe(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN);
       expect(harness.clock.pending).toBe(0);
 
       const binary = await openSocket(harness);
       callbacks.message(binary, new Uint8Array([0x7b, 0x7d]));
+      await settle();
       expect(binary.closes[0]?.code).toBe(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN);
       expect(harness.clock.pending).toBe(0);
 

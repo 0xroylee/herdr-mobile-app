@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
 import { handleAgentsRoutes } from "./agents-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
+import { headerCaller } from "./caller.ts";
 import { DeviceStore, type StoreFs } from "./devices.ts";
 import { AgentStarter } from "./start-agent.ts";
 
@@ -59,8 +60,6 @@ async function setup(roots = ["/home/owner"]) {
   await devices.add({ token: "watch-token", role: "watch", name: "Watch phone" });
   const runner = new FakeRunner();
   const context: AppCliContext = {
-    identity: { ownerLogin: "owner@example.com" },
-    devices,
     runner,
     env: { HOME: "/home/owner", PATH: "/usr/bin" },
     cwd: "/repo",
@@ -89,7 +88,13 @@ async function setup(roots = ["/home/owner"]) {
       return { address: "t31", templates: [] };
     },
   });
-  return { context, starter, runner, coreCalls };
+  return {
+    context,
+    starter,
+    runner,
+    coreCalls,
+    resolveCaller: headerCaller({ ownerLogin: "owner@example.com" }, undefined, devices),
+  };
 }
 
 function routeRequest(path: string, token: string, method = "GET", body?: string): Request {
@@ -106,11 +111,11 @@ function routeRequest(path: string, token: string, method = "GET", body?: string
 
 describe("agent routes", () => {
   test("returns the catalog to a control device", async () => {
-    const { context, starter, runner, coreCalls } = await setup();
+    const { starter, runner, coreCalls, resolveCaller } = await setup();
     const response = await handleAgentsRoutes(
       routeRequest("/api/agents/catalog", "control-token"),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(response?.status).toBe(200);
@@ -126,22 +131,22 @@ describe("agent routes", () => {
   });
 
   test("de-duplicates normalized roots in the catalog", async () => {
-    const { context, starter } = await setup(["/home/owner", "/home/owner/../owner"]);
+    const { starter, resolveCaller } = await setup(["/home/owner", "/home/owner/../owner"]);
     const response = await handleAgentsRoutes(
       routeRequest("/api/agents/catalog", "control-token"),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(await response?.json()).toMatchObject({ roots: ["/home/owner"] });
   });
 
   test("denies a watch device before reading the body or spawning a process", async () => {
-    const { context, starter, runner, coreCalls } = await setup();
+    const { starter, runner, coreCalls, resolveCaller } = await setup();
     const response = await handleAgentsRoutes(
       routeRequest("/api/agents/start", "watch-token", "POST", "not json"),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(response?.status).toBe(403);
@@ -151,11 +156,11 @@ describe("agent routes", () => {
   });
 
   test("rejects malformed and shell-line bodies with 400", async () => {
-    const { context, starter, runner, coreCalls } = await setup();
+    const { starter, runner, coreCalls, resolveCaller } = await setup();
     const malformed = await handleAgentsRoutes(
       routeRequest("/api/agents/start", "control-token", "POST", "{"),
-      context,
       starter,
+      resolveCaller,
     );
     const withLine = await handleAgentsRoutes(
       routeRequest(
@@ -169,8 +174,8 @@ describe("agent routes", () => {
           line: "echo unsafe",
         }),
       ),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(malformed?.status).toBe(400);
@@ -180,7 +185,7 @@ describe("agent routes", () => {
   });
 
   test("starts a valid request and returns the starter reply", async () => {
-    const { context, starter, runner, coreCalls } = await setup();
+    const { starter, runner, coreCalls, resolveCaller } = await setup();
     const response = await handleAgentsRoutes(
       routeRequest(
         "/api/agents/start",
@@ -192,8 +197,8 @@ describe("agent routes", () => {
           space: { kind: "new", name: "Review" },
         }),
       ),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(response?.status).toBe(200);
@@ -204,7 +209,7 @@ describe("agent routes", () => {
   });
 
   test("returns the core placement's first-message restriction to the caller", async () => {
-    const { context, starter, runner, coreCalls } = await setup();
+    const { starter, runner, coreCalls, resolveCaller } = await setup();
     const response = await handleAgentsRoutes(
       routeRequest(
         "/api/agents/start",
@@ -217,8 +222,8 @@ describe("agent routes", () => {
           task: "--dangerously-skip-permissions",
         }),
       ),
-      context,
       starter,
+      resolveCaller,
     );
 
     expect(response?.status).toBe(422);
