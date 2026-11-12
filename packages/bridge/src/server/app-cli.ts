@@ -1,10 +1,8 @@
-import type { DeviceRecordView } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import { DeadlineError, systemClock, within } from "../prototype/deadline.ts";
 import type { ProcessRunner } from "../prototype/process.ts";
-import type { DeviceStore } from "./devices.ts";
-import type { WhoisLookup } from "./identity.ts";
-import { checkIdentity } from "./identity.ts";
+import type { Caller, ResolveCaller } from "./caller.ts";
+import { resolveCallerResult } from "./caller.ts";
 
 const APP_ACTIONS = new Set(["space.new", "tab.new"]);
 const APP_ACTION_TIMEOUT_MS = 10_000;
@@ -19,11 +17,7 @@ export interface HerdrAppProcessContext {
   clock?: Clock;
 }
 
-export interface AppCliContext extends HerdrAppProcessContext {
-  identity: { ownerLogin: string };
-  whois?: WhoisLookup;
-  devices: DeviceStore;
-}
+export type AppCliContext = HerdrAppProcessContext;
 
 interface CapturedProcess {
   exitCode: number | null;
@@ -44,11 +38,6 @@ function failure(status: number, error: string, message?: string): Response {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function bearerToken(headers: Headers): string | undefined {
-  const match = /^Bearer ([A-Za-z0-9_-]+)$/u.exec(headers.get("Authorization") ?? "");
-  return match?.[1];
 }
 
 function collect(
@@ -105,16 +94,13 @@ export async function runHerdrApp(
 
 export async function authenticatedCaller(
   request: Request,
-  context: AppCliContext,
-): Promise<DeviceRecordView | Response> {
-  if (!(await checkIdentity(request.headers, context.identity, context.whois))) {
-    return failure(403, "forbidden");
-  }
-  const token = bearerToken(request.headers);
-  const caller = token ? await context.devices.findByToken(token) : undefined;
-  if (!caller) return failure(401, "unauthorized");
-  if (caller.role !== "control") return failure(403, "forbidden");
-  return caller;
+  resolveCaller: ResolveCaller,
+): Promise<Caller | Response> {
+  const result = await resolveCallerResult(request, resolveCaller);
+  if (!result.ok)
+    return failure(result.status, result.status === 403 ? "forbidden" : "unauthorized");
+  if (result.caller.device.role !== "control") return failure(403, "forbidden");
+  return result.caller;
 }
 
 export async function requestBody(request: Request): Promise<unknown | Response> {
@@ -151,11 +137,12 @@ function cliFailure(error: unknown): Response {
 export async function handleAppCli(
   request: Request,
   context: AppCliContext,
+  resolveCaller: ResolveCaller,
 ): Promise<Response | undefined> {
   const path = new URL(request.url).pathname;
   if (path !== "/api/app/ls" && path !== "/api/app/do") return undefined;
 
-  const caller = await authenticatedCaller(request, context);
+  const caller = await authenticatedCaller(request, resolveCaller);
   if (caller instanceof Response) return caller;
 
   if (path === "/api/app/ls") {

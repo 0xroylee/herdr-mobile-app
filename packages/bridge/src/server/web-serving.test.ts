@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AppCliContext } from "./app-cli.ts";
+import { headerPairingAuthorization } from "./caller.ts";
 import { parseServeFlags } from "./config.ts";
 import type { StoreFs } from "./devices.ts";
 import { DeviceStore } from "./devices.ts";
@@ -56,8 +57,6 @@ describe("bridge web build serving", () => {
     const devices = await DeviceStore.open(new FakeStoreFs(), "/state/devices.json");
     const runner = new NeverSpawnRunner();
     const appCli: AppCliContext = {
-      identity,
-      devices,
       runner,
       env: {},
       cwd: "/repo",
@@ -65,10 +64,12 @@ describe("bridge web build serving", () => {
     };
     const handler = createBridgeFetchHandler({
       api: {
-        identity,
         devices,
         pairing: new PairingCodes(),
         machine: { id: "mac-1", name: "Mac" },
+        routes: () => ({ direct: "https://mac.tailnet.ts.net" }),
+        bridgeKey: () => "a".repeat(43),
+        authorizePairing: headerPairingAuthorization(identity, undefined),
       },
       appCli,
       identity,
