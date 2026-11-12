@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FakeCore, flush, frame, line } from "@herdr-mobile/hc-client/testing";
 import { BRIDGE_WS_CLOSE_CODES, type DeviceRecordView } from "@herdr-mobile/protocol";
@@ -403,7 +403,14 @@ async function setup() {
     coreCall: async () => ({ templates: [] }),
   });
   const handler = createBridgeFetchHandler({
-    api: { identity, devices, pairing, machine: { id: "mac-1", name: "Mac" } },
+    api: {
+      identity,
+      devices,
+      pairing,
+      machine: { id: "mac-1", name: "Mac" },
+      routes: () => ({ direct: "https://mac.tailnet.ts.net" }),
+      bridgeKey: () => "a".repeat(43),
+    },
     appCli,
     agentStarter,
     identity,
@@ -462,9 +469,13 @@ describe("bridge HTTP dispatch", () => {
       }),
     );
     expect(paired?.status).toBe(201);
+    const pairedBody = (await paired?.json()) as { token: string };
+    expect(pairedBody).toMatchObject({
+      routes: { direct: "https://mac.tailnet.ts.net" },
+      bridgeKey: "a".repeat(43),
+    });
     expect(await devices.list()).toHaveLength(1);
 
-    const pairedBody = (await paired?.json()) as { token: string };
     const catalog = await handler(
       new Request("http://bridge/api/agents/catalog", {
         headers: { ...ownerHeaders, Authorization: `Bearer ${pairedBody.token}` },
@@ -569,6 +580,57 @@ describe("bridge HTTP dispatch", () => {
 });
 
 describe("bridge WebSocket lifecycle", () => {
+  test("wires the identity and advertised routes into admin status and pair replies", async () => {
+    await withHarness(async (harness) => {
+      const adminFetch = harness.serve.admin?.fetch;
+      const webFetch = harness.serve.web?.fetch;
+      if (!adminFetch || !webFetch)
+        throw new Error("fake Bun servers did not receive fetch handlers");
+
+      const statusResponse = await adminFetch(new Request("http://admin/status"));
+      const statusText = statusResponse ? await statusResponse.clone().text() : "";
+      const status = (await statusResponse?.json()) as {
+        bridgeKey: string;
+        secure: { port?: number; url?: string };
+      };
+      expect(status.bridgeKey).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      expect(status.secure).toEqual({});
+
+      const issuedResponse = await adminFetch(
+        new Request("http://admin/pair-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "control", name: "Phone" }),
+        }),
+      );
+      const issued = (await issuedResponse?.json()) as { code: string };
+      const pairResponse = await webFetch(
+        new Request("http://bridge/api/pair", {
+          method: "POST",
+          headers: {
+            ...ownerHeaders,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code: issued.code }),
+        }),
+      );
+      const pairText = pairResponse ? await pairResponse.clone().text() : "";
+      const pair = (await pairResponse?.json()) as {
+        bridgeKey: string;
+        routes: { direct?: string; secure?: string };
+      };
+
+      expect(pair.bridgeKey).toBe(status.bridgeKey);
+      expect(pair.routes).toEqual({ direct: "https://mac.tailnet.ts.net" });
+      const identity = JSON.parse(
+        await readFile(join(harness.root, "state", "identity.json"), "utf8"),
+      ) as { secretKey: string };
+      expect(statusText).not.toContain(identity.secretKey);
+      expect(pairText).not.toContain(identity.secretKey);
+      expect(harness.output.join("\n")).not.toContain(identity.secretKey);
+    });
+  });
+
   test("starts with mocked Bun servers, authenticates roles, and updates session counts", async () => {
     await withHarness(async (harness) => {
       expect(harness.serve.calls).toHaveLength(2);
