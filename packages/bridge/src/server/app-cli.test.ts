@@ -3,6 +3,7 @@ import type { Clock } from "../prototype/deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import { handleAppCli } from "./app-cli.ts";
+import { headerCaller } from "./caller.ts";
 import type { StoreFs } from "./devices.ts";
 import { DeviceStore } from "./devices.ts";
 
@@ -114,17 +115,16 @@ async function context(clock: Clock = new FakeClock()) {
   const devices = await DeviceStore.open(new MapFs(), "/state/devices.json", new FakeClock());
   await devices.add({ token: "control-token", role: "control", name: "Control phone" });
   await devices.add({ token: "watch-token", role: "watch", name: "Watch phone" });
+  const identity = { ownerLogin: "owner@example.com" };
   const runner = new FakeRunner();
   const options: AppCliContext = {
-    identity: { ownerLogin: "owner@example.com" },
-    devices,
     runner,
     env: { PATH: "/usr/bin" },
     cwd: "/Users/owner",
     herdrAppPath: "/opt/herdr/bin/herdr-app",
     clock,
   };
-  return { options, runner };
+  return { options, runner, resolveCaller: headerCaller(identity, undefined, devices) };
 }
 
 function request(path: string, token: string, method = "GET", body?: string): Request {
@@ -141,17 +141,21 @@ function request(path: string, token: string, method = "GET", body?: string): Re
 
 describe("herdr-app CLI API", () => {
   test("returns ls JSON as-is using the configured executable", async () => {
-    const { options, runner } = await context();
+    const { options, runner, resolveCaller } = await context();
     runner.child = new FakeChild('{"spaces":[{"name":"Work"}]}\n', "", 0);
 
-    const response = await handleAppCli(request("/api/app/ls", "control-token"), options);
+    const response = await handleAppCli(
+      request("/api/app/ls", "control-token"),
+      options,
+      resolveCaller,
+    );
     expect(response?.status).toBe(200);
     expect(await response?.text()).toBe('{"spaces":[{"name":"Work"}]}\n');
     expect(runner.argv).toEqual([["/opt/herdr/bin/herdr-app", "ls"]]);
   });
 
   test("allows only space.new and tab.new and builds argv without a shell", async () => {
-    const { options, runner } = await context();
+    const { options, runner, resolveCaller } = await context();
     const response = await handleAppCli(
       request(
         "/api/app/do",
@@ -160,6 +164,7 @@ describe("herdr-app CLI API", () => {
         JSON.stringify({ action: "space.new", args: { name: "Planning", task: "Review code" } }),
       ),
       options,
+      resolveCaller,
     );
     expect(response?.status).toBe(200);
     expect(runner.argv).toEqual([
@@ -176,18 +181,22 @@ describe("herdr-app CLI API", () => {
   });
 
   test("requires matching identity and a control device", async () => {
-    const { options, runner } = await context();
+    const { options, runner, resolveCaller } = await context();
     const wrongIdentity = new Request("http://bridge/api/app/ls", {
       headers: { Authorization: "Bearer control-token", "Tailscale-User-Login": "other" },
     });
-    expect((await handleAppCli(wrongIdentity, options))?.status).toBe(403);
-    expect((await handleAppCli(request("/api/app/ls", "watch-token"), options))?.status).toBe(403);
-    expect((await handleAppCli(request("/api/app/ls", "missing"), options))?.status).toBe(401);
+    expect((await handleAppCli(wrongIdentity, options, resolveCaller))?.status).toBe(403);
+    expect(
+      (await handleAppCli(request("/api/app/ls", "watch-token"), options, resolveCaller))?.status,
+    ).toBe(403);
+    expect(
+      (await handleAppCli(request("/api/app/ls", "missing"), options, resolveCaller))?.status,
+    ).toBe(401);
     expect(runner.argv).toEqual([]);
   });
 
   test("rejects unknown actions, invalid flag names and non-string values", async () => {
-    const { options, runner } = await context();
+    const { options, runner, resolveCaller } = await context();
     for (const body of [
       { action: "doc.set", args: {} },
       { action: "tab.new", args: { bad_name: "value" } },
@@ -196,6 +205,7 @@ describe("herdr-app CLI API", () => {
       const response = await handleAppCli(
         request("/api/app/do", "control-token", "POST", JSON.stringify(body)),
         options,
+        resolveCaller,
       );
       expect(response?.status).toBe(400);
     }
@@ -203,11 +213,12 @@ describe("herdr-app CLI API", () => {
   });
 
   test("reports non-zero exit as 409 with stderr", async () => {
-    const { options, runner } = await context();
+    const { options, runner, resolveCaller } = await context();
     runner.child = new FakeChild("", "Herdr isn't running on this Mac", 1);
     const response = await handleAppCli(
       request("/api/app/do", "control-token", "POST", JSON.stringify({ action: "tab.new" })),
       options,
+      resolveCaller,
     );
     expect(response?.status).toBe(409);
     expect(await response?.json()).toEqual({
@@ -218,12 +229,13 @@ describe("herdr-app CLI API", () => {
 
   test("kills a herdr-app process at the ten-second deadline", async () => {
     const clock = new ManualClock();
-    const { options, runner } = await context(clock);
+    const { options, runner, resolveCaller } = await context(clock);
     const child = new HangingChild();
     runner.child = child;
     const responsePromise = handleAppCli(
       request("/api/app/do", "control-token", "POST", JSON.stringify({ action: "space.new" })),
       options,
+      resolveCaller,
     );
     for (let index = 0; index < 20 && clock.callback === undefined; index++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
