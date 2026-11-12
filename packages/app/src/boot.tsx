@@ -36,7 +36,13 @@ export function Boot({ children, onReady }: { children: ReactNode; onReady(): vo
       },
       applyTheme,
       createManager: (machine: Machine, secrets) =>
-        createConnectionManager({ machine, secrets, core: coreStore.getState() }),
+        createConnectionManager({
+          machine,
+          secrets,
+          core: coreStore.getState(),
+          updateRoutes: (id, routes) => machinesStore.getState().updateRoutes(id, routes),
+          getMachine: (id) => machinesStore.getState().machines[id],
+        }),
       onManager: setManager,
       onReady: () => {
         setReady(true);

@@ -120,7 +120,7 @@ export class PairingController {
     this.unsubscribeConnection();
     this.unsubscribeConnection = () => {};
     this.update({
-      address: input.url,
+      address: input.direct ?? "",
       code: input.code,
       banner: undefined,
       retryable: false,

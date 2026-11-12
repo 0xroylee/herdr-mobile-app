@@ -7,10 +7,12 @@ export type ConnectionState =
   | "connected"
   | "reconnecting"
   | "offline"
-  | "unauthorized";
+  | "unauthorized"
+  | "identity_changed";
 
 export interface MachineCoreState {
   connection: ConnectionState;
+  route?: "direct" | "secure";
   terminals: TerminalTable;
   layout: Layout | undefined;
   snapshotAt: number | null;
@@ -18,7 +20,7 @@ export interface MachineCoreState {
 
 export interface CoreStore {
   machines: Record<string, MachineCoreState>;
-  setConnection(machineId: string, connection: ConnectionState): void;
+  setConnection(machineId: string, connection: ConnectionState, route?: "direct" | "secure"): void;
   setSnapshot(machineId: string, terminals: readonly Terminal[], at: number): void;
   applyEvent(machineId: string, event: HcEvent, at: number): void;
   setLayout(machineId: string, layout: Layout | undefined): void;
@@ -27,11 +29,16 @@ export interface CoreStore {
 export function createCoreStore() {
   return create<CoreStore>()((set) => ({
     machines: {},
-    setConnection: (machineId, connection) =>
+    setConnection: (machineId, connection, route) =>
       set((state) => ({
         machines: {
           ...state.machines,
-          [machineId]: { ...emptyMachineCore(), ...state.machines[machineId], connection },
+          [machineId]: {
+            ...emptyMachineCore(),
+            ...state.machines[machineId],
+            connection,
+            route: connection === "connected" ? route : undefined,
+          },
         },
       })),
     setSnapshot: (machineId, terminals, at) =>

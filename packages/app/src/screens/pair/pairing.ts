@@ -27,7 +27,8 @@ export async function pairAndStore(
   machines: typeof machinesStore,
   name?: string,
 ): Promise<PairedDevice> {
-  const reply: PairReply = await api.pair(input.url, {
+  const direct = input.direct as string;
+  const reply: PairReply = await api.pair(direct, {
     code: input.code,
     ...(name ? { name } : {}),
   });
@@ -36,7 +37,7 @@ export async function pairAndStore(
   const machine = {
     id: reply.machine.id,
     name: reply.machine.name,
-    url: input.url,
+    routes: { direct },
     role: reply.role,
     deviceId: reply.deviceId,
   };

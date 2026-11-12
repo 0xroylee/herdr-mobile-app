@@ -1,16 +1,15 @@
 import type { SpaceTargetId } from "@/model/spaceTarget.ts";
-import { type BridgeApi, BridgeApiError } from "@/net/bridge-api.ts";
+import { BridgeApiError } from "@/net/bridge-api.ts";
+import type { BridgeCalls } from "@/net/bridge-calls.ts";
 import type { Machine } from "@/store/machines.ts";
-import type { Secrets } from "@/store/secrets.ts";
 
 export const herdrNotRunningMessage = "Herdr isn't running on your Mac";
 
 export interface NewItemDependencies {
-  api: Pick<BridgeApi, "appDo">;
-  secrets: Pick<Secrets, "get">;
+  calls: Pick<BridgeCalls, "appDo">;
 }
 
-export type NewItemMachine = Pick<Machine, "id" | "url" | "role">;
+export type NewItemMachine = Pick<Machine, "id" | "role">;
 
 export type NewItemResult = { ok: true } | { ok: false; message: string };
 
@@ -39,15 +38,10 @@ async function runNewItem(
   if (machine.role !== "control") return { ok: false, message: "This device is read-only." };
 
   try {
-    const token = await dependencies.secrets.get(machine.id);
-    if (token === null) {
-      return { ok: false, message: "The access token for this Mac is unavailable." };
-    }
-
     if (action === "space.new") {
-      await dependencies.api.appDo(machine.url, token, action);
+      await dependencies.calls.appDo(action);
     } else {
-      await dependencies.api.appDo(machine.url, token, action, { space });
+      await dependencies.calls.appDo(action, { space });
     }
     return { ok: true };
   } catch (error) {

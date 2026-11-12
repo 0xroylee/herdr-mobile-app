@@ -38,6 +38,9 @@ export function startLifecycle(options: LifecycleOptions): () => void {
   let foreground = false;
   let manager: ConnectionManager | undefined;
   let selectedMachine: Machine | undefined;
+  let managerMachineId: string | undefined;
+  let managerToken: string | null | undefined;
+  let machineRevision = 0;
   let unsubscribeMachines = () => {};
 
   const updateForeground = (state: string | null | undefined) => {
@@ -55,19 +58,61 @@ export function startLifecycle(options: LifecycleOptions): () => void {
     const nextMachine = activeId ? machines[activeId] : undefined;
     if (nextMachine?.id === selectedMachine?.id && nextMachine === selectedMachine) return;
 
-    manager?.stop();
-    manager = undefined;
-    options.onManager(undefined);
     selectedMachine = nextMachine;
-    if (!nextMachine) return;
-
-    try {
-      manager = options.createManager(nextMachine, options.secrets);
-    } catch {
+    const revision = ++machineRevision;
+    if (!nextMachine) {
+      manager?.stop();
+      manager = undefined;
+      managerMachineId = undefined;
+      managerToken = undefined;
+      options.onManager(undefined);
       return;
     }
-    options.onManager(manager);
-    if (foreground) manager.start();
+
+    if (manager && managerMachineId !== nextMachine.id) {
+      manager.stop();
+      manager = undefined;
+      managerMachineId = undefined;
+      managerToken = undefined;
+      options.onManager(undefined);
+      if (disposed || revision !== machineRevision) return;
+    }
+
+    void options.secrets
+      .get(nextMachine.id)
+      .catch(() => null)
+      .then((token) => {
+        if (disposed || revision !== machineRevision) return;
+        const { activeId: currentId, machines: currentMachines } =
+          options.stores.machines.getState();
+        const currentMachine = currentId ? currentMachines[currentId] : undefined;
+        if (!currentMachine || currentMachine.id !== nextMachine.id) return;
+        selectedMachine = currentMachine;
+        if (manager && managerMachineId === currentMachine.id && managerToken === token) {
+          return;
+        }
+
+        manager?.stop();
+        manager = undefined;
+        managerMachineId = undefined;
+        managerToken = undefined;
+        options.onManager(undefined);
+        if (disposed || revision !== machineRevision) return;
+
+        try {
+          manager = options.createManager(currentMachine, options.secrets);
+        } catch {
+          return;
+        }
+        managerMachineId = currentMachine.id;
+        managerToken = token;
+        options.onManager(manager);
+        if (disposed || revision !== machineRevision) {
+          manager.stop();
+          return;
+        }
+        if (foreground) manager.start();
+      });
   };
 
   const hydrate = async () => {
@@ -112,6 +157,8 @@ export function startLifecycle(options: LifecycleOptions): () => void {
     unsubscribeMachines();
     manager?.stop();
     manager = undefined;
+    managerMachineId = undefined;
+    managerToken = undefined;
     options.onManager(undefined);
   };
 }

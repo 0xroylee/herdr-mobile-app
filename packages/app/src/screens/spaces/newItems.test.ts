@@ -4,11 +4,11 @@ import { describe, expect, test } from "bun:test";
 import type { Terminal } from "@herdr-mobile/protocol";
 import { deriveSpaces } from "@/model/spaces.ts";
 import { newTabTarget } from "@/model/spaceTarget.ts";
-import { type BridgeApi, BridgeApiError } from "@/net/bridge-api.ts";
-import type { Secrets } from "@/store/secrets.ts";
+import { BridgeApiError } from "@/net/bridge-api.ts";
+import type { BridgeCalls } from "@/net/bridge-calls.ts";
 import { createNewSpace, createNewTab, herdrNotRunningMessage } from "./newItems.ts";
 
-const machine = { id: "machine-1", url: "https://mac.tailnet.ts.net", role: "control" } as const;
+const machine = { id: "machine-1", role: "control" } as const;
 
 const targetTerminal: Terminal = {
   address: "t1",
@@ -27,36 +27,30 @@ if (targetSpace === undefined) throw new Error("Expected a label-backed space fi
 const target = newTabTarget(targetSpace, undefined);
 if (target === undefined) throw new Error("Expected a new-tab target from the label fixture");
 
-function dependencies(
-  appDo: BridgeApi["appDo"] = async () => ({ ok: true }),
-  token: string | null = "device-token",
-) {
+function dependencies(appDo: BridgeCalls["appDo"] = async () => ({ ok: true })) {
   const calls: unknown[][] = [];
   const api = {
-    appDo: async (...args: Parameters<BridgeApi["appDo"]>) => {
+    appDo: async (...args: Parameters<BridgeCalls["appDo"]>) => {
       calls.push(args);
       return appDo(...args);
     },
   };
-  const secrets: Pick<Secrets, "get"> = {
-    get: async (key) => (key === machine.id ? token : null),
-  };
-  return { dependencies: { api, secrets }, calls };
+  return { dependencies: { calls: api }, calls };
 }
 
 describe("space creation actions", () => {
-  test("creates a space on the active machine with its secret token", async () => {
+  test("creates a space through the active machine's BridgeCalls", async () => {
     const { dependencies: deps, calls } = dependencies();
 
     await expect(createNewSpace(deps, machine)).resolves.toEqual({ ok: true });
-    expect(calls).toEqual([[machine.url, "device-token", "space.new"]]);
+    expect(calls).toEqual([["space.new"]]);
   });
 
   test("creates a tab with the label target minted from a row", async () => {
     const { dependencies: deps, calls } = dependencies();
 
     await expect(createNewTab(deps, machine, target)).resolves.toEqual({ ok: true });
-    expect(calls).toEqual([[machine.url, "device-token", "tab.new", { space: "sp1" }]]);
+    expect(calls).toEqual([["tab.new", { space: "sp1" }]]);
   });
 
   test("shows the kit message when the bridge reports Herdr is not running", async () => {
@@ -80,10 +74,14 @@ describe("space creation actions", () => {
     expect(calls).toEqual([]);
   });
 
-  test("reports a missing token without calling the bridge", async () => {
-    const { dependencies: deps, calls } = dependencies(undefined, null);
+  test("reports a disconnected BridgeCalls failure", async () => {
+    const { dependencies: deps } = dependencies(async () => {
+      throw new BridgeApiError(503, "not_connected", "Not connected to Mac.");
+    });
 
-    await expect(createNewSpace(deps, machine)).resolves.toMatchObject({ ok: false });
-    expect(calls).toEqual([]);
+    await expect(createNewSpace(deps, machine)).resolves.toEqual({
+      ok: false,
+      message: "Not connected to Mac.",
+    });
   });
 });

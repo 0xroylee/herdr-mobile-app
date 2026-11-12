@@ -102,7 +102,7 @@ describe("agent screen controllers", () => {
       machine: {
         id: "machine-1",
         name: "Mac",
-        url: "https://machine.example.ts.net",
+        routes: { direct: "https://machine.example.ts.net" },
         role: "watch",
         deviceId: "phone",
       },
@@ -144,7 +144,7 @@ describe("agent screen controllers", () => {
       machine: {
         id: "machine-1",
         name: "Mac",
-        url: "https://machine.example.ts.net",
+        routes: { direct: "https://machine.example.ts.net" },
         role: "watch",
         deviceId: "phone",
       },
@@ -202,7 +202,7 @@ describe("agent screen controllers", () => {
         machine: {
           id: "machine-1",
           name: "Mac",
-          url: "https://machine.example.ts.net",
+          routes: { direct: "https://machine.example.ts.net" },
           role,
           deviceId: "phone",
         },

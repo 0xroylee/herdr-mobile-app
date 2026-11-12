@@ -1,6 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
+import { unavailableBridgeCalls } from "../net/bridge-calls.ts";
 import type { ConnectionManager } from "../net/connection.ts";
 import { type LifecycleAppStateSource, type LifecycleStores, startLifecycle } from "./lifecycle.ts";
 import { createMachinesStore, type Machine } from "./machines.ts";
@@ -13,7 +14,7 @@ import type { Storage } from "./storage.ts";
 const machine: Machine = {
   id: "machine-1",
   name: "Mac",
-  url: "https://mac.tailnet.ts.net",
+  routes: { direct: "https://mac.tailnet.ts.net" },
   role: "control",
   deviceId: "device-1",
 };
@@ -56,6 +57,35 @@ describe("app lifecycle", () => {
     await fixture.settle();
 
     expect(fixture.order.indexOf("theme:paper")).toBeLessThan(fixture.order.indexOf("ready"));
+    dispose();
+  });
+
+  test("keeps the manager for route changes and replaces it when the paired token changes", async () => {
+    const fixture = createFixture("paper", "active");
+    const dispose = startLifecycle(fixture.options);
+    fixture.resolveHydration();
+    await fixture.settle();
+    const firstManager = fixture.managers[0];
+
+    fixture.machines.update({
+      ...machine,
+      routes: { direct: "https://updated.tailnet.ts.net" },
+    });
+    await fixture.settle();
+
+    expect(fixture.managers).toHaveLength(1);
+    expect(firstManager?.stops).toBe(0);
+
+    await fixture.secrets.set(machine.id, "rotated-token");
+    fixture.machines.update({
+      ...machine,
+      routes: { direct: "https://updated.tailnet.ts.net" },
+    });
+    await fixture.settle();
+
+    expect(fixture.managers).toHaveLength(2);
+    expect(firstManager?.stops).toBe(1);
+    expect(fixture.managers[1]?.starts).toBe(1);
     dispose();
   });
 
@@ -106,6 +136,7 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
     getState: () => ({ ui: { theme } }),
   };
   const machines = createMachinesLifecycleStore(persist);
+  const secrets = createMemorySecrets();
   const seen = { persist };
   const stores: LifecycleStores = { settings, machines: machines.store, seen };
   const appState = createAppState(initialState);
@@ -113,7 +144,7 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
   let ready = false;
   const options = {
     stores,
-    secrets: createMemorySecrets(),
+    secrets,
     appState,
     applyTheme: (choice: ThemeChoice) => order.push(`theme:${choice}`),
     createManager: () => {
@@ -139,6 +170,8 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
     options,
     appState,
     managers,
+    machines,
+    secrets,
     order,
     get ready() {
       return ready;
@@ -155,14 +188,22 @@ function createMachinesLifecycleStore(persist: {
   hasHydrated(): boolean;
 }) {
   const listeners = new Set<() => void>();
+  let state = { activeId: machine.id, machines: { [machine.id]: machine } };
   return {
     store: {
       persist,
-      getState: () => ({ activeId: machine.id, machines: { [machine.id]: machine } }),
+      getState: () => state,
       subscribe: (listener: () => void) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
+    },
+    update(nextMachine: Machine) {
+      state = {
+        ...state,
+        machines: { ...state.machines, [nextMachine.id]: nextMachine },
+      };
+      for (const listener of listeners) listener();
     },
   };
 }
@@ -254,6 +295,7 @@ function fakeManager(start: () => void, stop: () => void): ConnectionManager {
     call: async () => {
       throw new Error("not used by lifecycle tests");
     },
+    calls: () => unavailableBridgeCalls("not used by lifecycle tests"),
     state: () => "offline",
     subscribe: () => () => {},
   };

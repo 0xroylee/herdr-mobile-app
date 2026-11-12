@@ -13,6 +13,7 @@ const connectionDotClasses: Record<ConnectionState, string> = {
   reconnecting: "h-2 w-2 shrink-0 rounded-full bg-blocked",
   offline: "h-2 w-2 shrink-0 rounded-full bg-dim",
   unauthorized: "h-2 w-2 shrink-0 rounded-full bg-blocked",
+  identity_changed: "h-2 w-2 shrink-0 rounded-full bg-blocked",
 };
 
 const chipClasses = {

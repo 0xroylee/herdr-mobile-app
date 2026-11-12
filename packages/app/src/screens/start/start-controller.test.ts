@@ -359,19 +359,13 @@ describe("start controller", () => {
 
     const appDoCalls: Array<{ action: string; args?: Record<string, unknown> }> = [];
     const dependencies = {
-      api: {
-        appDo: async (
-          _url: string,
-          _token: string,
-          action: "space.new" | "tab.new",
-          args?: Record<string, unknown>,
-        ) => {
+      calls: {
+        appDo: async (action: "space.new" | "tab.new", args?: Record<string, unknown>) => {
           appDoCalls.push({ action, args });
         },
       },
-      secrets: { get: async () => "token" },
     };
-    const machine = { id: "machine", url: "https://mac.example", role: "control" as const };
+    const machine = { id: "machine", role: "control" as const };
     const selectedChoice = layoutOptions.spaceChoices.find(
       (choice) => choice.selection.kind === "existing" && choice.selection.id === "sp1",
     );
@@ -426,19 +420,13 @@ describe("start controller", () => {
     const port = fakePort();
     const appDoCalls: Array<{ action: string; args?: Record<string, unknown> }> = [];
     const dependencies = {
-      api: {
-        appDo: async (
-          _url: string,
-          _token: string,
-          action: "space.new" | "tab.new",
-          args?: Record<string, unknown>,
-        ) => {
+      calls: {
+        appDo: async (action: "space.new" | "tab.new", args?: Record<string, unknown>) => {
           appDoCalls.push({ action, args });
         },
       },
-      secrets: { get: async () => "token" },
     };
-    const machine = { id: "machine", url: "https://mac.example", role: "control" as const };
+    const machine = { id: "machine", role: "control" as const };
     const controller = createStartController(port.value);
     const createEmptyTab = () =>
       controller.createEmptyTabIfAllowed(target, (resolvedTarget) =>

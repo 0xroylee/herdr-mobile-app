@@ -33,6 +33,14 @@ const expected: Record<ConnectionState, SpacesConnectionPresentation> = {
       action: "pair",
     },
   },
+  identity_changed: {
+    dimmed: true,
+    banner: {
+      kind: "unauthorized",
+      message: "This Mac's bridge identity changed. Pair again.",
+      action: "pair",
+    },
+  },
 };
 
 describe("connectionPresentation", () => {

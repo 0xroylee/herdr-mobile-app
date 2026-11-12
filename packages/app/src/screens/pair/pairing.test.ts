@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { BridgeApiError, type BridgeFetch, createBridgeApi } from "../../net/bridge-api.ts";
+import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import type { ConnectionManager } from "../../net/connection.ts";
 import type { ConnectionState } from "../../store/core.ts";
 import { createMachinesStore } from "../../store/machines.ts";
@@ -25,11 +26,11 @@ describe("pairing flow", () => {
     const link = makePairLink("https://mac.tailnet.ts.net", "ABCD2345");
 
     expect(parsePairingInput(link, "")).toEqual({
-      url: "https://mac.tailnet.ts.net",
+      direct: "https://mac.tailnet.ts.net",
       code: "ABCD2345",
     });
     expect(parsePairingInput("https://mac.tailnet.ts.net/", "ABCD2345")).toEqual({
-      url: "https://mac.tailnet.ts.net",
+      direct: "https://mac.tailnet.ts.net",
       code: "ABCD2345",
     });
     expect(parsePairingInput("https://mac.tailnet.ts.net/path", "ABCD2345")).toBeUndefined();
@@ -41,7 +42,10 @@ describe("pairing flow", () => {
     expect(clearedTo()).toBe("/app?keep=1");
     expect(handoff.hasPending()).toBe(true);
     expect(handoff.shouldRedirectToPair(false)).toBe(true);
-    expect(handoff.consume()).toEqual({ url: "https://mac.tailnet.ts.net", code: "ABCD2345" });
+    expect(handoff.consume()).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      code: "ABCD2345",
+    });
     expect(handoff.consume()).toBeUndefined();
     expect(handoff.hasPending()).toBe(false);
     expect(handoff.shouldRedirectToPair(false)).toBe(true);
@@ -51,7 +55,10 @@ describe("pairing flow", () => {
     const { handoff } = makeHandoff();
 
     expect(handoff.shouldRedirectToPair(true)).toBe(true);
-    expect(handoff.consume()).toEqual({ url: "https://mac.tailnet.ts.net", code: "ABCD2345" });
+    expect(handoff.consume()).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      code: "ABCD2345",
+    });
     expect(handoff.shouldRedirectToPair(true)).toBe(false);
   });
 
@@ -59,7 +66,9 @@ describe("pairing flow", () => {
     const secrets = createMemorySecrets();
     const machines = createMachinesStore(createMemoryStorage(), secrets);
     let requestName: string | undefined;
-    const api = createBridgeApi(async (_input, init) => {
+    let requestUrl: string | undefined;
+    const api = createBridgeApi(async (input, init) => {
+      requestUrl = String(input);
       const request = JSON.parse(String(init?.body)) as { code: string; name?: string };
       expect(request.code).toBe("ABCD2345");
       requestName = request.name;
@@ -68,11 +77,13 @@ describe("pairing flow", () => {
         token: "secret-token",
         role: "control",
         machine: { id: "mac-1", name: "MacBook" },
+        routes: { direct: "https://mac.tailnet.ts.net", secure: "https://edge.example.test" },
+        bridgeKey: "public-bridge-key",
       });
     });
 
     const result = await pairAndStore(
-      { url: "https://mac.tailnet.ts.net", code: "ABCD2345" },
+      { direct: "https://mac.tailnet.ts.net", code: "ABCD2345" },
       api,
       secrets,
       machines,
@@ -80,12 +91,13 @@ describe("pairing flow", () => {
     );
 
     expect(requestName).toBe("my-iphone");
+    expect(requestUrl).toBe("https://mac.tailnet.ts.net/api/pair");
     expect(await secrets.get("mac-1")).toBe("secret-token");
     expect(machines.getState().activeId).toBe("mac-1");
     expect(machines.getState().machines["mac-1"]).toEqual({
       id: "mac-1",
       name: "MacBook",
-      url: "https://mac.tailnet.ts.net",
+      routes: { direct: "https://mac.tailnet.ts.net" },
       role: "control",
       deviceId: "device-1",
     });
@@ -112,7 +124,15 @@ describe("pairing flow", () => {
     );
 
     await expect(
-      pairAndStore({ url: "https://mac.tailnet.ts.net", code: "ABCD2345" }, api, secrets, machines),
+      pairAndStore(
+        {
+          direct: "https://mac.tailnet.ts.net",
+          code: "ABCD2345",
+        },
+        api,
+        secrets,
+        machines,
+      ),
     ).rejects.toThrow("secure storage unavailable");
     expect(machines.getState().machines).toEqual({});
   });
@@ -138,7 +158,10 @@ describe("pairing flow", () => {
 
     expect(scanner.scan("not a pairing code")).toBeUndefined();
     expect(scanner.getSnapshot().message).toBe("This QR code isn't a Herdr pairing code.");
-    expect(scanner.scan(link)).toEqual({ url: "https://mac.tailnet.ts.net", code: "ABCD2345" });
+    expect(scanner.scan(link)).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      code: "ABCD2345",
+    });
     expect(scanner.getSnapshot()).toEqual({ accepted: true });
     expect(scanner.scan(link)).toBeUndefined();
   });
@@ -349,6 +372,7 @@ function makeConnectionManager(initialState: ConnectionState) {
     call: async () => {
       throw new Error("not used by pairing tests");
     },
+    calls: () => unavailableBridgeCalls("not used by pairing tests"),
     state: () => state,
     subscribe(nextListener) {
       listener = nextListener;
