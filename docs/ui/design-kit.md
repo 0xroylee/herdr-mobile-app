@@ -298,6 +298,8 @@ A space: its name in `headline`, then its branch in `mono` 11.5 `dim` with `git-
 
 ### `Banner`
 
+For CONN-4 when a secure route exists, show `Can't reach your Mac. Check it's awake and online.` For `identity_changed`, show `This Mac's bridge identity changed.` with a `Pair again` action.
+
 A connection problem, shown under the screen header and above the content: `surface` with a hairline, radius `group`, 10 × 14 padding, `subhead` in `muted` with a leading mark: the spinner and `Reconnecting to MacBook Pro…`, or a `blocked` `!` and `Can't reach the bridge. Check that Tailscale is on.` with a Retry `Button outline`.
 
 ### `EmptyState`
@@ -306,7 +308,7 @@ Centered in the list area, `callout` in `dim`, 24 side padding. Agents: herdr's 
 
 ### Pairing parts
 
-`PairingSteps` is a `ListGroup` of steps: a 24 number circle on `raised` with Geist 600 12.5 in `muted`, the step in `body`, and an optional detail. `Snippet` is a `term-bg` box with a hairline, radius `key`, 9 × 11 padding, `mono` 12 text and a `copy` button. `ConnectionLine` is an 8 `done` dot and `subhead`: `Connected as my-iphone`.
+`PairingSteps` is a `ListGroup` of steps: a 24 number circle on `raised` with Geist 600 12.5 in `muted`, the step in `body`, and an optional detail. Pair step 3 says `Keep Tailscale on, or set up the secure route.` `Snippet` is a `term-bg` box with a hairline, radius `key`, 9 × 11 padding, `mono` 12 text and a `copy` button. `ConnectionLine` is an 8 `done` dot and `subhead`: `Connected via Tailscale` on the direct route or `Connected via the secure route` on the secure route. When a fresh link matches a stored machine's key, show `Updated the address for <Mac>.` If typed pairing fails without Tailscale, show `Typing works over Tailscale. Without it, scan the code or paste the full link.`
 
 ### Notifications
 
@@ -327,7 +329,7 @@ Each screen is drawn in [mockups.html](mockups.html):
 | 7   | Push                  | Notifications                                                      |
 | 8   | Start agent           | `StartForm`, `ListGroup`, `Composer`, `Button large`               |
 
-Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Paper), Notifications (Needs you, Done), Machines (paired machines with Remove), and About.
+Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Paper), Notifications (Needs you, Done), Machines (paired machines with Remove), and About. In Machines, show `Tailscale: <host>` and `Secure route: <host>` for the available routes.
 
 ## Behavior
 
