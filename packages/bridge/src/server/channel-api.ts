@@ -87,7 +87,7 @@ export function createChannelApi(
     let incoming: Request;
     try {
       incoming = new Request(`http://bridge.internal${request.path}`, {
-        method: request.method,
+        method: request.method.toUpperCase() === "DELETE" ? "DELETE" : request.method,
         headers: { "content-type": "application/json" },
         ...(request.body === undefined ? {} : { body: request.body }),
       });
@@ -97,20 +97,19 @@ export function createChannelApi(
     }
 
     inFlight++;
+    const closesRevokedSessions =
+      incoming.method === "DELETE" &&
+      /^\/api\/devices(?:\/|$)/u.test(new URL(incoming.url).pathname);
     try {
       const response =
         (await dispatchApi(incoming, resolveCaller)) ?? new Response(null, { status: 404 });
-      const closesRevokedSessions =
-        response.status === 204 &&
-        request.method === "DELETE" &&
-        /^\/api\/devices(?:\/|$)/u.test(path);
       const body = await response.text();
       sendResponse(request.id, response.status, body || undefined);
-      if (closesRevokedSessions) onDeviceRevocation?.();
     } catch {
       sendResponse(request.id, 500, responseBody("internal_error"));
     } finally {
       inFlight--;
+      if (closesRevokedSessions) onDeviceRevocation?.();
     }
   };
 

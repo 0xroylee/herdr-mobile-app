@@ -58,13 +58,26 @@ interface ActiveSecureSession {
   ip: string;
 }
 
-export interface SecureConnectionHandler {
+interface TrackedConnection {
+  socket: DuplexSocket;
+  generation: number;
+  closed: boolean;
+}
+
+interface SecureConnectionHandler {
+  readonly generation: number;
   reserve(): boolean;
   releaseReservation(): void;
-  accept(socket: DuplexSocket, ip: string, reserved?: boolean, onSplit?: () => void): void;
+  accept(
+    socket: DuplexSocket,
+    ip: string,
+    reserved?: boolean,
+    onSplit?: () => void,
+    generation?: number,
+  ): void;
   rejectBusy(ip: string): void;
   closeRevokedSessions(liveDeviceIds: ReadonlySet<string>): void;
-  closeAll(code: number, reason: string): void;
+  rotate(): void;
   readonly sessions: number;
   readonly handshakeFailuresLastHour: number;
 }
@@ -78,8 +91,7 @@ function safeIp(value: string | undefined): string {
   return normalized ? normalized.slice(0, 64) : "unknown";
 }
 
-/** Creates the handshake/session engine separately from Bun's WebSocket adapter. */
-export function createSecureConnectionHandler(
+function createSecureConnectionHandler(
   dependencies: SecureListenerDependencies,
 ): SecureConnectionHandler {
   const clock = dependencies.clock ?? systemClock;
@@ -87,6 +99,7 @@ export function createSecureConnectionHandler(
   const pendingFailureTimes: number[] = [];
   const active = new Set<ActiveSecureSession>();
   let handshakes = 0;
+  let identityGeneration = 0;
 
   const logFailure = (
     ip: string,
@@ -239,7 +252,8 @@ export function createSecureConnectionHandler(
     }
   };
 
-  const runHandshake = async (socket: DuplexSocket, ip: string, onSplit?: () => void) => {
+  const runHandshake = async (connection: TrackedConnection, ip: string, onSplit?: () => void) => {
+    const { socket, generation } = connection;
     let phase: "handshake" | "first-record" | "authenticating" | "authenticated" | "closed" =
       "handshake";
     let authTimer: unknown;
@@ -272,6 +286,7 @@ export function createSecureConnectionHandler(
       session = await handshake;
     } catch (error) {
       phase = "closed";
+      if (generation !== identityGeneration) return;
       if (error instanceof KeyMismatchError) logFailure(ip, "key_mismatch");
       else if (error instanceof HandshakeError && error.message.includes("deadline")) {
         logFailure(ip, "timeout");
@@ -282,11 +297,23 @@ export function createSecureConnectionHandler(
     }
 
     if (!session) return;
+    if (connection.closed || generation !== identityGeneration) {
+      session.close(BRIDGE_WS_CLOSE_CODES.IDENTITY_ROTATED, "bridge identity rotated");
+      return;
+    }
     onSplit?.();
     phase = "first-record";
     setAuthTimer();
     const secureSession = session;
-    secureSession.closed.then(() => {
+    secureSession.closed.then(({ code }) => {
+      if (
+        phase !== "closed" &&
+        phase !== "authenticated" &&
+        code !== 1000 &&
+        generation === identityGeneration
+      ) {
+        logFailure(ip, "protocol");
+      }
       phase = "closed";
       clearAuthTimer();
     });
@@ -294,12 +321,14 @@ export function createSecureConnectionHandler(
       if (phase === "closed" || phase === "authenticated") return;
       if (phase === "authenticating") {
         phase = "closed";
+        logFailure(ip, "protocol");
         secureSession.close(BRIDGE_WS_CLOSE_CODES.RECORD_PROTOCOL, "record protocol error");
         return;
       }
       if (phase !== "first-record" || kind !== "text") {
         phase = "closed";
         clearAuthTimer();
+        logFailure(ip, "protocol");
         secureSession.close(BRIDGE_WS_CLOSE_CODES.RECORD_PROTOCOL, "record protocol error");
         return;
       }
@@ -317,7 +346,7 @@ export function createSecureConnectionHandler(
       }
       void authenticateFirstRecord(text, dependencies)
         .then((result) => {
-          if (phase === "closed") return;
+          if (phase === "closed" || connection.closed || generation !== identityGeneration) return;
           if (result.kind === "reject") {
             phase = "closed";
             logFailure(ip, result.reason);
@@ -356,7 +385,7 @@ export function createSecureConnectionHandler(
           activate(secureSession, result.device, ip, firstRecord ?? new Uint8Array(0), reply);
         })
         .catch(() => {
-          if (phase === "closed") return;
+          if (phase === "closed" || connection.closed || generation !== identityGeneration) return;
           phase = "closed";
           logFailure(ip, "protocol");
           secureSession.close(BRIDGE_WS_CLOSE_CODES.BAD_TOKEN, "authentication failed");
@@ -373,14 +402,23 @@ export function createSecureConnectionHandler(
     releaseReservation() {
       handshakes = Math.max(0, handshakes - 1);
     },
-    accept(socket, ip, reserved = false, onSplit) {
+    accept(socket, ip, reserved = false, onSplit, generation = identityGeneration) {
       if (!reserved && handshakes >= MAX_HANDSHAKES_IN_PROGRESS) {
         socket.close(BRIDGE_WS_CLOSE_CODES.BUSY, "too many handshakes");
         logFailure(ip, "busy");
         return;
       }
       if (!reserved) handshakes++;
-      void runHandshake(socket, safeIp(ip), onSplit);
+      const connection: TrackedConnection = { socket, generation, closed: false };
+      socket.onClose(() => {
+        connection.closed = true;
+      });
+      if (generation !== identityGeneration) {
+        handshakes = Math.max(0, handshakes - 1);
+        socket.close(BRIDGE_WS_CLOSE_CODES.IDENTITY_ROTATED, "bridge identity rotated");
+        return;
+      }
+      void runHandshake(connection, safeIp(ip), onSplit);
     },
     rejectBusy(ip) {
       logFailure(ip, "busy");
@@ -392,8 +430,11 @@ export function createSecureConnectionHandler(
         }
       }
     },
-    closeAll(code, reason) {
-      for (const entry of active) closeActive(entry, code, reason);
+    rotate() {
+      identityGeneration++;
+    },
+    get generation() {
+      return identityGeneration;
     },
     get sessions() {
       return active.size;
@@ -410,6 +451,9 @@ interface SecureSocketData {
   reserved: boolean;
   busy: boolean;
   phase: "handshake" | "open";
+  generation: number;
+  closeRequest?: { code: number; reason: string };
+  socket?: Bun.ServerWebSocket<SecureSocketData>;
   messages: Array<(bytes: Uint8Array) => void>;
   closes: Array<(code: number, reason: string) => void>;
 }
@@ -452,9 +496,17 @@ export async function startSecureListener(
   }
 
   const handler = createSecureConnectionHandler(dependencies);
+  const accepted = new Set<SecureSocketData>();
+  const closeAccepted = (code: number, reason: string) => {
+    for (const data of accepted) {
+      data.closeRequest = { code, reason };
+      data.socket?.close(code, reason);
+    }
+  };
   let server: Bun.Server<SecureSocketData>;
   const stopOnRotate = dependencies.identity.onRotate(() => {
-    handler.closeAll(BRIDGE_WS_CLOSE_CODES.IDENTITY_ROTATED, "bridge identity rotated");
+    handler.rotate();
+    closeAccepted(BRIDGE_WS_CLOSE_CODES.IDENTITY_ROTATED, "bridge identity rotated");
   });
 
   try {
@@ -474,10 +526,13 @@ export async function startSecureListener(
           reserved,
           busy: !reserved,
           phase: "handshake",
+          generation: handler.generation,
           messages: [],
           closes: [],
         };
+        accepted.add(data);
         if (!bunServer.upgrade(request, { data })) {
+          accepted.delete(data);
           if (reserved) handler.releaseReservation();
           return new Response(null, { status: 400 });
         }
@@ -485,14 +540,25 @@ export async function startSecureListener(
       },
       websocket: {
         open(ws) {
+          ws.data.socket = ws;
+          if (ws.data.closeRequest) {
+            ws.close(ws.data.closeRequest.code, ws.data.closeRequest.reason);
+            return;
+          }
           if (ws.data.busy) {
             ws.close(BRIDGE_WS_CLOSE_CODES.BUSY, "too many handshakes");
             return;
           }
           ws.data.reserved = false;
-          handler.accept(bunDuplexSocket(ws), ws.data.ip, true, () => {
-            ws.data.phase = "open";
-          });
+          handler.accept(
+            bunDuplexSocket(ws),
+            ws.data.ip,
+            true,
+            () => {
+              ws.data.phase = "open";
+            },
+            ws.data.generation,
+          );
         },
         message(ws, message) {
           const bytes = messageBytes(message);
@@ -507,6 +573,7 @@ export async function startSecureListener(
           for (const listener of [...ws.data.messages]) listener(bytes);
         },
         close(ws, code, reason) {
+          accepted.delete(ws.data);
           if (ws.data.reserved) {
             ws.data.reserved = false;
             handler.releaseReservation();
@@ -524,7 +591,7 @@ export async function startSecureListener(
     port: server.port ?? config.port,
     stop() {
       stopOnRotate();
-      handler.closeAll(1001, "bridge stopping");
+      closeAccepted(1001, "bridge stopping");
       server.stop(true);
     },
     closeRevokedSessions: (liveDeviceIds) => handler.closeRevokedSessions(liveDeviceIds),

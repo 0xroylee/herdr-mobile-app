@@ -123,4 +123,30 @@ describe("channel API multiplexing", () => {
     expect(responses(session)).toEqual([{ t: "res", id: 7, status: 204 }]);
     expect(revoked).toBe(true);
   });
+
+  test("reconciles normalized device deletion requests after dispatch failures", async () => {
+    for (const method of ["delete", "dElEtE"]) {
+      const session = new FakeSession();
+      let reconciliations = 0;
+      const api = createChannelApi(
+        session,
+        DEVICE,
+        async (request) => {
+          expect(request.method).toBe("DELETE");
+          throw new Error("persistence failed");
+        },
+        () => {
+          reconciliations++;
+        },
+      );
+
+      api.receive(requestRecord(8, "/api/devices/self", method));
+      await settle();
+
+      expect(responses(session)).toEqual([
+        { t: "res", id: 8, status: 500, body: JSON.stringify({ error: "internal_error" }) },
+      ]);
+      expect(reconciliations).toBe(1);
+    }
+  });
 });
