@@ -1,0 +1,18 @@
+Secure Channel includes code adapted from Paseo, Copyright 2025-present Mohamed Boudra,
+licensed under the Apache License, Version 2.0. The full license is in LICENSE.
+Source: https://github.com/getpaseo/paseo
+
+Adapted files:
+- src/noise/cipher-state.ts, from packages/relay/src/noise/cipher-state.ts
+- src/noise/symmetric-state.ts, from packages/relay/src/noise/symmetric-state.ts
+- src/noise/index.ts, from packages/relay/src/noise/index.ts
+- src/noise/noise.test.ts, from packages/relay/src/noise/noise.test.ts
+- src/noise/fixtures/nk-25519-chachapoly-sha256.json, from
+  packages/relay/src/noise/fixtures/nk-25519-chachapoly-sha256.json
+- src/records.ts, from packages/relay/src/protected-records.ts
+- src/records.test.ts, from packages/relay/src/protected-records.test.ts
+
+The TypeScript sources use .ts relative import extensions. UTF-8 encoding uses
+hc-client's portable helper. The copied tests use Bun and replace Node-only byte
+helpers. The Noise state now has explicit cleanup, and record plaintext scratch
+buffers are cleared after processing. The vector fixture data is unchanged.

@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+  },
   "dependencies": {
     "@herdr-mobile/hc-client": "*",
     "@noble/ciphers": "^2.4.0",
