@@ -3,7 +3,13 @@
 // starts a real core.
 
 import { describe, expect, test } from "bun:test";
-import { FakeCore, flush, lines, track } from "@herdr-mobile/hc-client/testing";
+import {
+  FakeCore,
+  flush,
+  lines,
+  SYNTHETIC_HC_0_1_17,
+  track,
+} from "@herdr-mobile/hc-client/testing";
 import { FrameKind, type Terminal } from "@herdr-mobile/protocol";
 import type { Clock } from "./deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "./process.ts";
@@ -218,6 +224,7 @@ class FakeRunner implements ProcessRunner {
     }
     this.spawns.push({ argv, ...options });
     const child = new FakeConnect();
+    child.core.helloResult = SYNTHETIC_HC_0_1_17;
     this.setup(child, this.children.length);
     this.children.push(child);
     return child;
@@ -589,7 +596,7 @@ describe("the checked run", () => {
       `subscribe: {"terminal":"t1","labels":{"${RUN_LABEL}":"${SESSION}"}}`,
     );
     const order = [
-      at("hello: hc 0.1.16"),
+      at("hello: hc 0.1.17"),
       at("snapshot: seq 1, t1"),
       at("attach: t1 on channel 2, observe only"),
       at("status: working"),
