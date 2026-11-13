@@ -46,10 +46,10 @@ import { WherePicker } from "./WherePicker.tsx";
 const emptyRecentFolders: string[] = [];
 
 export interface StartScreenProps {
-  preselectedSpaceId?: string;
+  preselectedSpaceTargetId?: string;
 }
 
-export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
+export function StartScreen({ preselectedSpaceTargetId }: StartScreenProps) {
   const router = useRouter();
   const connectionManager = useConnectionManager();
   const isPageSheet = Platform.OS === "ios" && router.canGoBack();
@@ -101,15 +101,17 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   }, [connectionManager, machine, router]);
   const controller = useMemo(
     () =>
-      createStartController(port, preselectedSpaceId, { role: machine?.role, connected: false }),
-    [machine?.role, port, preselectedSpaceId],
+      createStartController(port, preselectedSpaceTargetId, {
+        role: machine?.role,
+        connected: false,
+      }),
+    [machine?.role, port, preselectedSpaceTargetId],
   );
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
-  const preselectedSpaceTargetId = controller.preselectedSpaceTargetId;
   const options = useMemo(
     () =>
       deriveStartOptions(
@@ -117,7 +119,6 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
         machineCore?.layout,
         machineCore?.terminals ?? {},
         recentFolders,
-        preselectedSpaceId,
         preselectedSpaceTargetId,
       ),
     [
@@ -125,7 +126,6 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
       machineCore?.layout,
       machineCore?.terminals,
       recentFolders,
-      preselectedSpaceId,
       preselectedSpaceTargetId,
     ],
   );
@@ -140,8 +140,9 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     if (!access.readOnly) void controller.load();
   }, [access.readOnly, controller]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Reconcile when loading ends even if options are unchanged.
   useEffect(() => {
-    if (isEditable(state.status)) controller.applyOptions(options);
+    controller.applyOptions(options);
   }, [controller, options, state.status]);
 
   const draft = state.draft;
@@ -202,8 +203,6 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   function selectSpace(space: StartAgentSpace) {
     controller.set("space", space);
     setEmptyTabError(undefined);
-    const folderKey = startSpaceKey(space) ?? "";
-    controller.set("folder", options.foldersBySpace[folderKey]?.[0]?.path ?? "");
   }
 
   if (access.readOnly) {
