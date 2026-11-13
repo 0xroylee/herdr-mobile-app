@@ -1,4 +1,5 @@
-import type { BridgeApi } from "../../net/bridge-api.ts";
+import { bridgeCallsFor } from "../../net/bridge-calls.ts";
+import type { ConnectionManager } from "../../net/connection.ts";
 import type { Machine } from "../../store/machines.ts";
 import type { machinesStore } from "../../store/platform.ts";
 import type { Secrets } from "../../store/secrets.ts";
@@ -10,21 +11,20 @@ export interface MachineRemovalState {
   message?: string;
 }
 
+type MachineManagerResolver = (machine: Machine) => Pick<ConnectionManager, "calls"> | undefined;
+
 /** Try to revoke this device remotely, then always forget its local token and machine. */
 export async function removePairedMachine(
   machine: Machine,
-  api: BridgeApi,
   secrets: Secrets,
   machines: typeof machinesStore,
+  manager?: Pick<ConnectionManager, "calls">,
 ): Promise<{ revoked: boolean }> {
   let revoked = false;
 
   try {
-    const token = await secrets.get(machine.id);
-    if (token) {
-      await api.revoke(machine.url, token, "self");
-      revoked = true;
-    }
+    await bridgeCallsFor(machine, secrets, manager).revoke("self");
+    revoked = true;
   } catch {
     // The bridge may be offline; removing the local credentials must still finish.
   }
@@ -35,10 +35,10 @@ export async function removePairedMachine(
 
 /** Own confirmation, progress, and result state for removing a paired machine. */
 export function createMachineRemovalController(
-  api: BridgeApi,
   secrets: Secrets,
   machines: typeof machinesStore,
   confirmRemoval: typeof showConfirmation,
+  managerFor?: MachineManagerResolver,
 ) {
   let state: MachineRemovalState = { confirming: false };
   const listeners = new Set<() => void>();
@@ -76,7 +76,7 @@ export function createMachineRemovalController(
 
       update({ confirming: false, removingId: machine.id });
       try {
-        const result = await removePairedMachine(machine, api, secrets, machines);
+        const result = await removePairedMachine(machine, secrets, machines, managerFor?.(machine));
         update({
           confirming: false,
           removingId: machine.id,
@@ -97,10 +97,11 @@ export function createMachineRemovalController(
   };
 }
 
-export function machineHostName(url: string): string {
+export function machineHostName(machine: Machine): string {
   try {
-    return new URL(url).host;
+    const url = machine.routes.direct ?? machine.routes.secure?.url;
+    return url === undefined ? machine.name : new URL(url).host;
   } catch {
-    return url;
+    return machine.name;
   }
 }

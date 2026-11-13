@@ -211,5 +211,14 @@ export function connectionPresentation(
           action: "pair",
         },
       };
+    case "identity_changed":
+      return {
+        dimCachedRows,
+        banner: {
+          kind: "unauthorized",
+          message: "This Mac's bridge identity changed. Pair again.",
+          action: "pair",
+        },
+      };
   }
 }

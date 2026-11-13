@@ -34,6 +34,11 @@ const disconnectedBanners: Record<
     message: `This device is no longer paired with ${machine}.`,
     action: "pair",
   }),
+  identity_changed: () => ({
+    kind: "unauthorized",
+    message: "This Mac's bridge identity changed. Pair again.",
+    action: "pair",
+  }),
 };
 
 /** Describe stale content and recovery from the active connection state. */

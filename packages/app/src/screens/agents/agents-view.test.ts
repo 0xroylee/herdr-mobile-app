@@ -232,6 +232,7 @@ describe("Agents screen decisions", () => {
     "reconnecting",
     "offline",
     "unauthorized",
+    "identity_changed",
   ] as const) {
     test(`derives ${state} presentation with and without cached rows`, () => {
       const cold = connectionPresentation(state, false, "MacBook Pro");
@@ -279,6 +280,16 @@ describe("Agents screen decisions", () => {
         return;
       }
 
+      if (state === "identity_changed") {
+        expect(cold.banner).toEqual({
+          kind: "unauthorized",
+          message: "This Mac's bridge identity changed. Pair again.",
+          action: "pair",
+        });
+        expect(cached.banner).toEqual(cold.banner);
+        return;
+      }
+
       expect(cold.banner).toMatchObject({
         kind: "unauthorized",
         message: "This device is no longer paired with MacBook Pro.",
@@ -293,7 +304,7 @@ function machine(id: string, name: string): Machine {
   return {
     id,
     name,
-    url: `https://${id}.tailnet.ts.net`,
+    routes: { direct: `https://${id}.tailnet.ts.net` },
     role: "control",
     deviceId: `device-${id}`,
   };

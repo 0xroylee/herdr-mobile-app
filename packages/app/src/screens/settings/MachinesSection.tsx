@@ -1,6 +1,6 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
 import { View } from "react-native";
-import { createBridgeApi } from "../../net/bridge-api.ts";
+import { useConnectionManager } from "../../boot.tsx";
 import { appSecrets, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { Button } from "../../ui/components/Button.tsx";
@@ -12,13 +12,20 @@ import { Tag } from "../../ui/components/Tag.tsx";
 import { Text } from "../../ui/text.tsx";
 import { createMachineRemovalController, machineHostName } from "./settings-actions.ts";
 
-const bridgeApi = createBridgeApi((input, init) => globalThis.fetch(input, init));
-
 export function MachinesSection() {
   const machineMap = machinesStore((state) => state.machines);
+  const activeId = machinesStore((state) => state.activeId);
+  const manager = useConnectionManager();
+  const activeIdRef = useRef(activeId);
+  const managerRef = useRef(manager);
+  activeIdRef.current = activeId;
+  managerRef.current = manager;
   const machines = Object.values(machineMap);
   const controller = useMemo(
-    () => createMachineRemovalController(bridgeApi, appSecrets, machinesStore, confirm),
+    () =>
+      createMachineRemovalController(appSecrets, machinesStore, confirm, (machine) =>
+        machine.id === activeIdRef.current ? managerRef.current : undefined,
+      ),
     [],
   );
   const state = useSyncExternalStore(
@@ -49,7 +56,7 @@ export function MachinesSection() {
                   {machine.name}
                 </Text>
                 <Text numberOfLines={1} variant="subhead">
-                  {machineHostName(machine.url)}
+                  {machineHostName(machine)}
                 </Text>
               </View>
               <Tag label={machine.role} />
