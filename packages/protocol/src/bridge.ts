@@ -65,8 +65,8 @@ export interface AuthReply {
   ok: true;
   role: Role;
   machine: BridgeMachine;
-  routes?: BridgeRoutes;
-  bridgeKey?: string;
+  routes: BridgeRoutes;
+  bridgeKey: string;
 }
 
 /** Device details safe to return from the bridge's device-list endpoint. */

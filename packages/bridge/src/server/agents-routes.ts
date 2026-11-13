@@ -1,5 +1,6 @@
 import type { StartAgentRequest } from "@herdr-mobile/protocol";
-import { type AppCliContext, authenticatedCaller, requestBody } from "./app-cli.ts";
+import { authenticatedCaller, requestBody } from "./app-cli.ts";
+import type { ResolveCaller } from "./caller.ts";
 import { type AgentStarter, StartAgentError } from "./start-agent.ts";
 
 function json(value: unknown, status = 200): Response {
@@ -57,16 +58,16 @@ function startError(error: StartAgentError): Response {
   );
 }
 
-/** Handles the agent catalog and start routes after the existing identity and token checks. */
+/** Handles the agent catalog and start routes for the resolved device caller. */
 export async function handleAgentsRoutes(
   request: Request,
-  context: AppCliContext,
   starter: AgentStarter,
+  resolveCaller: ResolveCaller,
 ): Promise<Response | undefined> {
   const path = new URL(request.url).pathname;
   if (path !== "/api/agents/catalog" && path !== "/api/agents/start") return undefined;
 
-  const caller = await authenticatedCaller(request, context);
+  const caller = await authenticatedCaller(request, resolveCaller);
   if (caller instanceof Response) return caller;
 
   if (path === "/api/agents/catalog") {
@@ -87,7 +88,7 @@ export async function handleAgentsRoutes(
   if (!isStartAgentRequest(body)) return json({ error: "bad_request" }, 400);
 
   try {
-    return json(await starter.start(body, caller));
+    return json(await starter.start(body, caller.device));
   } catch (error) {
     if (error instanceof StartAgentError) return startError(error);
     return json({ error: "internal_error" }, 500);

@@ -79,6 +79,9 @@ export const HC_0_1_16: HelloResult = {
   features: ["framed", "attach", "events", "status", "shell"],
 };
 
+/** A synthetic 0.1.17 hello for prototype tests; other fields match the 0.1.16 fixture. */
+export const SYNTHETIC_HC_0_1_17: HelloResult = { ...HC_0_1_16, version: "0.1.17" };
+
 /** The terminal record a fake attach reply carries: only what the tests look at. */
 export const terminalRecord = (id: string) => ({ id, name: id }) as unknown as Terminal;
 
@@ -116,6 +119,8 @@ export class FakeCore {
   answerClose = true;
   /** An error to answer hello with, instead of hc 0.1.16's result. */
   helloError: object | undefined;
+  /** The successful hello response; defaults to the recorded 0.1.16 reply. */
+  helloResult: HelloResult = HC_0_1_16;
   /** Each events.subscribe's params, in order. */
   readonly subscribed: unknown[] = [];
   /** The method of every call it received, hello included, in order. */
@@ -257,7 +262,7 @@ export class FakeCore {
       return;
     }
     if (method === "hello") {
-      answer({ jsonrpc: "2.0", id: request.id, result: HC_0_1_16 });
+      answer({ jsonrpc: "2.0", id: request.id, result: this.helloResult });
       if ((request.params as { framed?: boolean } | undefined)?.framed === true) this.framed = true;
       return;
     }
