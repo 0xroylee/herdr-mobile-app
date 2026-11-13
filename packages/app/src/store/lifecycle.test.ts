@@ -60,7 +60,7 @@ describe("app lifecycle", () => {
     dispose();
   });
 
-  test("keeps the manager for route changes and replaces it when the paired token changes", async () => {
+  test("keeps the manager for route and key changes from machine store writes", async () => {
     const fixture = createFixture("paper", "active");
     const dispose = startLifecycle(fixture.options);
     fixture.resolveHydration();
@@ -76,12 +76,61 @@ describe("app lifecycle", () => {
     expect(fixture.managers).toHaveLength(1);
     expect(firstManager?.stops).toBe(0);
 
-    await fixture.secrets.set(machine.id, "rotated-token");
     fixture.machines.update({
       ...machine,
-      routes: { direct: "https://updated.tailnet.ts.net" },
+      routes: {
+        direct: "https://updated.tailnet.ts.net",
+        secure: { url: "https://edge.example.test", key: "first-key" },
+      },
     });
     await fixture.settle();
+
+    fixture.machines.update({
+      ...machine,
+      routes: {
+        direct: "https://updated.tailnet.ts.net",
+        secure: { url: "https://edge.example.test", key: "rotated-key" },
+      },
+    });
+    await fixture.settle();
+
+    expect(fixture.managers).toHaveLength(1);
+    expect(firstManager?.stops).toBe(0);
+    dispose();
+  });
+
+  test("replaces the manager when the active machine changes or is removed", async () => {
+    const fixture = createFixture("paper", "active");
+    const dispose = startLifecycle(fixture.options);
+    fixture.resolveHydration();
+    await fixture.settle();
+    const firstManager = fixture.managers[0];
+
+    fixture.machines.select({
+      ...machine,
+      id: "machine-2",
+      name: "Other Mac",
+      deviceId: "device-2",
+    });
+
+    expect(fixture.managers).toHaveLength(2);
+    expect(firstManager?.stops).toBe(1);
+    expect(fixture.managers[1]?.starts).toBe(1);
+
+    fixture.machines.removeActive();
+
+    expect(fixture.managers[1]?.stops).toBe(1);
+    dispose();
+  });
+
+  test("restartConnection replaces the active manager once", async () => {
+    const fixture = createFixture("paper", "active");
+    const dispose = startLifecycle(fixture.options);
+    fixture.resolveHydration();
+    await fixture.settle();
+    const firstManager = fixture.managers[0];
+
+    firstManager?.restartConnection(machine.id);
 
     expect(fixture.managers).toHaveLength(2);
     expect(firstManager?.stops).toBe(1);
@@ -136,19 +185,21 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
     getState: () => ({ ui: { theme } }),
   };
   const machines = createMachinesLifecycleStore(persist);
-  const secrets = createMemorySecrets();
   const seen = { persist };
   const stores: LifecycleStores = { settings, machines: machines.store, seen };
   const appState = createAppState(initialState);
-  const managers: { starts: number; stops: number }[] = [];
+  const managers: {
+    starts: number;
+    stops: number;
+    restartConnection(machineId: string): void;
+  }[] = [];
   let ready = false;
   const options = {
     stores,
-    secrets,
     appState,
     applyTheme: (choice: ThemeChoice) => order.push(`theme:${choice}`),
-    createManager: () => {
-      const record = { starts: 0, stops: 0 };
+    createManager: (_machine: Machine, restartConnection: (machineId: string) => void) => {
+      const record = { starts: 0, stops: 0, restartConnection };
       managers.push(record);
       return fakeManager(
         () => {
@@ -157,6 +208,7 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
         () => {
           record.stops += 1;
         },
+        restartConnection,
       );
     },
     onManager: () => {},
@@ -171,7 +223,6 @@ function createFixture(theme: ThemeChoice, initialState: string | null) {
     appState,
     managers,
     machines,
-    secrets,
     order,
     get ready() {
       return ready;
@@ -188,7 +239,10 @@ function createMachinesLifecycleStore(persist: {
   hasHydrated(): boolean;
 }) {
   const listeners = new Set<() => void>();
-  let state = { activeId: machine.id, machines: { [machine.id]: machine } };
+  let state: { activeId: string | null; machines: Record<string, Machine> } = {
+    activeId: machine.id,
+    machines: { [machine.id]: machine },
+  };
   return {
     store: {
       persist,
@@ -203,6 +257,20 @@ function createMachinesLifecycleStore(persist: {
         ...state,
         machines: { ...state.machines, [nextMachine.id]: nextMachine },
       };
+      for (const listener of listeners) listener();
+    },
+    select(nextMachine: Machine) {
+      state = {
+        activeId: nextMachine.id,
+        machines: { ...state.machines, [nextMachine.id]: nextMachine },
+      };
+      for (const listener of listeners) listener();
+    },
+    removeActive() {
+      if (!state.activeId) return;
+      const machines = { ...state.machines };
+      delete machines[state.activeId];
+      state = { activeId: null, machines };
       for (const listener of listeners) listener();
     },
   };
@@ -242,13 +310,13 @@ function createPersistedFixture(options: {
   const appState = createAppState("active");
   const lifecycleOptions = {
     stores,
-    secrets,
     appState,
     applyTheme: (theme: ThemeChoice) => order.push(`theme:${theme}`),
-    createManager: () =>
+    createManager: (_machine: Machine, restartConnection: (machineId: string) => void) =>
       fakeManager(
         () => {},
         () => {},
+        restartConnection,
       ),
     onManager: () => {},
     onReady: () => {
@@ -285,10 +353,15 @@ function createAppState(initialState: string | null) {
   return source;
 }
 
-function fakeManager(start: () => void, stop: () => void): ConnectionManager {
+function fakeManager(
+  start: () => void,
+  stop: () => void,
+  restartConnection: (machineId: string) => void,
+): ConnectionManager {
   return {
     start,
     stop,
+    restartConnection,
     attach: async () => {
       throw new Error("not used by lifecycle tests");
     },

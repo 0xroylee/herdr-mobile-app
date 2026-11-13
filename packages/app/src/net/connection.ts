@@ -63,12 +63,15 @@ export interface ConnectionManagerOptions {
   updateRoutes?: (id: string, routes: MachineRoutes) => void;
   /** Read the latest stored machine routes at the start of each connection attempt. */
   getMachine?: (id: string) => Machine | undefined;
+  /** Ask the owning lifecycle to replace this manager after an explicit token change. */
+  restartConnection?: (machineId: string) => void;
   clock?: Clock;
 }
 
 interface Candidate {
   route: ReturnType<typeof routesOf>[number];
   connection: RouteConnection;
+  token: string;
   state: "pending" | "won" | "failed";
   failureCode?: number;
   incoming: Promise<void>;
@@ -78,6 +81,7 @@ interface Candidate {
 export interface ConnectionManager {
   start(): void;
   stop(): void;
+  restartConnection(machineId: string): void;
   attach(
     address: string,
     options: AttachOptions & { observe: boolean; cols: number; rows: number },
@@ -100,6 +104,7 @@ class Manager implements ConnectionManager {
   private readonly openRoute: RouteOpener;
   private readonly updateRoutes: ((id: string, routes: MachineRoutes) => void) | undefined;
   private readonly getMachine: ((id: string) => Machine | undefined) | undefined;
+  private readonly requestRestart: ((machineId: string) => void) | undefined;
   private readonly clock: Clock;
   private readonly listeners = new Set<(state: ConnectionState) => void>();
   private readonly callsFacade: BridgeCalls;
@@ -125,6 +130,7 @@ class Manager implements ConnectionManager {
     this.openRoute = options.openRoute ?? defaultRouteOpener;
     this.updateRoutes = options.updateRoutes;
     this.getMachine = options.getMachine;
+    this.requestRestart = options.restartConnection;
     this.clock = options.clock ?? systemClock;
     this.callsFacade = lazyCalls(() => Promise.resolve(this.callsForCurrentState()));
   }
@@ -150,6 +156,10 @@ class Manager implements ConnectionManager {
     this.setState("offline");
     if (this.started || this.runId !== stoppedRun) return;
     this.core.setConnection(this.machine.id, "offline");
+  }
+
+  restartConnection(machineId: string): void {
+    if (machineId === this.machine.id) this.requestRestart?.(machineId);
   }
 
   attach(
@@ -227,7 +237,7 @@ class Manager implements ConnectionManager {
     }
     if (!this.isCurrent(run, attempt)) return;
     if (!token) {
-      this.unauthorized(run, attempt);
+      this.scheduleReconnect(run, attempt, new Error("The access token is unavailable"));
       return;
     }
 
@@ -258,7 +268,13 @@ class Manager implements ConnectionManager {
         }
         return;
       }
-      this.candidates.push({ route, connection, state: "pending", incoming: Promise.resolve() });
+      this.candidates.push({
+        route,
+        connection,
+        token,
+        state: "pending",
+        incoming: Promise.resolve(),
+      });
     }
 
     if (this.candidates.length === 0) {
@@ -443,12 +459,10 @@ class Manager implements ConnectionManager {
     await this.refetchLayout(client, run, attempt, socket);
     if (!this.isSocketCurrent(run, attempt, socket)) return;
     this.attemptCount = 0;
-    const token = await this.secrets.get(this.machine.id);
-    if (!token || !this.isSocketCurrent(run, attempt, socket)) return;
     this.connectedCalls = bindBridgeCalls(
       createBridgeApi(candidate.connection.fetch),
       candidate.route.url,
-      token,
+      candidate.token,
     );
     this.setState("connected");
     if (!this.isSocketCurrent(run, attempt, socket)) return;

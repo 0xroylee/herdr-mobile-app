@@ -110,7 +110,7 @@ export function secureSocket(route: { url: string; key: string }): SecureSocket 
       }
 
       const text = utf8Decode(data);
-      if (isChannelApiRecord(text)) return;
+      if (isChannelControlRecord(text)) return;
       socket?.onmessage?.(text);
     });
     queueMicrotask(() => {
@@ -153,12 +153,12 @@ function webSocketUrl(baseUrl: string): string {
   return url.toString();
 }
 
-function isChannelApiRecord(text: string): boolean {
+function isChannelControlRecord(text: string): boolean {
   try {
     const value: unknown = JSON.parse(text);
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const type = (value as Record<string, unknown>).t;
-    return type === "req" || type === "res";
+    return typeof type === "string";
   } catch {
     return false;
   }

@@ -134,6 +134,7 @@ export class PairingController {
         this.secrets,
         this.machines,
         this.deviceName,
+        (machineId) => this.connectionManager?.restartConnection(machineId),
       );
       this.update({ paired, code: "", manual: false });
     } catch (error) {

@@ -47,6 +47,10 @@ describe("secure socket", () => {
               }),
             ),
           );
+          session.send(
+            "text",
+            utf8Encode(JSON.stringify({ t: "future_extension", value: "ignored" })),
+          );
         });
       };
 

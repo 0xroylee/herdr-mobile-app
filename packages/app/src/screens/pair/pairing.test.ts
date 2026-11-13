@@ -276,6 +276,43 @@ describe("pairing flow", () => {
     expect(controller.getSnapshot().connectionState).toBe("connected");
   });
 
+  test("re-pairing the active machine restarts its manager after saving the token", async () => {
+    const events: string[] = [];
+    const baseSecrets = createMemorySecrets([["mac-1", "old-token"]]);
+    const secrets: Secrets = {
+      ...baseSecrets,
+      set: async (id, token) => {
+        await baseSecrets.set(id, token);
+        events.push(`token:${id}`);
+      },
+    };
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    machines.getState().addMachine({
+      id: "mac-1",
+      name: "MacBook",
+      routes: { direct: "https://mac.tailnet.ts.net" },
+      role: "control",
+      deviceId: "device-1",
+    });
+    machines.getState().setActiveId("mac-1");
+    const controller = new PairingController(
+      createBridgeApi(async () => jsonResponse(makePairReply())),
+      secrets,
+      machines,
+      "my-iphone",
+    );
+    const currentManager = makeConnectionManager("connected", (machineId) => {
+      events.push(`restart:${machineId}`);
+    });
+    controller.setConnectionManager(currentManager.manager);
+
+    submitManualPair(controller);
+    await waitForPairing(controller);
+
+    expect(events).toEqual(["token:mac-1", "restart:mac-1"]);
+    expect(await secrets.get("mac-1")).toBe("secret-token");
+  });
+
   test("shows a retryable pairing failure and retries the same pairing", async () => {
     let pairCalls = 0;
     const { controller, machines } = createPairingHarness(async () => {
@@ -359,13 +396,17 @@ async function waitForPairing(controller: PairingController): Promise<void> {
   });
 }
 
-function makeConnectionManager(initialState: ConnectionState) {
+function makeConnectionManager(
+  initialState: ConnectionState,
+  onRestart: (machineId: string) => void = () => {},
+) {
   let state = initialState;
   let listener: ((next: ConnectionState) => void) | undefined;
   let unsubscribed = false;
   const manager: ConnectionManager = {
     start() {},
     stop() {},
+    restartConnection: onRestart,
     attach: async () => {
       throw new Error("not used by pairing tests");
     },

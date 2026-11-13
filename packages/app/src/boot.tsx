@@ -26,7 +26,6 @@ export function Boot({ children, onReady }: { children: ReactNode; onReady(): vo
     setReady(false);
     return startLifecycle({
       stores: { settings: settingsStore, machines: machinesStore, seen: seenStore },
-      secrets: appSecrets,
       appState: {
         currentState: () => AppState.currentState,
         subscribe: (listener) => {
@@ -35,13 +34,14 @@ export function Boot({ children, onReady }: { children: ReactNode; onReady(): vo
         },
       },
       applyTheme,
-      createManager: (machine: Machine, secrets) =>
+      createManager: (machine: Machine, restartConnection) =>
         createConnectionManager({
           machine,
-          secrets,
+          secrets: appSecrets,
           core: coreStore.getState(),
           updateRoutes: (id, routes) => machinesStore.getState().updateRoutes(id, routes),
           getMachine: (id) => machinesStore.getState().machines[id],
+          restartConnection,
         }),
       onManager: setManager,
       onReady: () => {

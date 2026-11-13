@@ -1,6 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
+import { utf8Decode, utf8Encode } from "@herdr-mobile/hc-client";
 import { FakeCore, line } from "@herdr-mobile/hc-client/testing";
 import {
   BRIDGE_PROTOCOL_VERSION,
@@ -10,9 +11,13 @@ import {
 } from "@herdr-mobile/protocol";
 import {
   createMemoryDuplexPair,
+  type DuplexSocket,
+  encodeBase64Url,
   generateStaticKeyPair,
   openInitiator,
   openResponder,
+  type SecureSession,
+  type StaticKeyPair,
 } from "@herdr-mobile/secure-channel";
 import { createCoreStore } from "../store/core.ts";
 import {
@@ -316,16 +321,16 @@ describe("connection manager", () => {
     };
     const dispose = startLifecycle({
       stores,
-      secrets,
       appState,
       applyTheme: () => {},
-      createManager: (selectedMachine, managerSecrets) => {
+      createManager: (selectedMachine, restartConnection) => {
         const manager = createConnectionManager({
           machine: selectedMachine,
-          secrets: managerSecrets,
+          secrets,
           core: coreStore.getState(),
           getMachine: (id) => machineState.getMachine(id),
           updateRoutes: (id, routes) => machineState.updateRoutes(id, routes),
+          restartConnection,
           openRoute: (route) => {
             const socket = new FakeSocket({
               authReply: {
@@ -358,6 +363,171 @@ describe("connection manager", () => {
     });
     expect(socket.closeRequests).toEqual([]);
     dispose();
+  });
+
+  test("a transient token read failure during route persistence keeps the manager and retries", async () => {
+    const machineState = createLifecycleMachineState(machine);
+    const baseSecrets = createMemorySecrets([[machine.id, "secret-token"]]);
+    let tokenReads = 0;
+    let rejectFirstRead!: (error: Error) => void;
+    const firstRead = new Promise<string | null>((_resolve, reject) => {
+      rejectFirstRead = reject;
+    });
+    const secrets = {
+      ...baseSecrets,
+      get: async (id: string) => {
+        tokenReads += 1;
+        if (tokenReads === 1) return firstRead;
+        return baseSecrets.get(id);
+      },
+    };
+    const coreStore = createCoreStore();
+    const opened: OpenedSocket[] = [];
+    const managers: ReturnType<typeof createConnectionManager>[] = [];
+    const clock = new FakeClock();
+    let originalManagerStops = 0;
+    const persist = { rehydrate: async () => {}, hasHydrated: () => true };
+    const stores: LifecycleStores = {
+      settings: { persist, getState: () => ({ ui: { theme: "system" } }) },
+      machines: machineState.store,
+      seen: { persist },
+    };
+    const appState: LifecycleAppStateSource = {
+      currentState: () => "active",
+      subscribe: () => () => {},
+    };
+    const dispose = startLifecycle({
+      stores,
+      appState,
+      applyTheme: () => {},
+      createManager: (selectedMachine, restartConnection) => {
+        const manager = createConnectionManager({
+          machine: selectedMachine,
+          secrets,
+          core: coreStore.getState(),
+          getMachine: (id) => machineState.getMachine(id),
+          openRoute: (route) => {
+            const socket = new FakeSocket();
+            opened.push({ route, socket });
+            return routeConnection(socket);
+          },
+          clock,
+          restartConnection,
+        });
+        const stop = manager.stop.bind(manager);
+        manager.stop = () => {
+          originalManagerStops += 1;
+          stop();
+        };
+        managers.push(manager);
+        return manager;
+      },
+      onManager: () => {},
+      onReady: () => {},
+    });
+
+    await waitFor(() => tokenReads === 1);
+    machineState.updateRoutes(machine.id, { direct: "https://updated.tailnet.ts.net" });
+    rejectFirstRead(new Error("secure storage temporarily unavailable"));
+    await waitFor(() => managers[0]?.state() === "reconnecting");
+    expect(tokenReads).toBe(1);
+    expect(opened).toHaveLength(0);
+
+    expect(managers).toHaveLength(1);
+    expect(originalManagerStops).toBe(0);
+    expect(tokenReads).toBe(1);
+
+    clock.advance(1_000);
+    await waitFor(() => opened.length === 1);
+    expect(tokenReads).toBe(2);
+    expect(opened[0]?.route).toEqual({
+      kind: "direct",
+      url: "https://updated.tailnet.ts.net",
+    });
+    opened[0]?.socket.open();
+    await waitFor(() => managers[0]?.state() === "connected");
+
+    expect(managers).toHaveLength(1);
+    expect(originalManagerStops).toBe(0);
+    dispose();
+  });
+
+  test("unknown secure control records leave core and API calls connected", async () => {
+    await withMemoryConnectionWebSocket(async (identity) => {
+      MemoryConnectionWebSocket.onServerSession = (session) => {
+        const core = new FakeCore((bytes) => session.send("binary", bytes));
+        core.answer = (method) => {
+          if (method !== "doc.get") return undefined;
+          const count = core.calls.filter((call) => call === "doc.get").length;
+          return {
+            value: { spaces: [{ id: "space", name: `space-${count}`, tabs: [] }] },
+            version: count,
+          };
+        };
+        session.onRecord((kind, data) => {
+          if (kind === "binary") {
+            core.write(data);
+            return;
+          }
+          const record = JSON.parse(utf8Decode(data)) as Record<string, unknown>;
+          if (record.t === "req") {
+            session.send(
+              "text",
+              utf8Encode(
+                JSON.stringify({ t: "res", id: record.id, status: 200, body: '{"ok":true}' }),
+              ),
+            );
+            return;
+          }
+          if (record.v === BRIDGE_PROTOCOL_VERSION && typeof record.token === "string") {
+            session.send(
+              "text",
+              utf8Encode(
+                JSON.stringify({
+                  v: BRIDGE_PROTOCOL_VERSION,
+                  ok: true,
+                  role: "control",
+                  machine: { id: machine.id, name: machine.name },
+                }),
+              ),
+            );
+          }
+        });
+      };
+
+      const secureMachine: Machine = {
+        ...machine,
+        routes: {
+          secure: {
+            url: secureUrl,
+            key: encodeBase64Url(identity.publicKey),
+          },
+        },
+      };
+      const manager = createConnectionManager({
+        machine: secureMachine,
+        secrets: createMemorySecrets([[machine.id, "secret-token"]]),
+        core: createCoreStore().getState(),
+      });
+      manager.start();
+      await waitFor(() => manager.state() === "connected");
+
+      const serverSession = MemoryConnectionWebSocket.instances[0]?.serverSession;
+      expect(serverSession).toBeDefined();
+      serverSession?.send(
+        "text",
+        utf8Encode(JSON.stringify({ t: "future_extension", value: "ignored" })),
+      );
+      await flush();
+
+      expect(manager.state()).toBe("connected");
+      await expect(manager.calls().health()).resolves.toEqual({ ok: true });
+      await expect(manager.call("doc.get", { name: "herdr-app" })).resolves.toMatchObject({
+        value: { spaces: [{ id: "space", name: "space-2" }] },
+      });
+      expect(manager.state()).toBe("connected");
+      manager.stop();
+    });
   });
 
   test("a route persistence callback that stops the manager prevents bootstrap", async () => {
@@ -517,6 +687,46 @@ describe("connection manager", () => {
     expect(opened).toHaveLength(1);
     clock.advance(1);
     await waitFor(() => opened.length === 2);
+    manager.stop();
+  });
+
+  test("an empty token read uses the normal reconnect backoff", async () => {
+    const storedSecrets = createMemorySecrets([[machine.id, "secret-token"]]);
+    let tokenReads = 0;
+    const secrets = {
+      ...storedSecrets,
+      get: async (id: string) => {
+        tokenReads += 1;
+        if (tokenReads === 1) return null;
+        return storedSecrets.get(id);
+      },
+    };
+    const opened: OpenedSocket[] = [];
+    const clock = new FakeClock();
+    const manager = createConnectionManager({
+      machine,
+      secrets,
+      core: createCoreStore().getState(),
+      openRoute: (route) => {
+        const socket = new FakeSocket();
+        opened.push({ route, socket });
+        return routeConnection(socket);
+      },
+      clock,
+    });
+
+    manager.start();
+    await waitFor(() => manager.state() === "reconnecting");
+    expect(tokenReads).toBe(1);
+    expect(opened).toHaveLength(0);
+    clock.advance(999);
+    await flush();
+    expect(opened).toHaveLength(0);
+    clock.advance(1);
+    await waitFor(() => opened.length === 1);
+    expect(tokenReads).toBe(2);
+    opened[0]?.socket.open();
+    await waitFor(() => manager.state() === "connected");
     manager.stop();
   });
 
@@ -903,6 +1113,85 @@ async function withFetch<T>(
     return await action();
   } finally {
     globalThis.fetch = original;
+  }
+}
+
+let connectionWebSocketTask = Promise.resolve();
+
+async function withMemoryConnectionWebSocket<T>(
+  action: (identity: StaticKeyPair) => Promise<T>,
+): Promise<T> {
+  const previous = connectionWebSocketTask;
+  let release!: () => void;
+  connectionWebSocketTask = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+
+  const host = globalThis as unknown as { WebSocket: typeof WebSocket };
+  const original = host.WebSocket;
+  const identity = generateStaticKeyPair();
+  MemoryConnectionWebSocket.identity = identity;
+  MemoryConnectionWebSocket.onServerSession = undefined;
+  MemoryConnectionWebSocket.instances = [];
+  host.WebSocket = MemoryConnectionWebSocket as unknown as typeof WebSocket;
+  try {
+    return await action(identity);
+  } finally {
+    MemoryConnectionWebSocket.onServerSession = undefined;
+    MemoryConnectionWebSocket.instances = [];
+    host.WebSocket = original;
+    release();
+  }
+}
+
+class MemoryConnectionWebSocket {
+  static identity: StaticKeyPair;
+  static onServerSession: ((session: SecureSession) => void) | undefined;
+  static instances: MemoryConnectionWebSocket[] = [];
+
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  binaryType: BinaryType = "arraybuffer";
+  readonly clientDuplex: DuplexSocket;
+  serverSession: SecureSession | undefined;
+  closed = false;
+
+  constructor(_url: string) {
+    const [client, server] = createMemoryDuplexPair();
+    this.clientDuplex = client;
+    MemoryConnectionWebSocket.instances.push(this);
+    client.onMessage((bytes) => {
+      this.onmessage?.({ data: bytes.slice().buffer } as MessageEvent);
+    });
+    client.onClose((code, reason) => {
+      this.closed = true;
+      this.onclose?.({ code, reason } as CloseEvent);
+    });
+    void openResponder(server, { localStatic: MemoryConnectionWebSocket.identity }).then(
+      (session) => {
+        this.serverSession = session;
+        MemoryConnectionWebSocket.onServerSession?.(session);
+      },
+      () => {},
+    );
+    queueMicrotask(() => this.onopen?.({} as Event));
+  }
+
+  send(data: ArrayBuffer | ArrayBufferView): void {
+    const bytes =
+      data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    this.clientDuplex.send(bytes);
+  }
+
+  close(code = 1000, reason = "closed"): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.clientDuplex.close(code, reason);
   }
 }
 
