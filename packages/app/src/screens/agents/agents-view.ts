@@ -3,6 +3,7 @@ import { deriveAgents } from "../../model/agents.ts";
 import type { SeenState } from "../../model/seen.ts";
 import type { ConnectionState, MachineCoreState } from "../../store/core.ts";
 import type { Machine } from "../../store/machines.ts";
+import { machinesStore } from "../../store/platform.ts";
 
 export interface AgentSearchFields {
   title: string;
@@ -168,6 +169,7 @@ export function connectionPresentation(
   state: ConnectionState,
   hasCachedRows: boolean,
   machineName: string | undefined,
+  secureRouteAvailable = activeMachineHasSecureRoute(),
 ): ConnectionPresentation {
   const dimCachedRows = state !== "connected" && hasCachedRows;
   if (state === "connected" || machineName === undefined) {
@@ -198,7 +200,9 @@ export function connectionPresentation(
         dimCachedRows,
         banner: {
           kind: "offline",
-          message: "Can't reach the bridge. Check that Tailscale is on.",
+          message: secureRouteAvailable
+            ? "Can't reach your Mac. Check it's awake and online."
+            : "Can't reach the bridge. Check that Tailscale is on.",
           action: "retry",
         },
       };
@@ -216,9 +220,14 @@ export function connectionPresentation(
         dimCachedRows,
         banner: {
           kind: "unauthorized",
-          message: "This Mac's bridge identity changed. Pair again.",
+          message: "This Mac's bridge identity changed.",
           action: "pair",
         },
       };
   }
+}
+
+function activeMachineHasSecureRoute(): boolean {
+  const { activeId, machines } = machinesStore.getState();
+  return activeId !== null && machines[activeId]?.routes.secure !== undefined;
 }

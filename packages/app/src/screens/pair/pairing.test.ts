@@ -4,6 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { BridgeApiError, type BridgeFetch, createBridgeApi } from "../../net/bridge-api.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import type { ConnectionManager } from "../../net/connection.ts";
+import type { RouteOpener } from "../../net/route-opener.ts";
+import type { Socket } from "../../net/socket.ts";
 import type { ConnectionState } from "../../store/core.ts";
 import { createMachinesStore } from "../../store/machines.ts";
 import { createMemorySecrets, createMemoryStorage } from "../../store/memory.ts";
@@ -34,6 +36,25 @@ describe("pairing flow", () => {
       code: "ABCD2345",
     });
     expect(parsePairingInput("https://mac.tailnet.ts.net/path", "ABCD2345")).toBeUndefined();
+
+    const bridgeKey = makeBridgeKey();
+    const offer = base64Url(
+      JSON.stringify({
+        v: 2,
+        u: "https://mac.tailnet.ts.net",
+        s: "https://edge.example.test",
+        k: bridgeKey,
+        c: "ABCD2345",
+        n: "MacBook",
+      }),
+    );
+    expect(parsePairingInput(`https://edge.example.test/#pair=${offer}`, "")).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      secure: "https://edge.example.test",
+      bridgeKey,
+      code: "ABCD2345",
+      name: "MacBook",
+    });
   });
 
   test("captures, clears, and consumes a pair fragment once with no machine paired", () => {
@@ -62,7 +83,7 @@ describe("pairing flow", () => {
     expect(handoff.shouldRedirectToPair(true)).toBe(false);
   });
 
-  test("stores the token separately and activates the paired machine", async () => {
+  test("pairs typed input without a key over HTTP and stores its token and routes", async () => {
     const secrets = createMemorySecrets();
     const machines = createMachinesStore(createMemoryStorage(), secrets);
     let requestName: string | undefined;
@@ -78,15 +99,13 @@ describe("pairing flow", () => {
         role: "control",
         machine: { id: "mac-1", name: "MacBook" },
         routes: { direct: "https://mac.tailnet.ts.net", secure: "https://edge.example.test" },
-        bridgeKey: "public-bridge-key",
+        bridgeKey: makeBridgeKey(),
       });
     });
 
     const result = await pairAndStore(
       { direct: "https://mac.tailnet.ts.net", code: "ABCD2345" },
-      api,
-      secrets,
-      machines,
+      { api, openRoute: noSecureRoute, secrets, machines },
       "my-iphone",
     );
 
@@ -97,11 +116,15 @@ describe("pairing flow", () => {
     expect(machines.getState().machines["mac-1"]).toEqual({
       id: "mac-1",
       name: "MacBook",
-      routes: { direct: "https://mac.tailnet.ts.net" },
+      routes: {
+        direct: "https://mac.tailnet.ts.net",
+        secure: { url: "https://edge.example.test", key: makeBridgeKey() },
+      },
       role: "control",
       deviceId: "device-1",
     });
     expect(result).toEqual({
+      kind: "paired",
       machineName: "MacBook",
       deviceName: "my-iphone",
     });
@@ -129,22 +152,227 @@ describe("pairing flow", () => {
           direct: "https://mac.tailnet.ts.net",
           code: "ABCD2345",
         },
-        api,
-        secrets,
-        machines,
+        { api, openRoute: noSecureRoute, secrets, machines },
       ),
     ).rejects.toThrow("secure storage unavailable");
+    expect(machines.getState().machines).toEqual({});
+  });
+
+  test("refreshes only the secure route for a matching key without redeeming the code", async () => {
+    const bridgeKey = makeBridgeKey();
+    const secrets = createMemorySecrets([["mac-1", "kept-token"]]);
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    machines.getState().addMachine({
+      id: "mac-1",
+      name: "MacBook",
+      routes: {
+        direct: "https://mac.tailnet.ts.net",
+        secure: { url: "https://old-edge.example.test", key: bridgeKey },
+      },
+      role: "control",
+      deviceId: "device-1",
+    });
+    let pairCalls = 0;
+    let openCalls = 0;
+    const api = createBridgeApi(async () => {
+      pairCalls += 1;
+      throw new Error("a matching key must not redeem the code");
+    });
+
+    const result = await pairAndStore(
+      {
+        direct: "https://untrusted.example.test",
+        secure: "https://new-edge.example.test",
+        bridgeKey,
+        code: "ABCD2345",
+      },
+      {
+        api,
+        openRoute: () => {
+          openCalls += 1;
+          throw new Error("a matching key only refreshes its route");
+        },
+        secrets,
+        machines,
+      },
+    );
+
+    expect(result).toEqual({ kind: "refreshed", machineName: "MacBook" });
+    expect(pairCalls).toBe(0);
+    expect(openCalls).toBe(0);
+    expect(machines.getState().machines["mac-1"]?.routes).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      secure: { url: "https://new-edge.example.test", key: bridgeKey },
+    });
+    expect(machines.getState().activeId).toBe("mac-1");
+    expect(await secrets.get("mac-1")).toBe("kept-token");
+  });
+
+  test("pairs over the secure route first and stores both authenticated routes and its key", async () => {
+    const bridgeKey = makeBridgeKey();
+    const events: string[] = [];
+    const baseSecrets = createMemorySecrets([["mac-1", "old-token"]]);
+    const secrets: Secrets = {
+      ...baseSecrets,
+      set: async (id, token) => {
+        await baseSecrets.set(id, token);
+        events.push(`token:${id}`);
+      },
+    };
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    machines.getState().addMachine({
+      id: "mac-1",
+      name: "MacBook",
+      routes: { direct: "https://mac.tailnet.ts.net" },
+      role: "control",
+      deviceId: "old-device",
+    });
+    machines.getState().setActiveId("mac-1");
+    let openedRoute: unknown;
+    let sentMessage: unknown;
+    const api = createBridgeApi(async () => {
+      throw new Error("secure pairing must not use HTTP");
+    });
+    const openRoute: RouteOpener = (route) => {
+      openedRoute = route;
+      return createPairingConnection((data, socket) => {
+        sentMessage = JSON.parse(data);
+        queueMicrotask(() => socket.onmessage?.(JSON.stringify(makePairReply())));
+      });
+    };
+
+    const result = await pairAndStore(
+      {
+        direct: "https://mac.tailnet.ts.net",
+        secure: "https://edge.example.test",
+        bridgeKey,
+        code: "ABCD2345",
+      },
+      {
+        api,
+        openRoute,
+        secrets,
+        machines,
+        restartConnection: (machineId) => events.push(`restart:${machineId}`),
+      },
+      "my-iphone",
+    );
+
+    expect(openedRoute).toEqual({
+      kind: "secure",
+      url: "https://edge.example.test",
+      key: bridgeKey,
+    });
+    expect(sentMessage).toEqual({
+      v: 1,
+      pair: { code: "ABCD2345", name: "my-iphone" },
+    });
+    expect(result).toEqual({ kind: "paired", machineName: "MacBook", deviceName: "my-iphone" });
+    expect(await secrets.get("mac-1")).toBe("secret-token");
+    expect(events).toEqual(["token:mac-1", "restart:mac-1"]);
+    expect(machines.getState().machines["mac-1"]?.routes).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      secure: { url: "https://edge.example.test", key: bridgeKey },
+    });
+  });
+
+  test("falls back to the direct route when the secure handshake fails before pairing", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    let pairCalls = 0;
+    const api = createBridgeApi(async (input) => {
+      pairCalls += 1;
+      expect(String(input)).toBe("https://mac.tailnet.ts.net/api/pair");
+      return jsonResponse(makePairReply());
+    });
+    const openRoute: RouteOpener = () => createPairingConnection(() => {}, 4003);
+
+    await pairAndStore(
+      {
+        direct: "https://mac.tailnet.ts.net",
+        secure: "https://edge.example.test",
+        bridgeKey: makeBridgeKey(),
+        code: "ABCD2345",
+      },
+      { api, openRoute, secrets, machines },
+    );
+
+    expect(pairCalls).toBe(1);
+    expect(await secrets.get("mac-1")).toBe("secret-token");
+  });
+
+  test("falls back when the PairMessage could not be sent", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    let pairCalls = 0;
+    const api = createBridgeApi(async () => {
+      pairCalls += 1;
+      return jsonResponse(makePairReply());
+    });
+    const openRoute: RouteOpener = () =>
+      createPairingConnection(() => {
+        throw new Error("socket is already closed");
+      });
+
+    await pairAndStore(
+      {
+        direct: "https://mac.tailnet.ts.net",
+        secure: "https://edge.example.test",
+        bridgeKey: makeBridgeKey(),
+        code: "ABCD2345",
+      },
+      { api, openRoute, secrets, machines },
+    );
+
+    expect(pairCalls).toBe(1);
+  });
+
+  test("does not fall back after the secure channel might have redeemed the code", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    let pairCalls = 0;
+    const api = createBridgeApi(async () => {
+      pairCalls += 1;
+      return jsonResponse(makePairReply());
+    });
+    const openRoute: RouteOpener = () =>
+      createPairingConnection((_data, socket) => {
+        queueMicrotask(() => socket.onclose?.({ code: 1006 }));
+      });
+
+    await expect(
+      pairAndStore(
+        {
+          direct: "https://mac.tailnet.ts.net",
+          secure: "https://edge.example.test",
+          bridgeKey: makeBridgeKey(),
+          code: "ABCD2345",
+        },
+        { api, openRoute, secrets, machines },
+      ),
+    ).rejects.toThrow("Secure pairing failed");
+    expect(pairCalls).toBe(0);
     expect(machines.getState().machines).toEqual({});
   });
 
   test("maps pairing errors and picks a readable device name", () => {
     const forbidden = new BridgeApiError(403, "forbidden", "denied");
     const badCode = new BridgeApiError(400, "bad_code", "invalid");
+    const badChannelCode = new BridgeApiError(4402, "bad_pair_code", "invalid");
+    const changedIdentity = new BridgeApiError(4003, "key_mismatch", "mismatch");
     const networkError = new TypeError("fetch failed");
+    const typedInput = { direct: "https://mac.tailnet.ts.net", code: "ABCD2345" };
 
     expect(pairingErrorMessage(forbidden)).toContain("Tailscale");
     expect(pairingErrorMessage(badCode)).toContain("expired");
+    expect(pairingErrorMessage(badChannelCode)).toContain("expired");
+    expect(pairingErrorMessage(changedIdentity)).toBe(
+      "This Mac's bridge identity changed. Pair again.",
+    );
     expect(pairingErrorMessage(networkError)).toContain("Can't reach");
+    expect(pairingErrorMessage(networkError, typedInput)).toBe(
+      "Typing works over Tailscale. Without it, scan the code or paste the full link.",
+    );
     expect(pairingCanRetry(forbidden)).toBe(true);
     expect(pairingCanRetry(badCode)).toBe(false);
     expect(pairingCanRetry(networkError)).toBe(true);
@@ -208,6 +436,12 @@ describe("pairing flow", () => {
     });
     expect(connectionLineState("connected", "MacBook Pro", "my-iphone").message).toBe(
       "Connected as my-iphone",
+    );
+    expect(connectionLineState("connected", "MacBook Pro", "my-iphone", "direct").message).toBe(
+      "Connected via Tailscale",
+    );
+    expect(connectionLineState("connected", "MacBook Pro", "my-iphone", "secure").message).toBe(
+      "Connected via the secure route",
     );
     expect(connectionLineState("unauthorized", "MacBook Pro", "my-iphone").message).toContain(
       "Pairing must be repeated",
@@ -327,7 +561,7 @@ describe("pairing flow", () => {
     expect(controller.getSnapshot()).toMatchObject({
       busy: false,
       retryable: true,
-      banner: "The bridge couldn't complete pairing. Try again.",
+      banner: "Typing works over Tailscale. Without it, scan the code or paste the full link.",
     });
 
     controller.retry();
@@ -335,6 +569,7 @@ describe("pairing flow", () => {
 
     expect(pairCalls).toBe(2);
     expect(controller.getSnapshot().paired).toEqual({
+      kind: "paired",
       machineName: "MacBook",
       deviceName: "my-iphone",
     });
@@ -374,6 +609,33 @@ function createPairingHarness(fetcher: BridgeFetch) {
     "my-iphone",
   );
   return { controller, machines, secrets };
+}
+
+const noSecureRoute: RouteOpener = () => {
+  throw new Error("unexpected secure route attempt");
+};
+
+function createPairingConnection(
+  onSend: (data: string, socket: Socket) => void,
+  closeBeforeOpen?: number,
+): ReturnType<RouteOpener> {
+  let socket: Socket;
+  socket = {
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+    send(data) {
+      if (typeof data !== "string") throw new Error("pair message must be text");
+      onSend(data, socket);
+    },
+    close() {},
+  };
+  queueMicrotask(() => {
+    if (closeBeforeOpen === undefined) socket.onopen?.();
+    else socket.onclose?.({ code: closeBeforeOpen });
+  });
+  return { socket, fetch: async () => new Response(null) };
 }
 
 function submitManualPair(controller: PairingController): void {
@@ -468,7 +730,13 @@ function makePairReply() {
     token: "secret-token",
     role: "control",
     machine: { id: "mac-1", name: "MacBook" },
+    routes: { direct: "https://mac.tailnet.ts.net", secure: "https://edge.example.test" },
+    bridgeKey: makeBridgeKey(),
   };
+}
+
+function makeBridgeKey(): string {
+  return base64Url("x".repeat(32));
 }
 
 function jsonResponse(value: unknown, status = 200): Response {

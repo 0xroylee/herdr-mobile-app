@@ -8,6 +8,7 @@ import { createMemorySecrets, createMemoryStorage } from "../../store/memory.ts"
 import {
   createMachineRemovalController,
   machineHostName,
+  machineRouteLines,
   removePairedMachine,
 } from "./settings-actions.ts";
 
@@ -119,6 +120,24 @@ describe("machine settings actions", () => {
   test("parses the machine hostname for display", () => {
     expect(machineHostName(machine)).toBe("mac.tailnet.ts.net");
     expect(machineHostName({ ...machine, routes: {} })).toBe("MacBook");
+  });
+
+  test("lists the available direct and secure route hosts", () => {
+    expect(
+      machineRouteLines({
+        ...machine,
+        routes: {
+          direct: "https://mac.tailnet.ts.net",
+          secure: { url: "https://edge.example.test:9443", key: "bridge-key" },
+        },
+      }),
+    ).toEqual(["Tailscale: mac.tailnet.ts.net", "Secure route: edge.example.test:9443"]);
+    expect(
+      machineRouteLines({
+        ...machine,
+        routes: { secure: { url: "https://edge.example.test", key: "bridge-key" } },
+      }),
+    ).toEqual(["Secure route: edge.example.test"]);
   });
 });
 

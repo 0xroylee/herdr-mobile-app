@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useConnectionManager } from "../../boot.tsx";
 import { createBridgeApi } from "../../net/bridge-api.ts";
 import { routes } from "../../routes.ts";
-import { appSecrets, machinesStore } from "../../store/platform.ts";
+import { appSecrets, coreStore, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { Button } from "../../ui/components/Button.tsx";
 import { Text } from "../../ui/text.tsx";
@@ -26,6 +26,10 @@ const textActionClasses = {
 export function PairScreen() {
   const router = useRouter();
   const manager = useConnectionManager();
+  const activeMachineId = machinesStore((state) => state.activeId);
+  const connectionRoute = coreStore((state) =>
+    activeMachineId === null ? undefined : state.machines[activeMachineId]?.route,
+  );
   const controller = useMemo(
     () => new PairingController(bridgeApi, appSecrets, machinesStore, deviceName),
     [],
@@ -58,7 +62,7 @@ export function PairScreen() {
         <View className="gap-2 pt-3">
           <Text variant="pairTitle">Connect to your Mac</Text>
           <Text variant="body" tone="muted">
-            Reach the bridge through Tailscale. Your terminals stay on your tailnet.
+            Reach the bridge through Tailscale or the secure route.
           </Text>
         </View>
 
@@ -70,10 +74,18 @@ export function PairScreen() {
           />
         ) : null}
 
-        <PairingSteps connectionState={state.connectionState} paired={state.paired} />
+        <PairingSteps
+          connectionState={state.connectionState}
+          connectionRoute={connectionRoute}
+          paired={state.paired?.kind === "paired" ? state.paired : undefined}
+        />
 
         {state.paired ? (
-          <Text variant="callout">Paired with {state.paired.machineName}. Opening agents…</Text>
+          <Text variant="callout">
+            {state.paired.kind === "refreshed"
+              ? `Updated the address for ${state.paired.machineName}.`
+              : `Paired with ${state.paired.machineName}. Opening agents…`}
+          </Text>
         ) : state.manual ? (
           <ManualEntry
             address={state.address}

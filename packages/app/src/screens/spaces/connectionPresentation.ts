@@ -1,4 +1,5 @@
 import type { ConnectionState } from "@/store/core.ts";
+import { machinesStore } from "@/store/platform.ts";
 
 export type SpacesBanner =
   | { kind: "reconnecting"; message: string; action: "none" }
@@ -12,7 +13,7 @@ export interface SpacesConnectionPresentation {
 
 const disconnectedBanners: Record<
   Exclude<ConnectionState, "connected">,
-  (machine: string) => SpacesBanner
+  (machine: string, secureRouteAvailable: boolean) => SpacesBanner
 > = {
   connecting: (machine) => ({
     kind: "reconnecting",
@@ -24,9 +25,11 @@ const disconnectedBanners: Record<
     message: `Reconnecting to ${machine}…`,
     action: "none",
   }),
-  offline: () => ({
+  offline: (_machine, secureRouteAvailable) => ({
     kind: "offline",
-    message: "Can't reach the bridge. Check that Tailscale is on.",
+    message: secureRouteAvailable
+      ? "Can't reach your Mac. Check it's awake and online."
+      : "Can't reach the bridge. Check that Tailscale is on.",
     action: "retry",
   }),
   unauthorized: (machine) => ({
@@ -36,7 +39,7 @@ const disconnectedBanners: Record<
   }),
   identity_changed: () => ({
     kind: "unauthorized",
-    message: "This Mac's bridge identity changed. Pair again.",
+    message: "This Mac's bridge identity changed.",
     action: "pair",
   }),
 };
@@ -45,11 +48,20 @@ const disconnectedBanners: Record<
 export function connectionPresentation(
   connection: ConnectionState | undefined,
   machineName: string | undefined,
+  secureRouteAvailable = activeMachineHasSecureRoute(),
 ): SpacesConnectionPresentation {
   if (connection === undefined || connection === "connected") {
     return { dimmed: false, banner: undefined };
   }
 
   const machine = machineName?.trim() || "Mac";
-  return { dimmed: true, banner: disconnectedBanners[connection](machine) };
+  return {
+    dimmed: true,
+    banner: disconnectedBanners[connection](machine, secureRouteAvailable),
+  };
+}
+
+function activeMachineHasSecureRoute(): boolean {
+  const { activeId, machines } = machinesStore.getState();
+  return activeId !== null && machines[activeId]?.routes.secure !== undefined;
 }

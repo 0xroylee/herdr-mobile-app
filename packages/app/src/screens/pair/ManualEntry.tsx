@@ -34,6 +34,9 @@ export function ManualEntry({
       style={{ borderWidth: HAIRLINE }}
     >
       <Text variant="headline">Enter bridge details</Text>
+      <Text variant="caption" tone="muted">
+        Typing works over Tailscale. Without it, scan the code or paste the full link.
+      </Text>
       <View className="gap-1.5">
         <Text variant="caption" tone="muted">
           Bridge URL or pairing link

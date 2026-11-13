@@ -1,12 +1,13 @@
 import type { BridgeApi } from "../../net/bridge-api.ts";
 import type { ConnectionManager } from "../../net/connection.ts";
 import type { PairInput } from "../../net/pair-link.ts";
+import { defaultRouteOpener, type RouteOpener } from "../../net/route-opener.ts";
 import type { ConnectionState } from "../../store/core.ts";
 import type { machinesStore } from "../../store/platform.ts";
 import type { Secrets } from "../../store/secrets.ts";
 import { consumeCapturedPairFragment } from "./pair-fragment.ts";
 import {
-  type PairedDevice,
+  type PairingOutcome,
   pairAndStore,
   pairingCanRetry,
   pairingErrorMessage,
@@ -21,7 +22,7 @@ export interface PairingViewState {
   busy: boolean;
   banner?: string;
   retryable: boolean;
-  paired?: PairedDevice;
+  paired?: PairingOutcome;
   connectionState?: ConnectionState;
 }
 
@@ -43,17 +44,20 @@ export class PairingController {
   private readonly secrets: Secrets;
   private readonly machines: typeof machinesStore;
   private readonly deviceName: string;
+  private readonly openRoute: RouteOpener;
 
   constructor(
     api: BridgeApi,
     secrets: Secrets,
     machines: typeof machinesStore,
     deviceName: string,
+    openRoute: RouteOpener = defaultRouteOpener,
   ) {
     this.api = api;
     this.secrets = secrets;
     this.machines = machines;
     this.deviceName = deviceName;
+    this.openRoute = openRoute;
   }
 
   getSnapshot = (): PairingViewState => this.state;
@@ -130,15 +134,21 @@ export class PairingController {
     try {
       const paired = await pairAndStore(
         input,
-        this.api,
-        this.secrets,
-        this.machines,
+        {
+          api: this.api,
+          openRoute: this.openRoute,
+          secrets: this.secrets,
+          machines: this.machines,
+          restartConnection: (machineId) => this.connectionManager?.restartConnection(machineId),
+        },
         this.deviceName,
-        (machineId) => this.connectionManager?.restartConnection(machineId),
       );
       this.update({ paired, code: "", manual: false });
     } catch (error) {
-      this.update({ banner: pairingErrorMessage(error), retryable: pairingCanRetry(error) });
+      this.update({
+        banner: pairingErrorMessage(error, input),
+        retryable: pairingCanRetry(error),
+      });
     } finally {
       this.update({ busy: false });
     }
