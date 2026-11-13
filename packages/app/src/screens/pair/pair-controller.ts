@@ -120,7 +120,7 @@ export class PairingController {
     this.unsubscribeConnection();
     this.unsubscribeConnection = () => {};
     this.update({
-      address: input.url,
+      address: input.direct ?? "",
       code: input.code,
       banner: undefined,
       retryable: false,
@@ -134,6 +134,7 @@ export class PairingController {
         this.secrets,
         this.machines,
         this.deviceName,
+        (machineId) => this.connectionManager?.restartConnection(machineId),
       );
       this.update({ paired, code: "", manual: false });
     } catch (error) {

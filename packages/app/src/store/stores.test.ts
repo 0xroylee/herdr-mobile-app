@@ -46,13 +46,16 @@ describe("app stores", () => {
     });
   });
 
-  test("stores bridge details without ever persisting an accidental token field", async () => {
+  test("stores routes without ever persisting an accidental token field", async () => {
     const { storage, values } = recordableStorage();
     const machines = createMachinesStore(storage, createMemorySecrets());
     const machineWithAnExtraField = {
       id: "machine-1",
       name: "Mac",
-      url: "https://mac.tailnet.ts.net",
+      routes: {
+        direct: "https://mac.tailnet.ts.net",
+        secure: { url: "https://mac.example.test", key: "public-identity-key" },
+      },
       role: "control",
       deviceId: "device-1",
       token: "one-time-token",
@@ -64,7 +67,63 @@ describe("app stores", () => {
     expect(machines.getState().machines["machine-1"]).not.toHaveProperty("token");
     expect(persisted).not.toContain("one-time-token");
     expect(persisted).not.toContain('"token"');
+    expect(persisted).toContain("public-identity-key");
     expect(machines.getState().activeId).toBe("machine-1");
+  });
+
+  test("migrates a version 1 machine URL to its direct route", async () => {
+    const storage = createMemoryStorage();
+    await storage.setItem(
+      "machines",
+      JSON.stringify({
+        state: {
+          machines: {
+            "machine-1": {
+              id: "machine-1",
+              name: "Mac",
+              url: "https://mac.tailnet.ts.net",
+              role: "control",
+              deviceId: "device-1",
+            },
+          },
+          activeId: "machine-1",
+        },
+        version: 1,
+      }),
+    );
+    const machines = createMachinesStore(storage, createMemorySecrets());
+
+    await machines.persist.rehydrate();
+
+    expect(machines.getState().machines["machine-1"]).toEqual({
+      id: "machine-1",
+      name: "Mac",
+      routes: { direct: "https://mac.tailnet.ts.net" },
+      role: "control",
+      deviceId: "device-1",
+    });
+    expect(machines.getState().activeId).toBe("machine-1");
+  });
+
+  test("updates advertised routes without replacing the machine identity", () => {
+    const machines = createMachinesStore(createMemoryStorage(), createMemorySecrets());
+    machines.getState().addMachine({
+      id: "machine-1",
+      name: "Mac",
+      routes: { direct: "https://old.tailnet.ts.net" },
+      role: "control",
+      deviceId: "device-1",
+    });
+
+    machines.getState().updateRoutes("machine-1", {
+      direct: "https://new.tailnet.ts.net",
+      secure: { url: "https://mac.example.test", key: "public-key" },
+    });
+
+    expect(machines.getState().machines["machine-1"]?.routes).toEqual({
+      direct: "https://new.tailnet.ts.net",
+      secure: { url: "https://mac.example.test", key: "public-key" },
+    });
   });
 
   test("forgetting a machine removes its secret after a failed bridge revoke", async () => {
@@ -73,7 +132,7 @@ describe("app stores", () => {
     machines.getState().addMachine({
       id: "machine-1",
       name: "Mac",
-      url: "https://mac.tailnet.ts.net",
+      routes: { direct: "https://mac.tailnet.ts.net" },
       role: "control",
       deviceId: "device-1",
     });

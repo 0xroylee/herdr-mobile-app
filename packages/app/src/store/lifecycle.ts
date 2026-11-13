@@ -1,6 +1,5 @@
 import type { ConnectionManager } from "../net/connection.ts";
 import type { Machine } from "./machines.ts";
-import type { Secrets } from "./secrets.ts";
 import type { ThemeChoice } from "./settings.ts";
 
 interface RehydratableStore {
@@ -23,10 +22,12 @@ export interface LifecycleAppStateSource {
 
 export interface LifecycleOptions {
   stores: LifecycleStores;
-  secrets: Secrets;
   appState: LifecycleAppStateSource;
   applyTheme(theme: ThemeChoice): void;
-  createManager(machine: Machine, secrets: Secrets): ConnectionManager;
+  createManager(
+    machine: Machine,
+    restartConnection: (machineId: string) => void,
+  ): ConnectionManager;
   onManager(manager: ConnectionManager | undefined): void;
   onReady(): void;
 }
@@ -37,8 +38,60 @@ export function startLifecycle(options: LifecycleOptions): () => void {
   let ready = false;
   let foreground = false;
   let manager: ConnectionManager | undefined;
-  let selectedMachine: Machine | undefined;
+  let activeMachineId: string | undefined;
+  let managerMachineId: string | undefined;
+  let machineRevision = 0;
   let unsubscribeMachines = () => {};
+
+  const stopManager = () => {
+    const current = manager;
+    manager = undefined;
+    managerMachineId = undefined;
+    if (!current) return;
+    current.stop();
+    options.onManager(undefined);
+  };
+
+  let restartActiveManager = (_machineId: string) => {};
+
+  const createManager = (machine: Machine, revision: number) => {
+    let created: ConnectionManager | undefined;
+    try {
+      created = options.createManager(machine, (machineId) => {
+        if (manager !== created || managerMachineId !== machine.id) return;
+        restartActiveManager(machineId);
+      });
+    } catch {
+      return;
+    }
+    if (disposed || revision !== machineRevision || activeMachineId !== machine.id) {
+      created.stop();
+      return;
+    }
+
+    manager = created;
+    managerMachineId = machine.id;
+    options.onManager(created);
+    if (disposed || revision !== machineRevision || manager !== created) {
+      created.stop();
+      return;
+    }
+    if (foreground) created.start();
+  };
+
+  restartActiveManager = (machineId) => {
+    if (disposed || activeMachineId !== machineId || managerMachineId !== machineId || !manager) {
+      return;
+    }
+    const { activeId, machines } = options.stores.machines.getState();
+    const currentMachine = activeId ? machines[activeId] : undefined;
+    if (currentMachine?.id !== machineId) return;
+
+    const revision = ++machineRevision;
+    stopManager();
+    if (disposed || revision !== machineRevision) return;
+    createManager(currentMachine, revision);
+  };
 
   const updateForeground = (state: string | null | undefined) => {
     foreground = state === "active" || state == null;
@@ -53,21 +106,13 @@ export function startLifecycle(options: LifecycleOptions): () => void {
   const syncActiveMachine = () => {
     const { activeId, machines } = options.stores.machines.getState();
     const nextMachine = activeId ? machines[activeId] : undefined;
-    if (nextMachine?.id === selectedMachine?.id && nextMachine === selectedMachine) return;
+    if (nextMachine?.id === activeMachineId) return;
 
-    manager?.stop();
-    manager = undefined;
-    options.onManager(undefined);
-    selectedMachine = nextMachine;
-    if (!nextMachine) return;
-
-    try {
-      manager = options.createManager(nextMachine, options.secrets);
-    } catch {
-      return;
-    }
-    options.onManager(manager);
-    if (foreground) manager.start();
+    const revision = ++machineRevision;
+    activeMachineId = nextMachine?.id;
+    stopManager();
+    if (disposed || revision !== machineRevision || !nextMachine) return;
+    createManager(nextMachine, revision);
   };
 
   const hydrate = async () => {
@@ -110,9 +155,9 @@ export function startLifecycle(options: LifecycleOptions): () => void {
     disposed = true;
     unsubscribeAppState();
     unsubscribeMachines();
-    manager?.stop();
-    manager = undefined;
-    options.onManager(undefined);
+    const hadManager = manager !== undefined;
+    stopManager();
+    if (!hadManager) options.onManager(undefined);
   };
 }
 

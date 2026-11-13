@@ -26,22 +26,26 @@ export async function pairAndStore(
   secrets: Secrets,
   machines: typeof machinesStore,
   name?: string,
+  restartConnection?: (machineId: string) => void,
 ): Promise<PairedDevice> {
-  const reply: PairReply = await api.pair(input.url, {
+  const direct = input.direct as string;
+  const reply: PairReply = await api.pair(direct, {
     code: input.code,
     ...(name ? { name } : {}),
   });
 
+  const machineWasActive = machines.getState().activeId === reply.machine.id;
   await secrets.set(reply.machine.id, reply.token);
   const machine = {
     id: reply.machine.id,
     name: reply.machine.name,
-    url: input.url,
+    routes: { direct },
     role: reply.role,
     deviceId: reply.deviceId,
   };
   machines.getState().addMachine(machine);
   machines.getState().setActiveId(machine.id);
+  if (machineWasActive) restartConnection?.(machine.id);
 
   return {
     machineName: machine.name,

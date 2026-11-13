@@ -8,19 +8,38 @@ describe("pair link", () => {
     const payload = base64Url(JSON.stringify({ u: "https://mac.tailnet.ts.net", c: "ABCD2345" }));
 
     expect(parsePairFragment(`https://mac.tailnet.ts.net/#pair=${payload}`)).toEqual({
-      url: "https://mac.tailnet.ts.net",
+      direct: "https://mac.tailnet.ts.net",
       code: "ABCD2345",
     });
   });
 
   test("normalizes typed input and rejects malformed URLs or codes", () => {
     expect(parseTypedPairInput("https://mac.tailnet.ts.net/", "  ABCD2345 ")).toEqual({
-      url: "https://mac.tailnet.ts.net",
+      direct: "https://mac.tailnet.ts.net",
       code: "ABCD2345",
     });
     expect(parseTypedPairInput("javascript:alert(1)", "ABCD2345")).toBeUndefined();
     expect(parseTypedPairInput("https://mac.tailnet.ts.net/path", "ABCD2345")).toBeUndefined();
     expect(parseTypedPairInput("https://mac.tailnet.ts.net", "short")).toBeUndefined();
+  });
+
+  test("preserves every route and the pinned key from a v2 pair offer", () => {
+    const payload = base64Url(
+      JSON.stringify({
+        v: 2,
+        u: "https://mac.tailnet.ts.net",
+        s: "https://bridge.example.test",
+        k: base64Url("x".repeat(32)),
+        c: "ABCD2345",
+      }),
+    );
+
+    expect(parsePairFragment(`#pair=${payload}`)).toEqual({
+      direct: "https://mac.tailnet.ts.net",
+      secure: "https://bridge.example.test",
+      bridgeKey: base64Url("x".repeat(32)),
+      code: "ABCD2345",
+    });
   });
 
   test("returns undefined for malformed or unrelated fragments without throwing", () => {

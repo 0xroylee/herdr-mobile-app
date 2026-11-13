@@ -1,20 +1,18 @@
 import type { Layout } from "@herdr-mobile/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
+import { useConnectionManager } from "@/boot.tsx";
 import { deriveSpaces, type MachineSpaceGroup } from "@/model/spaces.ts";
 import type { SpaceTargetId } from "@/model/spaceTarget.ts";
-import { createBridgeApi } from "@/net/bridge-api.ts";
+import { unavailableBridgeCalls } from "@/net/bridge-calls.ts";
 import type { Machine } from "@/store/machines.ts";
-import { appSecrets, coreStore, machinesStore } from "@/store/platform.ts";
+import { coreStore, machinesStore } from "@/store/platform.ts";
 import {
   connectionPresentation,
   type SpacesConnectionPresentation,
 } from "./connectionPresentation.ts";
 import { createNewSpace, createNewTab, type NewItemResult } from "./newItems.ts";
 import { initialExpandedSpaceKeys, toggleExpandedSpace } from "./viewState.ts";
-
-const bridgeApi = createBridgeApi((input, init) => fetch(input, init));
-const newItemDependencies = { api: bridgeApi, secrets: appSecrets };
 
 export interface UseSpacesResult {
   groups: MachineSpaceGroup[];
@@ -32,6 +30,7 @@ export interface UseSpacesResult {
 }
 
 export function useSpaces(): UseSpacesResult {
+  const connectionManager = useConnectionManager();
   const activeId = useStore(machinesStore, (state) => state.activeId);
   const machine = useStore(machinesStore, (state) =>
     activeId === null ? undefined : state.machines[activeId],
@@ -50,6 +49,8 @@ export function useSpaces(): UseSpacesResult {
   const actionInProgress = useRef(false);
   const expandedSpaceKeys = expandedOverride ?? defaultExpandedKeys;
   const presentation = connectionPresentation(core?.connection, machine?.name);
+  const calls =
+    connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac.");
 
   const isExpanded = useCallback(
     (key: string) => expandedSpaceKeys.includes(key),
@@ -70,13 +71,13 @@ export function useSpaces(): UseSpacesResult {
       setMessage(undefined);
       const result: NewItemResult =
         item.kind === "space"
-          ? await createNewSpace(newItemDependencies, machine)
-          : await createNewTab(newItemDependencies, machine, item.target);
+          ? await createNewSpace({ calls }, machine)
+          : await createNewTab({ calls }, machine, item.target);
       if (!result.ok) setMessage(result.message);
       setIsCreating(false);
       actionInProgress.current = false;
     },
-    [machine],
+    [calls, machine],
   );
 
   const createSpace = useCallback(() => {

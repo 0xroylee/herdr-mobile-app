@@ -1,3 +1,4 @@
+import "../polyfills/crypto.ts";
 import "../global.css";
 
 import { Stack } from "expo-router";

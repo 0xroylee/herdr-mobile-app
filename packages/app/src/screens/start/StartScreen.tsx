@@ -1,4 +1,4 @@
-import type { StartAgentSpace } from "@herdr-mobile/protocol";
+import type { StartAgentRequest, StartAgentSpace } from "@herdr-mobile/protocol";
 import * as Haptics from "expo-haptics";
 import { type Href, useRouter } from "expo-router";
 import type { ReactNode } from "react";
@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
+import { useConnectionManager } from "../../boot.tsx";
 import { deriveSpaces } from "../../model/spaces.ts";
 import { newTabTarget } from "../../model/spaceTarget.ts";
 import {
@@ -25,9 +26,9 @@ import {
   type StartSpaceChoice,
   startSpaceKey,
 } from "../../model/startAgent.ts";
-import { createBridgeApi } from "../../net/bridge-api.ts";
+import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import { routes } from "../../routes.ts";
-import { appSecrets, coreStore, machinesStore, settingsStore } from "../../store/platform.ts";
+import { coreStore, machinesStore, settingsStore } from "../../store/platform.ts";
 import { shortenHomeFolder } from "../../terminal/folder.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { buttonClasses, HAIRLINE } from "../../ui/components/classes.ts";
@@ -42,7 +43,6 @@ import { getStartScreenAccess } from "./start-access.ts";
 import { createStartController, dispatchStartAction } from "./start-controller.ts";
 import { WherePicker } from "./WherePicker.tsx";
 
-const bridgeApi = createBridgeApi((input, init) => fetch(input, init));
 const emptyRecentFolders: string[] = [];
 
 export interface StartScreenProps {
@@ -51,6 +51,7 @@ export interface StartScreenProps {
 
 export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const router = useRouter();
+  const connectionManager = useConnectionManager();
   const isPageSheet = Platform.OS === "ios" && router.canGoBack();
   const activeId = useStore(machinesStore, (state) => state.activeId);
   const machine = useStore(machinesStore, (state) =>
@@ -69,19 +70,17 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
   const solid = useCSSVariable("--color-solid-fg");
   const placeholderColor = typeof dim === "string" ? dim : undefined;
   const solidForeground = typeof solid === "string" ? solid : undefined;
-  const port = useMemo(
-    () => ({
+  const port = useMemo(() => {
+    const calls =
+      connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac.");
+    return {
       catalog: async () => {
         if (machine?.role !== "control") throw new Error("This device is read-only.");
-        const token = await appSecrets.get(machine.id);
-        if (!token) throw new Error("The access token for this Mac is unavailable.");
-        return bridgeApi.agentCatalog(machine.url, token);
+        return calls.agentCatalog();
       },
-      start: async (request: Parameters<typeof bridgeApi.startAgent>[2]) => {
+      start: async (request: StartAgentRequest) => {
         if (machine?.role !== "control") throw new Error("This device is read-only.");
-        const token = await appSecrets.get(machine.id);
-        if (!token) throw new Error("The access token for this Mac is unavailable.");
-        const reply = await bridgeApi.startAgent(machine.url, token, request);
+        const reply = await calls.startAgent(request);
         settingsStore.getState().pushRecentFolder(machine.id, request.folder);
         return reply;
       },
@@ -98,9 +97,8 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
           params: { space: spaceId, started: placement },
         } as Href);
       },
-    }),
-    [machine, router],
-  );
+    };
+  }, [connectionManager, machine, router]);
   const controller = useMemo(
     () =>
       createStartController(port, preselectedSpaceId, { role: machine?.role, connected: false }),
@@ -174,7 +172,15 @@ export function StartScreen({ preselectedSpaceId }: StartScreenProps) {
     setEmptyTabError(undefined);
     setEmptyTabBusy(true);
     const result = await controller.createEmptyTabIfAllowed(emptyTabTarget, (target) =>
-      createNewTab({ api: bridgeApi, secrets: appSecrets }, machine, target),
+      createNewTab(
+        {
+          calls:
+            connectionManager?.calls() ??
+            unavailableBridgeCalls("Not connected to the selected Mac."),
+        },
+        machine,
+        target,
+      ),
     );
     setEmptyTabBusy(false);
     if (!result) return;
