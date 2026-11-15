@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { HcRpcError } from "@herdr-mobile/hc-client";
 import type { DeviceRecordView, TaskRecord, TasksDocument } from "@herdr-mobile/protocol";
-import { TASKS_DOC_NAME, TASKS_MAX_AGE_MS } from "@herdr-mobile/protocol";
+import { TASKS_DOC_NAME, TASKS_MAX_AGE_MS, TASKS_TARGET_BYTES } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import type { TaskCoreCaller } from "./task-store.ts";
 import { TaskStore, TaskStoreError } from "./task-store.ts";
@@ -20,7 +20,9 @@ class FakeClock implements Clock {
 class FakeCore {
   document: TasksDocument = { v: 1, tasks: {} };
   version = 0;
-  live: string[] = [];
+  live: Array<string | { address: string; state: string; reason?: unknown }> = [];
+  docValue: unknown = undefined;
+  externalDocument: TasksDocument | undefined;
   gets = 0;
   sets: Array<{ version: number; value: TasksDocument }> = [];
   conflicts = 0;
@@ -30,11 +32,16 @@ class FakeCore {
     if (method === "doc.get") {
       this.gets += 1;
       expect(params).toEqual({ name: TASKS_DOC_NAME });
-      return { value: structuredClone(this.document), version: this.version };
+      return {
+        value: structuredClone(this.docValue === undefined ? this.document : this.docValue),
+        version: this.version,
+      };
     }
     if (method === "terminal.list") {
       return {
-        terminals: this.live.map((address) => ({ address, state: "live" })),
+        terminals: this.live.map((terminal) =>
+          typeof terminal === "string" ? { address: terminal, state: "live" } : terminal,
+        ),
       };
     }
     if (method !== "doc.set") throw new Error(`unexpected method ${method}`);
@@ -43,6 +50,10 @@ class FakeCore {
     this.sets.push({ version: input.version, value: structuredClone(input.value) });
     if (this.conflicts > 0) {
       this.conflicts -= 1;
+      if (this.externalDocument !== undefined) {
+        this.document = structuredClone(this.externalDocument);
+        this.externalDocument = undefined;
+      }
       this.version += 1;
       throw new HcRpcError({
         code: -32000,
@@ -99,6 +110,25 @@ describe("TaskStore", () => {
 
     expect(core.gets).toBe(1);
     expect(store.snapshot().tasks[id]?.text).toBe("A task");
+  });
+
+  test.each([
+    ["missing", null],
+    ["unparsable", { v: 2, tasks: {} }],
+  ])("opens an empty document when the core value is %s", async (_name, value) => {
+    const core = new FakeCore();
+    core.version = 7;
+    core.docValue = value;
+    const store = await TaskStore.open(core.call);
+
+    expect(store.snapshot()).toEqual({ v: 1, tasks: {} });
+    const created = await store.create({
+      text: "Review this change",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(core.sets[0]?.version).toBe(7);
+    expect(core.document.tasks[created.id]).toEqual(created);
   });
 
   test("creates a phone record after the caller asks, with a cryptographic task id", async () => {
@@ -164,6 +194,35 @@ describe("TaskStore", () => {
     expect(unchecked).not.toHaveProperty("checkedBy");
   });
 
+  test("rejects prototype task ids and terminal addresses without mutating shared prototypes", async () => {
+    const { core, store } = await opened();
+    const unchecked = await store.create({
+      text: "Keep this unchecked record",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    const descriptors = Object.getOwnPropertyDescriptors(Object.prototype);
+    const setCount = core.sets.length;
+
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      await expect(store.check(key, 0, control)).rejects.toMatchObject({
+        code: "task_not_found",
+      });
+      await expect(store.link(key, "t1")).rejects.toMatchObject({ code: "task_not_found" });
+      await expect(store.uncheck(key)).rejects.toMatchObject({ code: "task_not_found" });
+      await expect(store.check({ terminal: key }, 0, control)).rejects.toMatchObject({
+        code: "task_not_found",
+      });
+      await expect(store.link(unchecked.id, key)).rejects.toMatchObject({
+        code: "task_not_found",
+      });
+    }
+
+    expect(core.sets).toHaveLength(setCount);
+    expect(store.snapshot().tasks[unchecked.id]).toEqual(unchecked);
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(descriptors);
+  });
+
   test("checking a from-Herdr terminal creates and checks a Herdr-origin record", async () => {
     const { store } = await opened();
     const checked = await store.check({ terminal: "t-mac" }, 2, control);
@@ -205,7 +264,7 @@ describe("TaskStore", () => {
       },
     };
     const refreshed = await TaskStore.open(core.call, new FakeClock());
-    const removed = await refreshed.clear("sp1", new Set(core.live));
+    const removed = await refreshed.clear("sp1", new Set(["t-live"]));
 
     expect(removed).toEqual([checkedEnded]);
     expect(refreshed.snapshot().tasks).toHaveProperty(checkedLive);
@@ -226,6 +285,49 @@ describe("TaskStore", () => {
     expect(core.gets).toBe(2);
     expect(core.sets.map((set) => set.version)).toEqual([0, 1]);
     expect(core.document.tasks[created.id]).toEqual(created);
+  });
+
+  test("serializes simultaneous writes and keeps both records", async () => {
+    const core = new FakeCore();
+    const store = await TaskStore.open(core.call);
+    const [first, second] = await Promise.all([
+      store.create({
+        text: "First concurrent task",
+        run: { kind: "program", id: "claude" },
+        folder: "/repo",
+      }),
+      store.create({
+        text: "Second concurrent task",
+        run: { kind: "program", id: "codex" },
+        folder: "/repo",
+      }),
+    ]);
+
+    expect(core.sets.map((set) => set.version)).toEqual([0, 1]);
+    expect(core.document.tasks[first.id]).toEqual(first);
+    expect(core.document.tasks[second.id]).toEqual(second);
+  });
+
+  test("preserves another writer's record when retrying a version conflict", async () => {
+    const core = new FakeCore();
+    const store = await TaskStore.open(core.call);
+    const externalId = `tk${"e".repeat(32)}`;
+    core.conflicts = 1;
+    core.externalDocument = {
+      v: 1,
+      tasks: { [externalId]: record(externalId, { text: "Other phone task" }) },
+    };
+
+    const created = await store.create({
+      text: "Review this change",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+
+    expect(core.gets).toBe(2);
+    expect(core.document.tasks[externalId]?.text).toBe("Other phone task");
+    expect(core.document.tasks[created.id]).toEqual(created);
+    expect(core.sets[1]?.value.tasks[externalId]?.text).toBe("Other phone task");
   });
 
   test("returns conflict after one retry and keeps the last confirmed document in memory", async () => {
@@ -265,6 +367,64 @@ describe("TaskStore", () => {
     expect(store.snapshot().tasks[`tk${"0".repeat(32)}`]).toBeUndefined();
     expect(store.snapshot().tasks[`tk${"0".repeat(30)}06`]).toBeDefined();
     expect(store.snapshot().tasks[`tk${"0".repeat(30)}cc`]).toBeDefined();
+  });
+
+  test("prunes a checked live terminal with a lost program but keeps a running agent", async () => {
+    const core = new FakeCore();
+    const clock = new FakeClock();
+    const tasks: Record<string, TaskRecord> = {};
+    const lostId = `tk${"0".repeat(32)}`;
+    tasks[lostId] = record(lostId, {
+      terminal: "t-lost",
+      checkedTurn: 1,
+      checkedAt: 1,
+    });
+    for (let index = 1; index <= 200; index += 1) {
+      const id = `tk${index.toString(16).padStart(32, "0")}`;
+      tasks[id] = record(id, {
+        terminal: `t-${index}`,
+        checkedTurn: 1,
+        checkedAt: index + 1,
+      });
+    }
+    const runningId = `tk${"f".repeat(32)}`;
+    tasks[runningId] = record(runningId, {
+      terminal: "t-running",
+      checkedTurn: 1,
+      checkedAt: 1,
+    });
+    core.document = { v: 1, tasks };
+    core.live = [
+      { address: "t-lost", state: "live", reason: "signaled" },
+      { address: "t-running", state: "live", reason: null },
+    ];
+    const store = await TaskStore.open(core.call, clock);
+
+    await store.check({ terminal: "t-new" }, 1, control);
+
+    expect(store.snapshot().tasks[lostId]).toBeUndefined();
+    expect(store.snapshot().tasks[runningId]).toBeDefined();
+  });
+
+  test("prunes checked records toward the 768 KiB target", async () => {
+    const core = new FakeCore();
+    const tasks: Record<string, TaskRecord> = {};
+    for (let index = 0; index < 100; index += 1) {
+      const id = `tk${index.toString(16).padStart(32, "0")}`;
+      tasks[id] = record(id, {
+        text: "x".repeat(8 * 1024),
+        checkedTurn: 1,
+        checkedAt: index + 1,
+      });
+    }
+    core.document = { v: 1, tasks };
+    const store = await TaskStore.open(core.call);
+
+    await store.check({ terminal: "t-new" }, 1, control);
+
+    const bytes = new TextEncoder().encode(JSON.stringify(store.snapshot())).byteLength;
+    expect(bytes).toBeLessThanOrEqual(TASKS_TARGET_BYTES);
+    expect(Object.keys(store.snapshot().tasks).length).toBeLessThan(101);
   });
 
   test("prunes checked records older than 30 days even when their terminal is live", async () => {

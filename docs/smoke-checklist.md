@@ -73,7 +73,8 @@ bridge's own `PATH` does not control programs spawned inside the core.
 
 - [ ] Create wrappers for Claude Code and Codex. The fake agent prints its argv, reports `working`,
   then waits at a numbered menu, accepts input, reports `working` and `done`, and exits with the
-  configured code.
+  configured code. OSC 7501 reports contain only the state; the question, menu and done message stay
+  visible as terminal text.
 
   ```sh
   repo=$PWD
@@ -102,12 +103,15 @@ bridge's own `PATH` does not control programs spawned inside the core.
   `argv: ["claude", "--", "Review the scratch task"]`, `cwd: "$root/home"`, and the
   `herdr.space`, `herdr.tab` and `herdr-mobile.origin` labels. Read `herdr-mobile.tasks` with
   `doc.get`; confirm the record has the matching terminal address.
-- [ ] Try a one-word task and a task beginning with `-`. Each returns 422 `task_not_allowed` with
-  `Write the task as a sentence.`. Confirm neither adds a task record. Try each task route with a
-  watch token; each returns 403. Unknown body keys return 400.
+- [ ] For Claude Code and Codex, try a one-word task and a task beginning with `-`. Each returns 422
+  `task_not_allowed` with `Write the task as a sentence.` and adds no record. Try one-word and
+  dash-leading text with a template on both Herdr window and core starts; each is passed as the
+  template's first message (`[name, task]` on core). NUL and text over 8 KiB are refused for every
+  task. Try each task route with a watch token; each returns 403. Unknown body keys return 400.
 - [ ] Check the running task with its current turn, then uncheck it. Check a terminal started outside
   the phone by its address; confirm a `herdr` record appears. Clear a space and confirm only checked
-  tasks whose terminals ended or disappeared are removed.
+  tasks whose terminals ended or disappeared are removed, including a kept terminal with a
+  non-null reason, while a running terminal remains.
 - [ ] Stop and restart the scratch bridge and confirm the core document is unchanged. Restart the
   scratch core only through the wrapper's `server.stop` procedure in [Cleanup](#cleanup), reconnect
   with the same scratch session, and confirm the document survives. Never run a core stop command

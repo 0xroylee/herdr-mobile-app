@@ -3,6 +3,7 @@ import type {
   ClearTasksRequest,
   DeviceRecordView,
   LinkTaskRequest,
+  StartAgentRequest,
   StartAgentRun,
   StartAgentSpace,
   StartTaskReply,
@@ -10,7 +11,7 @@ import type {
   TaskErrorCode,
   UncheckTaskRequest,
 } from "@herdr-mobile/protocol";
-import { TASK_TEXT_MAX_BYTES } from "@herdr-mobile/protocol";
+import { TASK_ID_PATTERN, TASK_TEXT_MAX_BYTES } from "@herdr-mobile/protocol";
 import { authenticatedCaller, requestBody } from "../server/app-cli.ts";
 import type { ResolveCaller } from "../server/caller.ts";
 import type { CoreMethod } from "../server/core-call.ts";
@@ -83,25 +84,35 @@ function isTaskRequest(value: unknown): value is StartTaskRequest {
   return true;
 }
 
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isTaskId(value: unknown): value is string {
+  return typeof value === "string" && TASK_ID_PATTERN.test(value);
+}
+
+function isTerminalAddress(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !PROTOTYPE_KEYS.has(value);
+}
+
 function isCheckRequest(value: unknown): value is CheckTaskRequest {
   if (!isRecord(value) || !Number.isSafeInteger(value.turn) || (value.turn as number) < 0) {
     return false;
   }
   return (
-    (typeof value.id === "string" && hasOnlyKeys(value, ["id", "turn"])) ||
-    (typeof value.terminal === "string" && hasOnlyKeys(value, ["terminal", "turn"]))
+    (isTaskId(value.id) && hasOnlyKeys(value, ["id", "turn"])) ||
+    (isTerminalAddress(value.terminal) && hasOnlyKeys(value, ["terminal", "turn"]))
   );
 }
 
 function isUncheckRequest(value: unknown): value is UncheckTaskRequest {
-  return isRecord(value) && typeof value.id === "string" && hasOnlyKeys(value, ["id"]);
+  return isRecord(value) && isTaskId(value.id) && hasOnlyKeys(value, ["id"]);
 }
 
 function isLinkRequest(value: unknown): value is LinkTaskRequest {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.terminal === "string" &&
+    isTaskId(value.id) &&
+    isTerminalAddress(value.terminal) &&
     hasOnlyKeys(value, ["id", "terminal"])
   );
 }
@@ -114,11 +125,39 @@ function isClearRequest(value: unknown): value is ClearTasksRequest {
   );
 }
 
-function startError(error: StartAgentError): Response {
-  return json(
-    { error: error.code, message: error.message, ...(error.kind ? { kind: error.kind } : {}) },
-    error.status,
-  );
+function taskStartError(error: StartAgentError, run: StartAgentRun): Response {
+  let message: string;
+  switch (error.code) {
+    case "herdr_app_failed":
+      message = "Herdr couldn’t start the task.";
+      break;
+    case "herdr_app_timeout":
+      message = "Herdr took too long to start the task.";
+      break;
+    case "core_unavailable":
+      message = "Can’t reach your Mac.";
+      break;
+    case "folder_not_allowed":
+    case "folder_missing":
+      message = "Choose a folder under an allowed root.";
+      break;
+    case "task_not_allowed":
+      message = "Write the task as a sentence.";
+      break;
+    case "first_message_not_allowed":
+      message =
+        run.kind === "program"
+          ? `${run.id} gets a first message only while Herdr is open on your Mac.`
+          : "That agent isn’t available.";
+      break;
+    case "run_not_allowed":
+      message = "That agent isn’t available.";
+      break;
+    default:
+      message = "That agent isn’t available.";
+  }
+  const code = error.code === "first_message_not_allowed" ? "run_not_allowed" : error.code;
+  return json({ error: code, message }, error.status);
 }
 
 function storeError(error: TaskStoreError): Response {
@@ -149,7 +188,12 @@ function liveAddresses(value: unknown): ReadonlySet<string> {
     throw new TaskStoreError("core_unavailable");
   const addresses = new Set<string>();
   for (const terminal of value.terminals) {
-    if (isRecord(terminal) && terminal.state === "live" && typeof terminal.address === "string") {
+    if (
+      isRecord(terminal) &&
+      terminal.state === "live" &&
+      terminal.reason == null &&
+      typeof terminal.address === "string"
+    ) {
       addresses.add(terminal.address);
     }
   }
@@ -195,19 +239,17 @@ export async function handleTaskRoutes(
       return taskTextError();
     }
     try {
-      const start = await context.starter.startTask(
-        {
-          run: body.run,
-          folder: body.folder,
-          space: body.space,
-          task: body.text,
-        },
-        caller.device,
-      );
+      const startRequest: StartAgentRequest = {
+        run: body.run,
+        folder: body.folder,
+        space: body.space,
+        task: body.text,
+      };
+      const start = await context.starter.start(startRequest, caller.device);
       const record = await context.store.create({
         text: body.text,
         run: body.run,
-        folder: body.folder,
+        folder: startRequest.folder,
         ...(start.space.id ? { space: { id: start.space.id } } : {}),
         ...(start.tab.id ? { tab: { id: start.tab.id } } : {}),
         placement: start.placement,
@@ -217,7 +259,7 @@ export async function handleTaskRoutes(
       const reply: StartTaskReply = { record, start };
       return json(reply);
     } catch (error) {
-      if (error instanceof StartAgentError) return startError(error);
+      if (error instanceof StartAgentError) return taskStartError(error, body.run);
       if (error instanceof TaskStoreError) return storeError(error);
       return json({ error: "internal_error" }, 500);
     }

@@ -34,8 +34,8 @@ describe("fake-agent", () => {
     const exitCode = await runFakeAgent(["--", task], defaults, io);
 
     expect(io.output[0]).toBe(`${JSON.stringify(["--", task])}\r\n`);
-    expect(io.output.join("")).toContain("state=working");
-    expect(io.output.join("")).toContain("state=done");
+    expect(io.output.join("")).toContain("\u001b]7501;state=working\u001b\\");
+    expect(io.output.join("")).toContain("\u001b]7501;state=done\u001b\\");
     expect(exitCode).toBe(0);
   });
 
@@ -43,9 +43,12 @@ describe("fake-agent", () => {
     const io = new FakeIo();
     await runFakeAgent([], { ...defaults, mode: "blocked", msg: "All done" }, io);
 
-    expect(io.output.join("")).toContain("1. Yes\r\n2. No\r\n");
-    expect(io.output.join("")).toContain("state=blocked;msg=Continue?");
-    expect(io.output.join("")).toContain("state=done;msg=All done");
+    const output = io.output.join("");
+    expect(output).toContain("Continue?\r\n1. Yes\r\n2. No\r\n");
+    expect(output).toContain("\u001b]7501;state=blocked\u001b\\");
+    expect(output).toContain("All done\r\nFinished.\r\n");
+    expect(output).toContain("\u001b]7501;state=done\u001b\\");
+    expect(output).not.toContain(";msg=");
     expect(io.replies).toBe(1);
   });
 

@@ -59,12 +59,12 @@ export interface AgentStarterConfig {
 
 export class StartAgentError extends Error {
   readonly status: number;
-  readonly code: StartAgentErrorCode | "task_not_allowed";
+  readonly code: StartAgentErrorCode | "task_not_allowed" | "first_message_not_allowed";
   readonly kind: string | undefined;
 
   constructor(
     status: number,
-    code: StartAgentErrorCode | "task_not_allowed",
+    code: StartAgentErrorCode | "task_not_allowed" | "first_message_not_allowed",
     message: string,
     kind?: string,
   ) {
@@ -285,39 +285,45 @@ export class AgentStarter {
   }
 
   async start(request: StartAgentRequest, caller: DeviceRecordView): Promise<StartAgentReply> {
-    return this.startWithTaskDelivery(request, caller, false);
-  }
-
-  /** Starts a task route request with guarded task argv delivery when Herdr is closed. */
-  async startTask(request: StartAgentRequest, caller: DeviceRecordView): Promise<StartAgentReply> {
-    return this.startWithTaskDelivery(request, caller, true);
-  }
-
-  private async startWithTaskDelivery(
-    request: StartAgentRequest,
-    caller: DeviceRecordView,
-    taskRoute: boolean,
-  ): Promise<StartAgentReply> {
     if (caller.role !== "control") {
       throw new StartAgentError(403, "forbidden", "This device is read-only.");
     }
     validateRequest(request);
+    if (request.task === "") request.task = undefined;
     const run = await this.resolveRun(request.run);
     const folder = await this.resolveFolder(request.folder);
+    request.folder = folder;
     const windowOpen = await this.probeWindow();
+
+    if (
+      !windowOpen &&
+      run.kind === "program" &&
+      request.task &&
+      run.name !== "claude" &&
+      run.name !== "codex"
+    ) {
+      throw new StartAgentError(
+        422,
+        "first_message_not_allowed",
+        "A first message requires Herdr to be open.",
+      );
+    }
+
+    const taskArgv =
+      request.task === undefined
+        ? undefined
+        : launchArgv(
+            run.kind === "program"
+              ? { kind: "program", id: run.name }
+              : { kind: "template", name: run.name },
+            request.task,
+          );
 
     let reply: StartAgentReply;
     if (windowOpen) {
       reply = await this.startInWindow(request, run, folder);
     } else {
-      if (run.kind === "program" && request.task && run.name !== "claude" && run.name !== "codex") {
-        throw new StartAgentError(
-          422,
-          "run_not_allowed",
-          `First messages for ${run.name} need Herdr open on your Mac. Open Herdr, or leave the message empty.`,
-        );
-      }
-      reply = await this.startInCore(request, run, folder, caller, taskRoute);
+      reply = await this.startInCore(request, run, folder, caller, taskArgv);
     }
     this.logSuccessfulStart(caller, run, folder, reply, request.task !== undefined);
     return reply;
@@ -536,40 +542,12 @@ export class AgentStarter {
     run: ResolvedRun,
     folder: string,
     caller: DeviceRecordView,
-    taskRoute: boolean,
+    taskArgv: string[] | undefined,
   ): Promise<StartAgentReply> {
     const spaceIsNew = request.space.kind === "new";
     const spaceId = request.space.kind === "new" ? this.idGenerator("sp") : request.space.id;
     const tabId = this.idGenerator("tb");
-    let argv: string[];
-    if (!request.task) {
-      argv = [run.name];
-    } else if (!taskRoute && run.kind === "template") {
-      argv = [run.name, request.task];
-    } else {
-      try {
-        argv = launchArgv(
-          run.kind === "program"
-            ? { kind: "program", id: run.name }
-            : { kind: "template", name: run.name },
-          request.task,
-        );
-      } catch (error) {
-        if (
-          !taskRoute &&
-          run.kind === "program" &&
-          error instanceof StartAgentError &&
-          error.code === "task_not_allowed"
-        ) {
-          throw new StartAgentError(
-            422,
-            "run_not_allowed",
-            `First messages for ${run.name} need Herdr open on your Mac. Open Herdr, or leave the message empty.`,
-          );
-        }
-        throw error;
-      }
-    }
+    const argv = taskArgv ?? [run.name];
     const params = {
       argv,
       cwd: folder,

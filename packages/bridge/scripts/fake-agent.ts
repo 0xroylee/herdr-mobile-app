@@ -7,7 +7,7 @@
  *   mode: "done" | "blocked" (`HERDR_FAKE_AGENT_MODE`, default "done")
  *   delayMs: milliseconds between status changes (`HERDR_FAKE_AGENT_DELAY_MS`, default 400)
  *   exitCode: process exit code (`HERDR_FAKE_AGENT_EXIT_CODE`, default 0)
- *   msg: optional done-status message (`HERDR_FAKE_AGENT_MSG`)
+ *   msg: optional done message printed to the terminal (`HERDR_FAKE_AGENT_MSG`)
  *   lastLine: canned final screen line (`HERDR_FAKE_AGENT_LAST_LINE`)
  *   question: blocked menu question (`HERDR_FAKE_AGENT_QUESTION`)
  *   choices: menu labels (`HERDR_FAKE_AGENT_CHOICES`, separated by |)
@@ -120,13 +120,8 @@ export async function readFakeAgentOptions(
   };
 }
 
-function escapeStatusValue(value: string): string {
-  return value.replaceAll("\u001b", "").replaceAll("\u0007", "").replaceAll(";", ",");
-}
-
-function report(io: FakeAgentIo, state: string, msg?: string): void {
-  const status = `state=${state}${msg === undefined ? "" : `;msg=${escapeStatusValue(msg)}`}`;
-  io.write(`\u001b]7501;${status}\u001b\\`);
+function report(io: FakeAgentIo, state: string): void {
+  io.write(`\u001b]7501;state=${state}\u001b\\`);
 }
 
 function printMenu(io: FakeAgentIo, options: FakeAgentOptions): void {
@@ -146,13 +141,14 @@ export async function runFakeAgent(
   await io.delay(options.delayMs);
   if (options.mode === "blocked") {
     printMenu(io, options);
-    report(io, "blocked", options.question);
+    report(io, "blocked");
     await io.waitForReply();
     report(io, "working");
     await io.delay(options.delayMs);
   }
+  if (options.msg !== undefined) io.write(`${options.msg}\r\n`);
   io.write(`${options.lastLine}\r\n`);
-  report(io, "done", options.msg);
+  report(io, "done");
   return options.exitCode;
 }
 

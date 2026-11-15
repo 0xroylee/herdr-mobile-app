@@ -17,6 +17,13 @@ describe("launchArgv", () => {
     ]);
   });
 
+  test.each(["Inspect", "-p inspect this change"])(
+    "allows template text without applying program-only guards: %s",
+    (task) => {
+      expect(launchArgv({ kind: "template", name: "review" }, task)).toEqual(["review", task]);
+    },
+  );
+
   test.each([
     ["dash-leading", " -p inspect this"],
     ["whitespace-free", "inspect"],
@@ -24,6 +31,15 @@ describe("launchArgv", () => {
     ["over-limit UTF-8", `${"a".repeat(8191)} é`],
   ])("refuses %s text with the task copy", (_name, task) => {
     expect(() => launchArgv({ kind: "program", id: "claude" }, task)).toThrow(
+      new StartAgentError(422, "task_not_allowed", "Write the task as a sentence."),
+    );
+  });
+
+  test.each([
+    ["NUL", "inspect\0 this"],
+    ["over-limit UTF-8", `${"a".repeat(8191)} é`],
+  ])("applies common safety limits to template text: %s", (_name, task) => {
+    expect(() => launchArgv({ kind: "template", name: "review" }, task)).toThrow(
       new StartAgentError(422, "task_not_allowed", "Write the task as a sentence."),
     );
   });

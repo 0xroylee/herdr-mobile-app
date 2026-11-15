@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import type { TaskRecord, TasksDocument } from "@herdr-mobile/protocol";
 import type { SecureSession } from "@herdr-mobile/secure-channel";
+import type { ProcessRunner } from "../prototype/process.ts";
+import type { TaskRoutesContext } from "../tasks/task-routes.ts";
+import type { TaskCoreCaller } from "../tasks/task-store.ts";
+import { TaskStore } from "../tasks/task-store.ts";
+import type { AppCliContext } from "./app-cli.ts";
 import { createChannelApi } from "./channel-api.ts";
+import type { ApiContext } from "./routes.ts";
+import { dispatchApi } from "./routes.ts";
+import { AgentStarter } from "./start-agent.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -28,6 +37,8 @@ class FakeSession implements SecureSession {
   }
 }
 
+const WATCH_DEVICE = { ...DEVICE, id: "device-watch", role: "watch" as const };
+
 function requestRecord(
   id: number,
   path = "/api/health",
@@ -44,7 +55,7 @@ function responses(session: FakeSession): unknown[] {
 }
 
 async function settle(): Promise<void> {
-  for (let index = 0; index < 12; index++) await Promise.resolve();
+  for (let index = 0; index < 50; index++) await Promise.resolve();
 }
 
 describe("channel API multiplexing", () => {
@@ -93,25 +104,101 @@ describe("channel API multiplexing", () => {
     ]);
   });
 
-  test("carries task routes through the authenticated channel API", async () => {
-    const session = new FakeSession();
-    const paths: string[] = [];
-    const api = createChannelApi(session, DEVICE, async (request) => {
-      paths.push(new URL(request.url).pathname);
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "Content-Type": "application/json" },
-      });
+  test("dispatches real task routes over the channel and rejects a watch device", async () => {
+    const id = `tk${"a".repeat(32)}`;
+    let document: TasksDocument = {
+      v: 1,
+      tasks: {
+        [id]: {
+          id,
+          origin: "phone",
+          text: "Review this change",
+          run: { kind: "program", id: "claude" },
+          folder: "/repo",
+          terminal: "t12",
+          createdAt: 1,
+        } satisfies TaskRecord,
+      },
+    };
+    let version = 1;
+    const coreCall: TaskCoreCaller = async (method, params) => {
+      if (method === "doc.get") return { value: document, version };
+      if (method === "terminal.list") return { terminals: [] };
+      if (method === "doc.set") {
+        const input = params as { value: TasksDocument; version: number };
+        if (input.version !== version) throw new Error("unexpected version conflict");
+        document = structuredClone(input.value);
+        version += 1;
+        return { version };
+      }
+      throw new Error(`unexpected method ${method}`);
+    };
+    const store = await TaskStore.open(coreCall);
+    const runner: ProcessRunner = {
+      spawn: () => {
+        throw new Error("task check does not spawn processes");
+      },
+    };
+    const starter = new AgentStarter({
+      runner,
+      programs: ["claude", "codex"],
+      roots: ["/"],
+      home: "/",
+      herdrAppPath: "herdr-app",
+      hcPath: "hc",
+      env: {},
+      cwd: "/",
+      coreCall,
+      statFs: {
+        async realPath(path) {
+          return path;
+        },
+        async stat() {
+          return { isDirectory: () => true };
+        },
+      },
     });
-
-    api.receive(
-      requestRecord(4, "/api/tasks/check", "POST", JSON.stringify({ id: "tk1", turn: 1 })),
+    const taskRoutes: TaskRoutesContext = { starter, store, coreCall };
+    const appCli: AppCliContext = { runner, env: {}, cwd: "/", herdrAppPath: "herdr-app" };
+    const sharedDispatch = (request: Request, resolveCaller: Parameters<typeof dispatchApi>[1]) =>
+      dispatchApi(request, resolveCaller, {
+        api: {} as ApiContext,
+        appCli,
+        agentStarter: starter,
+        taskRoutes,
+      });
+    const controlSession = new FakeSession();
+    const controlApi = createChannelApi(controlSession, DEVICE, sharedDispatch);
+    controlApi.receive(
+      requestRecord(4, "/api/tasks/check", "POST", JSON.stringify({ id, turn: 2 })),
     );
     await settle();
 
-    expect(paths).toEqual(["/api/tasks/check"]);
-    expect(responses(session)).toEqual([
-      { t: "res", id: 4, status: 200, body: JSON.stringify({ ok: true }) },
+    const controlResponses = responses(controlSession) as Array<{
+      t: string;
+      id: number;
+      status: number;
+      body?: string;
+    }>;
+    expect(controlResponses).toHaveLength(1);
+    expect(controlResponses[0]).toMatchObject({ t: "res", id: 4, status: 200 });
+    expect(JSON.parse(controlResponses[0]?.body ?? "{}")).toMatchObject({
+      id,
+      checkedTurn: 2,
+      checkedBy: { deviceId: DEVICE.id, deviceName: DEVICE.name },
+    });
+    expect(document.tasks[id]?.checkedTurn).toBe(2);
+
+    const confirmed = structuredClone(document);
+    const watchSession = new FakeSession();
+    const watchApi = createChannelApi(watchSession, WATCH_DEVICE, sharedDispatch);
+    watchApi.receive(requestRecord(5, "/api/tasks/check", "POST", JSON.stringify({ id, turn: 3 })));
+    await settle();
+
+    expect(responses(watchSession)).toEqual([
+      { t: "res", id: 5, status: 403, body: JSON.stringify({ error: "forbidden" }) },
     ]);
+    expect(document).toEqual(confirmed);
   });
 
   test("ignores unknown channel control message types", () => {

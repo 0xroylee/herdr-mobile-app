@@ -30,15 +30,21 @@ class FakeChild implements OwnedProcess {
   readonly exited: Promise<number | null>;
   killed = false;
   private readonly stdoutText: string;
+  private readonly stderrText: string;
 
-  constructor(stdoutText = "", exitCode = 1) {
+  constructor(stdoutText = "", exitCode = 1, stderrText = "") {
     this.stdoutText = stdoutText;
+    this.stderrText = stderrText;
     this.exited = Promise.resolve(exitCode);
   }
   write(): void {}
   closeInput(): void {}
   read(onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
     if (this.stdoutText) onData(new TextEncoder().encode(this.stdoutText));
+    onEnd();
+  }
+  readStderr(onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
+    if (this.stderrText) onData(new TextEncoder().encode(this.stderrText));
     onEnd();
   }
   kill(): void {
@@ -48,13 +54,20 @@ class FakeChild implements OwnedProcess {
 
 class FakeRunner implements ProcessRunner {
   readonly argv: string[][] = [];
+  lsExitCode = 1;
+  doExitCode = 0;
+  doStderr = "";
   spawn(argv: string[]): OwnedProcess {
     this.argv.push(argv);
-    return new FakeChild("{}", argv[1] === "ls" ? 1 : 0);
+    return new FakeChild("{}", argv[1] === "ls" ? this.lsExitCode : this.doExitCode, this.doStderr);
   }
 }
 
-async function setup(roots = ["/home/owner"]) {
+async function setup(
+  roots = ["/home/owner"],
+  templateNames: string[] = [],
+  extraPrograms: string[] = [],
+) {
   const devices = await DeviceStore.open(new MapFs(), "/state/devices.json");
   await devices.add({ token: "control-token", role: "control", name: "Control phone" });
   await devices.add({ token: "watch-token", role: "watch", name: "Watch phone" });
@@ -68,7 +81,7 @@ async function setup(roots = ["/home/owner"]) {
   const coreCalls: { method: string; params: unknown }[] = [];
   const starter = new AgentStarter({
     runner,
-    programs: ["claude", "codex"],
+    programs: ["claude", "codex", ...extraPrograms],
     roots,
     home: "/home/owner",
     herdrAppPath: context.herdrAppPath,
@@ -85,6 +98,11 @@ async function setup(roots = ["/home/owner"]) {
     },
     coreCall: async (method, params) => {
       coreCalls.push({ method, params });
+      if (method === "templates.list") {
+        return {
+          templates: templateNames.map((name) => ({ name, description: name })),
+        };
+      }
       return { address: "t31", templates: [] };
     },
   });
@@ -208,6 +226,112 @@ describe("agent routes", () => {
     expect(coreCalls[0]?.method).toBe("terminal.run");
   });
 
+  test.each(["claude", "codex"])(
+    "treats an empty task as absent for %s on the core path",
+    async (program) => {
+      const { starter, coreCalls, resolveCaller } = await setup();
+      const response = await handleAgentsRoutes(
+        routeRequest(
+          "/api/agents/start",
+          "control-token",
+          "POST",
+          JSON.stringify({
+            run: { kind: "program", id: program },
+            folder: "/home/owner/project",
+            space: { kind: "new", name: "Review" },
+            task: "",
+          }),
+        ),
+        starter,
+        resolveCaller,
+      );
+
+      expect(response?.status).toBe(200);
+      expect(coreCalls.find((call) => call.method === "terminal.run")?.params).toMatchObject({
+        argv: [program],
+      });
+    },
+  );
+
+  test.each(["claude", "codex"])(
+    "omits an empty task from %s on the window path",
+    async (program) => {
+      const { starter, runner, resolveCaller } = await setup();
+      runner.lsExitCode = 0;
+      const response = await handleAgentsRoutes(
+        routeRequest(
+          "/api/agents/start",
+          "control-token",
+          "POST",
+          JSON.stringify({
+            run: { kind: "program", id: program },
+            folder: "/home/owner/project",
+            space: { kind: "new", name: "Review" },
+            task: "",
+          }),
+        ),
+        starter,
+        resolveCaller,
+      );
+
+      expect(response?.status).toBe(200);
+      expect(runner.argv[1]?.slice(0, 3)).toEqual(["/opt/herdr-app", "do", "space.new"]);
+      expect(JSON.parse(runner.argv[1]?.[3] ?? "{}")).toEqual({
+        folder: "/home/owner/project",
+        argv: [program],
+        name: "Review",
+      });
+    },
+  );
+
+  test("treats an empty task as absent for an added program on the core path", async () => {
+    const { starter, coreCalls, resolveCaller } = await setup(undefined, [], ["aider"]);
+    const response = await handleAgentsRoutes(
+      routeRequest(
+        "/api/agents/start",
+        "control-token",
+        "POST",
+        JSON.stringify({
+          run: { kind: "program", id: "aider" },
+          folder: "/home/owner/project",
+          space: { kind: "new", name: "Review" },
+          task: "",
+        }),
+      ),
+      starter,
+      resolveCaller,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(coreCalls.find((call) => call.method === "terminal.run")?.params).toMatchObject({
+      argv: ["aider"],
+    });
+  });
+
+  test("treats an empty task as absent for a template on the core path", async () => {
+    const { starter, coreCalls, resolveCaller } = await setup(undefined, ["review"]);
+    const response = await handleAgentsRoutes(
+      routeRequest(
+        "/api/agents/start",
+        "control-token",
+        "POST",
+        JSON.stringify({
+          run: { kind: "template", name: "review" },
+          folder: "/home/owner/project",
+          space: { kind: "new", name: "Review" },
+          task: "",
+        }),
+      ),
+      starter,
+      resolveCaller,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(coreCalls.find((call) => call.method === "terminal.run")?.params).toMatchObject({
+      argv: ["review"],
+    });
+  });
+
   test("returns the core placement's first-message restriction to the caller", async () => {
     const { starter, runner, coreCalls, resolveCaller } = await setup();
     const response = await handleAgentsRoutes(
@@ -235,4 +359,58 @@ describe("agent routes", () => {
     expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
     expect(coreCalls).toEqual([]);
   });
+
+  test("keeps the legacy start route's Herdr stderr response", async () => {
+    const { starter, runner, resolveCaller } = await setup();
+    runner.lsExitCode = 0;
+    runner.doExitCode = 1;
+    runner.doStderr = "legacy herdr-app detail";
+    const response = await handleAgentsRoutes(
+      routeRequest(
+        "/api/agents/start",
+        "control-token",
+        "POST",
+        JSON.stringify({
+          run: { kind: "program", id: "claude" },
+          folder: "/home/owner/project",
+          space: { kind: "existing", id: "sp1" },
+        }),
+      ),
+      starter,
+      resolveCaller,
+    );
+
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toEqual({
+      error: "herdr_app_failed",
+      message: "legacy herdr-app detail",
+    });
+  });
+
+  test.each(["Inspect", "-p inspect this change"])(
+    "keeps one-word and dash-leading template text on the legacy route: %s",
+    async (task) => {
+      const { starter, coreCalls, resolveCaller } = await setup(undefined, ["review"]);
+      const response = await handleAgentsRoutes(
+        routeRequest(
+          "/api/agents/start",
+          "control-token",
+          "POST",
+          JSON.stringify({
+            run: { kind: "template", name: "review" },
+            folder: "/home/owner/project",
+            space: { kind: "existing", id: "sp1" },
+            task,
+          }),
+        ),
+        starter,
+        resolveCaller,
+      );
+
+      expect(response?.status).toBe(200);
+      expect(coreCalls.find((call) => call.method === "terminal.run")?.params).toMatchObject({
+        argv: ["review", task],
+      });
+    },
+  );
 });

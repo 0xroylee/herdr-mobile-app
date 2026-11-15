@@ -251,9 +251,10 @@ describe("handleApi", () => {
 });
 
 describe("dispatchApi task routes", () => {
-  test("dispatches a task check through the shared route handler", async () => {
+  test("dispatches control checks and rejects watch checks through the shared dispatcher", async () => {
     const { devices, context } = await setup();
     await devices.add({ token: "task-control", role: "control", name: "Phone" });
+    await devices.add({ token: "task-watch", role: "watch", name: "Display" });
     const id = `tk${"a".repeat(32)}`;
     let document: TasksDocument = {
       v: 1,
@@ -320,5 +321,29 @@ describe("dispatchApi task routes", () => {
     expect(response?.status).toBe(200);
     expect(await response?.json()).toMatchObject({ id, checkedTurn: 2 });
     expect(document.tasks[id]?.checkedTurn).toBe(2);
+
+    const confirmed = structuredClone(document);
+    let bodyRead = false;
+    const watchRequest = request("/api/tasks/check", {
+      method: "POST",
+      headers: ownerHeaders({ Authorization: "Bearer task-watch" }),
+      body: JSON.stringify({ id, turn: 3 }),
+    });
+    Object.defineProperty(watchRequest, "text", {
+      value: async () => {
+        bodyRead = true;
+        return JSON.stringify({ id, turn: 3 });
+      },
+    });
+    const watchResponse = await dispatchApi(
+      watchRequest,
+      headerCaller({ ownerLogin: OWNER }, undefined, devices),
+      { api: context, appCli, agentStarter: starter, taskRoutes },
+    );
+
+    expect(watchResponse?.status).toBe(403);
+    expect(await watchResponse?.json()).toEqual({ error: "forbidden" });
+    expect(bodyRead).toBe(false);
+    expect(document).toEqual(confirmed);
   });
 });

@@ -8,6 +8,7 @@ import type {
 } from "@herdr-mobile/protocol";
 import {
   parseTasksDoc,
+  TASK_ID_PATTERN,
   TASKS_DOC_NAME,
   TASKS_MAX_AGE_MS,
   TASKS_MAX_RECORDS,
@@ -58,6 +59,7 @@ interface DocRecord {
 
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const utf8 = new TextEncoder();
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function isRecord(value: unknown): value is DocRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -108,6 +110,18 @@ function checked(record: TaskRecord): boolean {
   return record.checkedTurn !== undefined;
 }
 
+function ownTask(tasks: Record<string, TaskRecord>, id: string): TaskRecord | undefined {
+  return Object.hasOwn(tasks, id) ? tasks[id] : undefined;
+}
+
+function validTaskId(id: string): boolean {
+  return TASK_ID_PATTERN.test(id);
+}
+
+function validTerminalAddress(address: string): boolean {
+  return address.length > 0 && !PROTOTYPE_KEYS.has(address);
+}
+
 function taskRecord(input: unknown): TaskRecord | undefined {
   if (!isRecord(input) || !isJsonValue(input) || typeof input.id !== "string") return undefined;
   const parsed = parseTasksDoc({ v: 1, tasks: { [input.id]: input } });
@@ -129,7 +143,12 @@ function liveTerminalSet(value: unknown): ReadonlySet<string> {
   }
   const addresses = new Set<string>();
   for (const terminal of value.terminals) {
-    if (isRecord(terminal) && terminal.state === "live" && typeof terminal.address === "string") {
+    if (
+      isRecord(terminal) &&
+      terminal.state === "live" &&
+      terminal.reason == null &&
+      typeof terminal.address === "string"
+    ) {
       addresses.add(terminal.address);
     }
   }
@@ -173,7 +192,10 @@ export class TaskStore {
     const id = makeId();
     return this.enqueue(async () => {
       const candidate = await this.write((document) => {
-        if (document.tasks[id]) throw new TaskStoreError("task_linked");
+        if (ownTask(document.tasks, id)) throw new TaskStoreError("task_linked");
+        if (fields.terminal !== undefined && !validTerminalAddress(fields.terminal)) {
+          throw new TaskStoreError("task_not_found");
+        }
         if (
           fields.terminal !== undefined &&
           Object.values(document.tasks).some((record) => record.terminal === fields.terminal)
@@ -198,7 +220,7 @@ export class TaskStore {
         document.tasks[id] = record;
         return record;
       });
-      const record = taskRecord(candidate.tasks[id]);
+      const record = taskRecord(ownTask(candidate.tasks, id));
       if (!record) throw new TaskStoreError("core_unavailable");
       return record;
     });
@@ -207,7 +229,10 @@ export class TaskStore {
   link(id: string, address: string): Promise<TaskRecord> {
     return this.enqueue(async () => {
       const candidate = await this.write((document) => {
-        const record = document.tasks[id];
+        if (!validTaskId(id) || !validTerminalAddress(address)) {
+          throw new TaskStoreError("task_not_found");
+        }
+        const record = ownTask(document.tasks, id);
         if (!record) throw new TaskStoreError("task_not_found");
         if (record.terminal !== undefined) throw new TaskStoreError("task_linked");
         if (Object.values(document.tasks).some((other) => other.terminal === address)) {
@@ -216,7 +241,7 @@ export class TaskStore {
         record.terminal = address;
         return record;
       });
-      const record = taskRecord(candidate.tasks[id]);
+      const record = taskRecord(ownTask(candidate.tasks, id));
       if (!record) throw new TaskStoreError("task_not_found");
       return record;
     });
@@ -230,11 +255,23 @@ export class TaskStore {
     const newId = makeId();
     return this.enqueue(async () => {
       if (!Number.isSafeInteger(turn) || turn < 0) throw new TaskStoreError("task_not_found");
+      if (
+        (typeof target === "string" && !validTaskId(target)) ||
+        (typeof target !== "string" && !validTerminalAddress(target.terminal))
+      ) {
+        throw new TaskStoreError("task_not_found");
+      }
       const candidate = await this.write((document) => {
+        const byTerminal = new Map<string, TaskRecord>();
+        for (const [id, item] of Object.entries(document.tasks)) {
+          if (Object.hasOwn(document.tasks, id) && item.terminal !== undefined) {
+            byTerminal.set(item.terminal, item);
+          }
+        }
         let record =
           typeof target === "string"
-            ? document.tasks[target]
-            : Object.values(document.tasks).find((item) => item.terminal === target.terminal);
+            ? ownTask(document.tasks, target)
+            : byTerminal.get(target.terminal);
         if (typeof target === "string" && !record) throw new TaskStoreError("task_not_found");
         if (!record && typeof target !== "string") {
           record = {
@@ -251,8 +288,8 @@ export class TaskStore {
         record.checkedBy = { deviceId: by.id, deviceName: by.name };
         return record;
       });
-      const id = typeof target === "string" ? target : candidate.tasks[newId]?.id;
-      const record = id === undefined ? undefined : taskRecord(candidate.tasks[id]);
+      const id = typeof target === "string" ? target : ownTask(candidate.tasks, newId)?.id;
+      const record = id === undefined ? undefined : taskRecord(ownTask(candidate.tasks, id));
       if (!record && typeof target === "object") {
         const matched = Object.values(candidate.tasks).find(
           (item) => item.terminal === target.terminal,
@@ -267,14 +304,15 @@ export class TaskStore {
   uncheck(id: string): Promise<TaskRecord> {
     return this.enqueue(async () => {
       const candidate = await this.write((document) => {
-        const record = document.tasks[id];
+        if (!validTaskId(id)) throw new TaskStoreError("task_not_found");
+        const record = ownTask(document.tasks, id);
         if (!record) throw new TaskStoreError("task_not_found");
         delete record.checkedTurn;
         delete record.checkedAt;
         delete record.checkedBy;
         return record;
       });
-      const record = taskRecord(candidate.tasks[id]);
+      const record = taskRecord(ownTask(candidate.tasks, id));
       if (!record) throw new TaskStoreError("task_not_found");
       return record;
     });
@@ -285,6 +323,7 @@ export class TaskStore {
       const candidate = await this.write((document) => {
         const removed: string[] = [];
         for (const [id, record] of Object.entries(document.tasks)) {
+          if (!Object.hasOwn(document.tasks, id)) continue;
           if (
             checked(record) &&
             (spaceId === undefined || record.space?.id === spaceId) &&
@@ -360,7 +399,7 @@ export class TaskStore {
     const checkedRecords = Object.values(document.tasks).filter(checked);
     for (const record of checkedRecords) {
       if (record.checkedAt !== undefined && now - record.checkedAt > TASKS_MAX_AGE_MS) {
-        delete document.tasks[record.id];
+        if (Object.hasOwn(document.tasks, record.id)) delete document.tasks[record.id];
       }
     }
 
@@ -377,13 +416,15 @@ export class TaskStore {
       );
     const keep = new Set(ended.slice(0, TASKS_MAX_RECORDS).map((record) => record.id));
     for (const record of ended) {
-      if (!keep.has(record.id)) delete document.tasks[record.id];
+      if (!keep.has(record.id) && Object.hasOwn(document.tasks, record.id)) {
+        delete document.tasks[record.id];
+      }
     }
 
     if (documentBytes(document) <= TASKS_TARGET_BYTES) return;
     for (const record of [...ended].reverse()) {
       if (documentBytes(document) <= TASKS_TARGET_BYTES) break;
-      delete document.tasks[record.id];
+      if (Object.hasOwn(document.tasks, record.id)) delete document.tasks[record.id];
     }
   }
 

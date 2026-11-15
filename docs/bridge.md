@@ -126,10 +126,10 @@ device cannot invoke those actions.
 
 ## Start agents from a phone
 
-Only control devices can use `GET /api/agents/catalog` and `POST /api/agents/start`. The catalog
-lists Claude Code (`claude`), Codex (`codex`), programs added with `--run-program <name>`, and
-templates returned by herdr-core. A request names one program or template. It cannot contain shell
-lines or extra program arguments.
+Only control devices can use `GET /api/agents/catalog`, `POST /api/agents/start` and `POST
+/api/tasks`. The catalog lists Claude Code (`claude`), Codex (`codex`), programs added with
+`--run-program <name>`, and templates returned by herdr-core. A request names one program or
+template. It cannot contain shell lines or extra program arguments.
 
 The bridge accepts folders under the home folder or a `--run-root <dir>`. It resolves the requested
 folder and checks it by real path. That folder check has a ten-second deadline. `AllowedRoots`
@@ -148,17 +148,22 @@ When the Herdr window is closed, the bridge uses herdr-core's `terminal.run` thr
 
 Claude Code and Codex can receive a task while Herdr is closed. The bridge passes a task as one
 argument after `--`, such as `argv: ["claude", "--", "Review this change"]`; it never builds a
-shell `line`. It refuses task text that starts with `-`, has no whitespace, contains NUL or exceeds
-8 KiB, returning 422 `task_not_allowed` with `Write the task as a sentence.` Templates receive the
-task as their second `argv` item. Other programs added with `--run-program` keep the refusal:
-`First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the message empty.`
+shell `line`. For these two programs, it refuses task text that starts with `-` or has no whitespace.
+Every task is limited to 8 KiB and cannot contain NUL. Refused program text returns 422
+`task_not_allowed` with `Write the task as a sentence.` Templates receive a task as their second
+`argv` item, including one-word and dash-leading text. Other programs added with `--run-program`
+keep the closed-window refusal: `First messages for <program> need Herdr open on your Mac. Open
+Herdr, or leave the message empty.` The task route maps start errors to fixed UI copy and does not
+return stderr or transport details.
 
 When Herdr is open, the bridge keeps `argv: [program]` and puts the task in Herdr's typed `task`
 field. After a successful window start without an address, it checks `terminal.list` twice at most,
 with a one-second pause, and matches the newest recent live terminal by program, folder and known
 space id. The task record stays unlinked if no terminal matches.
 
-`POST /api/tasks` starts the agent and writes the record only after the start succeeds. `POST
+`POST /api/tasks` starts the agent and writes the record only after the start succeeds. It stores the
+folder that was verified and used for launch, including the resolved real path; a window start with
+no terminal match stays unlinked. `POST
 /api/tasks/check`, `/api/tasks/uncheck`, `/api/tasks/link` and `/api/tasks/clear` update records; all
 five routes require a control device. Watch devices receive 403. The direct listener and secure
 channel use the same route dispatcher.
@@ -167,7 +172,8 @@ The bridge is the only writer of the herdr-core document `herdr-mobile.tasks`. I
 and version with `doc.get`, then writes with `doc.set`. Writes are serialized, retry a version
 conflict once after re-reading, keep unchecked tasks, drop checked tasks older than 30 days, and keep
 at most 200 recent checked tasks whose terminals ended or disappeared. It prunes further checked
-records as needed to target 768 KiB, then enforces the core's 1 MiB document limit. If the document
+records as needed to target 768 KiB, then enforces the core's 1 MiB document limit. A live terminal
+with a non-null reason counts as ended. If the document
 still cannot fit, the route returns `tasks_full` and `Check off and clear old tasks first.` The
 document holds task identity, launch text, placement, space/tab ids, terminal address and shared
 check-off fields. The phone derives task state from that record and its terminal snapshot; the bridge
@@ -179,7 +185,8 @@ In the 2026-11-04 scratch verification, `hc templates --help` named
 
 After a successful start, the bridge writes one `Agent started` line with JSON fields for time,
 device id, name and role, run, canonical folder, `task: true|false`, placement, optional address,
-space and tab. It does not include task text or a device token.
+space and tab. The task field is `true or false`; the line does not include task text or a device
+token.
 
 ## Launch at login with launchd
 

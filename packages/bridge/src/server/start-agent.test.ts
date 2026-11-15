@@ -304,7 +304,7 @@ describe("AgentStarter", () => {
       const { starter, runner, calls } = setup();
 
       await expect(
-        starter.startTask(request({ run: { kind: "program", id: "claude" }, task }), control),
+        starter.start(request({ run: { kind: "program", id: "claude" }, task }), control),
       ).rejects.toMatchObject({
         status: 422,
         code: "task_not_allowed",
@@ -325,9 +325,8 @@ describe("AgentStarter", () => {
       ),
     ).rejects.toMatchObject({
       status: 422,
-      code: "run_not_allowed",
-      message:
-        "First messages for aider need Herdr open on your Mac. Open Herdr, or leave the message empty.",
+      code: "first_message_not_allowed",
+      message: "A first message requires Herdr to be open.",
     });
     expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
     expect(calls).toEqual([]);
@@ -397,6 +396,34 @@ describe("AgentStarter", () => {
     expect(args.task).toBe(task);
     expect(calls).toEqual([{ method: "templates.list", params: {} }]);
   });
+
+  test.each(["Inspect", "-p inspect this change"])(
+    "keeps template text unchanged on the core path: %s",
+    async (task) => {
+      const { starter, calls } = setup();
+
+      await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
+
+      expect(calls[1]).toMatchObject({
+        method: "terminal.run",
+        params: { argv: ["review", task] },
+      });
+    },
+  );
+
+  test.each(["Inspect", "-p inspect this change"])(
+    "keeps template text unchanged on the window path: %s",
+    async (task) => {
+      const { starter, runner } = setup();
+      runner.lsExitCode = 0;
+      runner.doOutput = '{"address":"t41"}';
+
+      await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
+
+      const args = JSON.parse(runner.argv[1]?.[3] ?? "{}") as Record<string, unknown>;
+      expect(args).toMatchObject({ argv: ["review"], task });
+    },
+  );
 
   test("accepts successful herdr-app output that has no address or location ids", async () => {
     const clock = new ManualClock();
