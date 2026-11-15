@@ -1,8 +1,14 @@
 import type {
   AgentCatalog,
+  CheckTaskRequest,
+  ClearTasksRequest,
   DeviceRecordView,
+  LinkTaskRequest,
   StartAgentReply,
   StartAgentRequest,
+  StartTaskReply,
+  StartTaskRequest,
+  UncheckTaskRequest,
 } from "@herdr-mobile/protocol";
 import type { Machine } from "../store/machines.ts";
 import type { Secrets } from "../store/secrets.ts";
@@ -17,6 +23,11 @@ export interface BridgeCalls {
   appDo(action: "space.new" | "tab.new", args?: Record<string, unknown>): Promise<unknown>;
   agentCatalog(): Promise<AgentCatalog>;
   startAgent(request: StartAgentRequest): Promise<StartAgentReply>;
+  startTask(request: StartTaskRequest): Promise<StartTaskReply>;
+  checkTask(request: CheckTaskRequest): Promise<unknown>;
+  uncheckTask(request: UncheckTaskRequest): Promise<unknown>;
+  linkTask(request: LinkTaskRequest): Promise<unknown>;
+  clearTasks(request?: ClearTasksRequest): Promise<unknown>;
 }
 
 export function bindBridgeCalls(api: BridgeApi, baseUrl: string, token: string): BridgeCalls {
@@ -28,6 +39,11 @@ export function bindBridgeCalls(api: BridgeApi, baseUrl: string, token: string):
     appDo: (action, args) => api.appDo(baseUrl, token, action, args),
     agentCatalog: () => api.agentCatalog(baseUrl, token),
     startAgent: (request) => api.startAgent(baseUrl, token, request),
+    startTask: (request) => api.startTask(baseUrl, token, request),
+    checkTask: (request) => api.checkTask(baseUrl, token, request),
+    uncheckTask: (request) => api.uncheckTask(baseUrl, token, request),
+    linkTask: (request) => api.linkTask(baseUrl, token, request),
+    clearTasks: (request) => api.clearTasks(baseUrl, token, request),
   };
 }
 
@@ -41,6 +57,11 @@ export function unavailableBridgeCalls(message: string): BridgeCalls {
     appDo: fail,
     agentCatalog: fail,
     startAgent: fail,
+    startTask: fail,
+    checkTask: fail,
+    uncheckTask: fail,
+    linkTask: fail,
+    clearTasks: fail,
   };
 }
 
@@ -85,5 +106,10 @@ export function lazyCalls(resolve: () => Promise<BridgeCalls>): BridgeCalls {
     appDo: (action, args) => resolve().then((calls) => calls.appDo(action, args)),
     agentCatalog: () => resolve().then((calls) => calls.agentCatalog()),
     startAgent: (request) => resolve().then((calls) => calls.startAgent(request)),
+    startTask: (request) => resolve().then((calls) => calls.startTask(request)),
+    checkTask: (request) => resolve().then((calls) => calls.checkTask(request)),
+    uncheckTask: (request) => resolve().then((calls) => calls.uncheckTask(request)),
+    linkTask: (request) => resolve().then((calls) => calls.linkTask(request)),
+    clearTasks: (request) => resolve().then((calls) => calls.clearTasks(request)),
   };
 }

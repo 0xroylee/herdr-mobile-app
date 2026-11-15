@@ -54,6 +54,33 @@ describe("BridgeCalls", () => {
       message: "Not connected to MacBook Pro.",
     });
   });
+
+  test("routes task calls over the direct HTTP connection", async () => {
+    const secrets = createMemorySecrets([[directMachine.id, "device-token"]]);
+    const callsSeen: { url: string; authorization: string | null; body: unknown }[] = [];
+    await withFetch(
+      async (input, init) => {
+        callsSeen.push({
+          url: String(input),
+          authorization: new Headers(init?.headers).get("Authorization"),
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+        });
+        return Response.json({ ok: true });
+      },
+      async () => {
+        const calls = bridgeCallsFor(directMachine, secrets);
+        await calls.clearTasks({ spaceId: "space-1" });
+      },
+    );
+
+    expect(callsSeen).toEqual([
+      {
+        url: "https://mac.tailnet.ts.net/api/tasks/clear",
+        authorization: "Bearer device-token",
+        body: { spaceId: "space-1" },
+      },
+    ]);
+  });
 });
 
 async function withFetch<T>(

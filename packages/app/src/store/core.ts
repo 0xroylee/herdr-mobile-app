@@ -1,4 +1,4 @@
-import type { HcEvent, Layout, Terminal } from "@herdr-mobile/protocol";
+import type { HcEvent, Layout, TasksDocument, Terminal } from "@herdr-mobile/protocol";
 import { create } from "zustand";
 import { applyEvent, applySnapshot, type TerminalTable } from "../model/terminals.ts";
 
@@ -15,6 +15,7 @@ export interface MachineCoreState {
   route?: "direct" | "secure";
   terminals: TerminalTable;
   layout: Layout | undefined;
+  tasks?: TasksDocument;
   snapshotAt: number | null;
 }
 
@@ -24,6 +25,7 @@ export interface CoreStore {
   setSnapshot(machineId: string, terminals: readonly Terminal[], at: number): void;
   applyEvent(machineId: string, event: HcEvent, at: number): void;
   setLayout(machineId: string, layout: Layout | undefined): void;
+  setTasks(machineId: string, tasks: TasksDocument): void;
 }
 
 export function createCoreStore() {
@@ -87,11 +89,28 @@ export function createCoreStore() {
           [machineId]: { ...emptyMachineCore(), ...state.machines[machineId], layout },
         },
       })),
+    setTasks: (machineId, tasks) =>
+      set((state) => ({
+        machines: {
+          ...state.machines,
+          [machineId]: { ...emptyMachineCore(), ...state.machines[machineId], tasks },
+        },
+      })),
   }));
 }
 
 function emptyMachineCore(): MachineCoreState {
-  return { connection: "offline", terminals: {}, layout: undefined, snapshotAt: null };
+  return {
+    connection: "offline",
+    terminals: {},
+    layout: undefined,
+    tasks: emptyTasksDocument(),
+    snapshotAt: null,
+  };
+}
+
+function emptyTasksDocument(): TasksDocument {
+  return { v: 1, tasks: {} };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

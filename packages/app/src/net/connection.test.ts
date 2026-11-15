@@ -7,6 +7,7 @@ import {
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_WS_CLOSE_CODES,
   FrameKind,
+  TASKS_DOC_NAME,
   type Terminal,
 } from "@herdr-mobile/protocol";
 import {
@@ -86,13 +87,35 @@ describe("connection manager", () => {
     manager.stop();
   });
 
-  test("refetches the layout after a doc event and a missed snapshot", async () => {
+  test("refetches both documents on their events and after a missed snapshot", async () => {
     const { manager, socket, coreStore } = setupConnected();
     manager.start();
     await connect(manager, socket);
-    expect(socket.core.calls.filter((method) => method === "doc.get")).toHaveLength(1);
+    expect(socket.docGets).toEqual(["herdr-app", TASKS_DOC_NAME]);
 
+    const taskId = `tk${"1".repeat(32)}`;
+    socket.tasksResponse = {
+      v: 1,
+      tasks: {
+        [taskId]: {
+          id: taskId,
+          origin: "phone",
+          text: "from task event",
+          createdAt: 1,
+        },
+      },
+    };
     socket.sendSubscriptionNotification(11, "event", {
+      type: "doc",
+      data: { name: TASKS_DOC_NAME, version: 2 },
+    });
+    await waitFor(
+      () =>
+        coreStore.getState().machines[machine.id]?.tasks?.tasks[taskId]?.text === "from task event",
+    );
+    expect(socket.docGets.filter((name) => name === "herdr-app")).toHaveLength(1);
+
+    socket.sendSubscriptionNotification(12, "event", {
       type: "doc",
       data: { name: "herdr-app", version: 2 },
     });
@@ -100,11 +123,69 @@ describe("connection manager", () => {
       () => coreStore.getState().machines[machine.id]?.layout?.spaces[0]?.name === "space-2",
     );
 
-    socket.sendSubscriptionNotification(12, "missed", { terminals: [terminal("t2")] });
+    socket.tasksResponse = {
+      v: 1,
+      tasks: {
+        [taskId]: {
+          id: taskId,
+          origin: "phone",
+          text: "from missed snapshot",
+          createdAt: 1,
+        },
+      },
+    };
+    socket.sendSubscriptionNotification(13, "missed", { terminals: [terminal("t2")] });
     await waitFor(
       () => coreStore.getState().machines[machine.id]?.layout?.spaces[0]?.name === "space-3",
     );
+    await waitFor(
+      () =>
+        coreStore.getState().machines[machine.id]?.tasks?.tasks[taskId]?.text ===
+        "from missed snapshot",
+    );
     expect(Object.keys(coreStore.getState().machines[machine.id]?.terminals ?? {})).toEqual(["t2"]);
+    expect(socket.docGets.filter((name) => name === "herdr-app")).toHaveLength(3);
+    expect(socket.docGets.filter((name) => name === TASKS_DOC_NAME)).toHaveLength(3);
+
+    socket.tasksResponse = null;
+    socket.sendSubscriptionNotification(14, "event", {
+      type: "doc",
+      data: { name: TASKS_DOC_NAME, version: 4 },
+    });
+    await waitFor(
+      () => Object.keys(coreStore.getState().machines[machine.id]?.tasks?.tasks ?? {}).length === 0,
+    );
+    manager.stop();
+  });
+
+  test("refetches both documents after reconnect", async () => {
+    const clock = new FakeClock();
+    const opened: OpenedSocket[] = [];
+    const coreStore = createCoreStore();
+    const manager = createConnectionManager({
+      machine,
+      secrets: createMemorySecrets([[machine.id, "secret-token"]]),
+      core: coreStore.getState(),
+      openRoute: (route) => {
+        const socket = new FakeSocket();
+        opened.push({ route, socket });
+        return routeConnection(socket);
+      },
+      clock,
+    });
+
+    manager.start();
+    await waitFor(() => opened.length === 1);
+    opened[0]?.socket.open();
+    await waitFor(() => manager.state() === "connected");
+    opened[0]?.socket.serverClose(1006);
+    await waitFor(() => manager.state() === "reconnecting");
+    clock.advance(1_000);
+    await waitFor(() => opened.length === 2);
+    opened[1]?.socket.open();
+    await waitFor(() => manager.state() === "connected" && opened[1]?.socket.docGets.length === 2);
+
+    expect(opened[1]?.socket.docGets).toEqual(["herdr-app", TASKS_DOC_NAME]);
     manager.stop();
   });
 
@@ -212,7 +293,12 @@ describe("connection manager", () => {
     await waitFor(() => manager.state() === "connected");
 
     await expect(manager.calls().health()).resolves.toEqual({ secure: true });
-    expect(requests).toEqual([`${secureUrl}/api/health`]);
+    await expect(
+      manager.calls().checkTask({ id: `tk${"1".repeat(32)}`, turn: 2 }),
+    ).resolves.toEqual({
+      secure: true,
+    });
+    expect(requests).toEqual([`${secureUrl}/api/health`, `${secureUrl}/api/tasks/check`]);
     manager.stop();
   });
 
@@ -456,9 +542,13 @@ describe("connection manager", () => {
     await withMemoryConnectionWebSocket(async (identity) => {
       MemoryConnectionWebSocket.onServerSession = (session) => {
         const core = new FakeCore((bytes) => session.send("binary", bytes));
-        core.answer = (method) => {
+        let layoutReads = 0;
+        core.answer = (method, params) => {
           if (method !== "doc.get") return undefined;
-          const count = core.calls.filter((call) => call === "doc.get").length;
+          if (params.name !== "herdr-app") {
+            return { value: { v: 1, tasks: {} }, version: 1 };
+          }
+          const count = ++layoutReads;
           return {
             value: { spaces: [{ id: "space", name: `space-${count}`, tabs: [] }] },
             version: count,
@@ -995,16 +1085,24 @@ class FakeSocket implements Socket {
   onclose: ((event: { code: number; reason?: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   readonly core: FakeCore;
+  readonly docGets: string[] = [];
   readonly closeRequests: { code: number; reason: string }[] = [];
   authMessage: unknown;
+  tasksResponse: unknown = { v: 1, tasks: {} };
   private readonly options: FakeSocketOptions;
 
   constructor(options: FakeSocketOptions = {}) {
     this.options = options;
     this.core = new FakeCore((bytes) => this.onmessage?.(bytes));
-    this.core.answer = (method) => {
+    this.core.answer = (method, params) => {
       if (method !== "doc.get") return undefined;
-      const count = this.core.calls.filter((call) => call === "doc.get").length;
+      const name = String(params.name);
+      this.docGets.push(name);
+      if (name === TASKS_DOC_NAME) {
+        const count = this.docGets.filter((docName) => docName === TASKS_DOC_NAME).length;
+        return { value: this.tasksResponse, version: count };
+      }
+      const count = this.docGets.filter((docName) => docName === "herdr-app").length;
       return {
         value: { spaces: [{ id: "space", name: `space-${count}`, folder: null, tabs: [] }] },
         version: count,

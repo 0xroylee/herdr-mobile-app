@@ -1,11 +1,17 @@
 import type {
   AgentCatalog,
+  CheckTaskRequest,
+  ClearTasksRequest,
   DeviceRecordView,
   HttpErrorBody,
+  LinkTaskRequest,
   PairReply,
   PairRequest,
   StartAgentReply,
   StartAgentRequest,
+  StartTaskReply,
+  StartTaskRequest,
+  UncheckTaskRequest,
 } from "@herdr-mobile/protocol";
 
 export class BridgeApiError extends Error {
@@ -36,6 +42,11 @@ export interface BridgeApi {
   ): Promise<unknown>;
   agentCatalog(baseUrl: string, token: string): Promise<AgentCatalog>;
   startAgent(baseUrl: string, token: string, request: StartAgentRequest): Promise<StartAgentReply>;
+  startTask(baseUrl: string, token: string, request: StartTaskRequest): Promise<StartTaskReply>;
+  checkTask(baseUrl: string, token: string, request: CheckTaskRequest): Promise<unknown>;
+  uncheckTask(baseUrl: string, token: string, request: UncheckTaskRequest): Promise<unknown>;
+  linkTask(baseUrl: string, token: string, request: LinkTaskRequest): Promise<unknown>;
+  clearTasks(baseUrl: string, token: string, request?: ClearTasksRequest): Promise<unknown>;
 }
 
 /** Build bridge calls over the caller's fetch implementation. */
@@ -102,7 +113,48 @@ export function createBridgeApi(fetcher: BridgeFetch): BridgeApi {
       if (!isStartAgentReply(value)) throw new Error("The bridge returned an invalid start reply");
       return value;
     },
+    async startTask(baseUrl, token, request) {
+      const value = await sendJson(
+        fetcher,
+        baseUrl,
+        "/api/tasks",
+        authorized(token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        }),
+      );
+      if (!isStartTaskReply(value)) throw new Error("The bridge returned an invalid task reply");
+      return value;
+    },
+    checkTask: (baseUrl, token, request) =>
+      postJson(fetcher, baseUrl, token, "/api/tasks/check", request),
+    uncheckTask: (baseUrl, token, request) =>
+      postJson(fetcher, baseUrl, token, "/api/tasks/uncheck", request),
+    linkTask: (baseUrl, token, request) =>
+      postJson(fetcher, baseUrl, token, "/api/tasks/link", request),
+    clearTasks: (baseUrl, token, request = {}) =>
+      postJson(fetcher, baseUrl, token, "/api/tasks/clear", request),
   };
+}
+
+function postJson(
+  fetcher: BridgeFetch,
+  baseUrl: string,
+  token: string,
+  path: string,
+  request: unknown,
+): Promise<unknown> {
+  return sendJson(
+    fetcher,
+    baseUrl,
+    path,
+    authorized(token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }),
+  );
 }
 
 function authorized(token: string, init: RequestInit = {}): RequestInit {
@@ -210,6 +262,23 @@ function isStartAgentReply(value: unknown): value is StartAgentReply {
     (record.address === undefined || typeof record.address === "string") &&
     isStartAgentLocation(record.space) &&
     isStartAgentLocation(record.tab)
+  );
+}
+
+function isStartTaskReply(value: unknown): value is StartTaskReply {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const reply = value as Record<string, unknown>;
+  return isTaskRecord(reply.record) && isStartAgentReply(reply.start);
+}
+
+function isTaskRecord(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    (record.origin === "phone" || record.origin === "herdr") &&
+    typeof record.createdAt === "number" &&
+    Number.isFinite(record.createdAt)
   );
 }
 

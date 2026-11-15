@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import type { HcEvent, Terminal } from "@herdr-mobile/protocol";
+import type { HcEvent, TasksDocument, Terminal } from "@herdr-mobile/protocol";
 import { seenKey } from "../model/seen.ts";
 import { createCoreStore } from "./core.ts";
 import { createMachinesStore, type Machine } from "./machines.ts";
@@ -159,6 +159,7 @@ describe("app stores", () => {
   test("keeps terminal snapshots and events behind U7's reducer in a memory-only core store", () => {
     const core = createCoreStore();
     core.getState().setSnapshot("machine-1", [terminal("t1")], 100);
+    expect(core.getState().machines["machine-1"]?.tasks).toEqual({ v: 1, tasks: {} });
     core.getState().applyEvent("machine-1", event("turn", { turn: 2 }), 200);
 
     expect(core.getState().machines["machine-1"]?.terminals.t1?.turn).toBe(2);
@@ -167,6 +168,12 @@ describe("app stores", () => {
     core.getState().applyEvent("machine-1", event("missed", { terminals: [terminal("t2")] }), 300);
     expect(Object.keys(core.getState().machines["machine-1"]?.terminals ?? {})).toEqual(["t2"]);
     expect(core.getState().machines["machine-1"]?.snapshotAt).toBe(300);
+
+    const tasks: TasksDocument = { v: 1, tasks: {} };
+    core.getState().setTasks("machine-1", tasks);
+    core.getState().setTasks("machine-2", { v: 1, tasks: {} });
+    expect(core.getState().machines["machine-1"]?.tasks).toBe(tasks);
+    expect(core.getState().machines["machine-2"]?.tasks).toEqual({ v: 1, tasks: {} });
   });
 
   test("keeps memory storage and secrets as separate adapters", async () => {
