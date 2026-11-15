@@ -314,6 +314,38 @@ Centered in the list area, `callout` in `dim`, 24 side padding. Agents: herdr's 
 
 Title: `<agent> needs you` or `<agent> is done`, where `<agent>` is the row title. Body: `<Program> in <space>: <question>` for blocked, `<Program> in <space> finished.` for done. Send them only for blocked and done, and only while the Mac's person is away. Tapping one opens that agent.
 
+### `SmartTile`
+
+Parts: state icon, count, and label. Sizes in pt: 2-column grid with 10 gap and 4 side padding; tile uses 11 × 12 × 10 padding, 12 gap, a 1 pt border and 14 radius; icon is 30 × 30 with a 17 icon; count is 27/27 and label is 15. Tokens: `surface`, `border`, `fg`, `muted`, `blocked`, `working`, `done`. States: Needs you, Running and Done, each with its matching status color and count; Done includes stopped tasks. Scheduled is not shown in v1. Watch: tiles remain tappable and open read-only lists. Offline: show the last counts and dim the screen to 60%. Source: `tasks-mockups.html`, screen 1.
+
+### `ProjectRow`
+
+Parts: 30 pt project initial in a circle, project name, most urgent unchecked task mark, unchecked task count and a 16 pt chevron. Sizes in pt: minimum height 54; 12 horizontal padding; 12 gap between initial and row; 9 gap inside the row; project name 16, count 15; separate rows with a 1 pt hairline. Tokens: `raised`, `border`, `fg`, `dim`, `blocked`, `working`, `done`; use `mono` for the initial. States: mark `!` for Needs you, spinner for Running, dot for Done, and no mark when there are no unchecked tasks. Watch: opening the project is allowed; its composer and check-off controls are absent or disabled. Offline: keep the row from the last snapshot and dim the screen to 60%; it may open the cached project. Source: `tasks-mockups.html`, screen 1.
+
+### `TaskRow`
+
+Parts: `TaskCircle`, title, program icon and name, age, optional `from Herdr` tag and a third line for a question, summary or stopped reason. Smart-list rows also show the project name. Sizes in pt: 12 gap; 6 horizontal row padding; text column has 11 top and bottom padding; title 16/21, metadata 13, question 13.5/19, summary 13.5/19; metadata icons 13; the separator is a 1 pt hairline inset after the circle. Tokens: `fg`, `muted`, `dim`, `border`, `blocked`, `working`, `done`, `danger`. States: Needs you shows its question, Done shows a summary, Stopped uses `danger`, and checked-off rows dim before leaving; Running has no third line unless it needs one. Watch: tapping the row opens the task, but its circle and row actions are disabled. Offline: retain the last row data and dim the screen to 60%; actions are disabled. Sources: `tasks-mockups.html`, screens 2, 4, 5 and 6.
+
+### `TaskCircle`
+
+Parts: 23 × 23 pt circle; use the 18 × 18 pt variant for compact project marks. Tokens: `working` and `spinner-track` for the spinner; `blocked` and `blocked-tint` for `!`; `done` for the dot and checked fill; `danger` for the stopped `x`; `dim` for the base ring. States in the mockup legend: Running, Needs you, Done, Checked off by you, and Stopped. Not started appears in the legend and screen 2, and Scheduled appears in the legend and screen 7; both are drawn for a later version and neither appears in v1. Watch: draw each mark but disable check-off. Offline: draw the last known mark and disable check-off. Source: `tasks-mockups.html`, screens 2–7 and the legend.
+
+### `TaskComposer`
+
+Parts: title field, `Add details for the agent` field and a focused caret; place it as the last row in a project. Sizes in pt: use the TaskRow's 12 gap and 11 vertical padding; title is 16/21, details are 14 with 3 top margin, caret is 2 × 19. Tokens: `fg`, `dim`, `border`, `surface`, `focus`, `danger`, `working`. States: empty, focused, starting with a spinner, and failed with its message and retry while retaining both fields. `go` submits title, blank line and notes as one task. Watch: do not show the composer. Offline: disable fields and go; go shows `Can’t reach your Mac.` Source: `tasks-mockups.html`, screen 3.
+
+### `AccessoryBar`
+
+Parts: selected agent chip, folder chip and details button above the keyboard. Sizes in pt: 1 pt top border; 8 × 10 padding; 7 gap; chips are 32 high with content width and 0 × 9 side padding; the details icon button is 32 × 32; chip text is 13 and icons are 14. Tokens: `chrome`, `border`, `surface`, `fg`, `dim`, `raised`, `focus`. States: agent and folder can be changed; show `needs Herdr open` for extra programs when Herdr is closed, and `Choose folder` when the project has no folder. Watch: absent with the composer. Offline: visible but disabled. Source: `tasks-mockups.html`, screen 3.
+
+### `TaskScreen`
+
+Parts: task title, state and age strip, prompt card when blocked, Latest output, Open terminal, Project/Started/Folder/Terminal facts, follow-up composer and `⋯` menu. Sizes in pt: 4 × 6 top content padding; title 21/27; terminal preview has 12 radius and 1 pt border, a 32 pt header, 10.4 pt text and a 40 pt Open terminal row; fact groups have 14 radius, 1 pt border, 12 top margin; fact rows are at least 44 high with 10 gap and 14 horizontal padding. Tokens: `fg`, `muted`, `dim`, `border`, `surface`, `term-bg`, `term-fg`, `working`, `blocked`, `done`, `danger`, `prompt-bg`, `prompt-border`. States: Running, Needs you, Done, Stopped and checked off; Stopped and checked-off tasks disable follow-up, and a blocked task can show the prompt card. Watch: output and facts are readable; composer, answer buttons and destructive menu actions are disabled or hidden. Offline: show cached output and facts at 60% opacity and disable actions. Source: `tasks-mockups.html`, screen 5.
+
+### `DetailsSheet`
+
+Parts: Cancel/New task/Add header, task text, notes, Project, Agent and Folder rows. Sizes in pt: 14 pt top grip; sheet has 14 top corner radius and 16 horizontal padding; 56 pt header; field text uses 12 × 14 padding at 15.5/21; fact rows are 48 high with 10 gap, 29 × 29 icons and 22 bottom margin between groups. Tokens: `canvas`, `fg`, `muted`, `dim`, `surface`, `border`, `raised`, `solid`, `solid-fg`, `danger`, `focus`. States: editing, selecting a project/agent/folder, adding, and inline error; project creation asks for Name and Folder. Do not show date, time, repeat, worktree or notify rows in v1. Watch: the sheet is not offered. Offline: keep the sheet visible if already open, disable edits and Add, and show `Can’t reach your Mac.` Source: `tasks-mockups.html`, screen 8.
+
 ## Screens
 
 Each screen is drawn in [mockups.html](mockups.html):
@@ -331,10 +363,135 @@ Each screen is drawn in [mockups.html](mockups.html):
 
 Settings has no mockup yet. It is a `ListGroup` of: Theme (System, Graphite, Paper), Notifications (Needs you, Done), Machines (paired machines with Remove), and About. In Machines, show `Tailscale: <host>` and `Secure route: <host>` for the available routes.
 
+### Task mockups
+
+These screens are in [tasks-mockups.html](tasks-mockups.html). Screen 7 is Scheduled, which is for a later version. The Worktree chip in screen 3 and the New worktree and Notify me rows in screen 8 are out of the first version.
+
+| # | Screen | Built from |
+| - | ------ | ---------- |
+| 1 | Home | `SmartTile`, `ProjectRow`, machine chip and Home menu |
+| 2 | Project | `TaskRow`, `TaskCircle`, checked-off bar and project menu |
+| 3 | Adding a task | `TaskComposer`, `AccessoryBar` |
+| 4 | Needs you | `TaskRow`, `TaskCircle`, inline prompt choices |
+| 5 | Task | `TaskScreen` |
+| 6 | Done | `TaskRow`, `TaskCircle`, swipe actions |
+| 7 | Scheduled, later version | Scheduled task rows |
+| 8 | Details | `DetailsSheet` |
+
+## UI copy
+
+Use sentence case. Keep placeholders in angle brackets when they stand for a value, such as `<program>` or `<signal>`.
+
+### Home
+
+| Element | Copy |
+| ------- | ---- |
+| Search | `Search` |
+| Smart tiles | `Needs you`; `Running`; `Done` |
+| Project section | `Projects` |
+| Main actions | `New task`; `Add project` |
+| Home menu | `Settings`; `Pair again` |
+| Empty projects | `No projects yet. Spaces you make in Herdr show up here.` |
+| Project with no active space | `Other` |
+
+### Add project sheet
+
+| Element | Copy |
+| ------- | ---- |
+| Sheet title and action | `Add project`; `Cancel`; `Add` |
+| Fields | `Name`; `Folder` |
+| Herdr is closed | `Herdr isn’t running on your Mac` |
+
+### Project
+
+| Element | Copy |
+| ------- | ---- |
+| Navigation and menu | `Projects`; `Terminals`; `Open terminal`; `Copy address`; `Check off` |
+| Checked-off bar | `<count> checked off`; `Clear`; `Show`; `Hide` |
+| Toolbar | `New task` |
+| Start the composer | `Task`; `Add details for the agent`; `Choose folder`; `go` |
+
+### Check-off sheet
+
+Shown when checking off a Running or Needs you task; done and stopped tasks check off without it.
+
+| Element | Copy |
+| ------- | ---- |
+| Title | `Check off this task?` |
+| Stop and check off | `Stop agent and check off` |
+| Keep running | `Check off, keep it running` |
+| Dismiss | `Cancel` |
+
+### New task composer
+
+| Element | Copy |
+| ------- | ---- |
+| Title and details fields | `Task`; `Add details for the agent` |
+| Agent and folder chips | `Claude Code`; `Codex`; `Choose folder`; `needs Herdr open` |
+| Task validation | `Write the task as a sentence.` |
+| `folder_*` error and folder picker | `Choose a folder under an allowed root.`; `Choose folder` |
+| Agent no longer available | `That agent isn’t available.`; `Refresh` |
+| Core is unavailable | `Can’t reach your Mac.` |
+| Herdr start failed | `Herdr couldn’t start the task.` |
+| Herdr start timed out | `Herdr took too long to start the task.` |
+| Task document is full | `Check off and clear old tasks first.` |
+| Extra program while Herdr is closed | `<program> gets a first message only while Herdr is open on your Mac.` |
+| Retry after a failed start | `Retry` |
+
+### Needs you
+
+| Element | Copy |
+| ------- | ---- |
+| Screen title | `Needs you` |
+| Unrecognized prompt | `Open terminal to answer` |
+| Answer sent | `Sent` |
+
+### Task
+
+| Element | Copy |
+| ------- | ---- |
+| State labels | `Running`; `Needs you`; `Done`; `Stopped`; `Checked off` |
+| Output and terminal | `Latest output`; `Open terminal` |
+| Facts | `Project`; `Started`; `Today, 10:02 from <device>`; `from Herdr`; `Folder`; `Terminal` |
+| Follow-up composer | `Follow up…`; `Sent` |
+| Menu | `Open terminal`; `Interrupt`; `Stop agent`; `Check off`; `Copy address` |
+| Stop confirmation | `Stop this agent?`; `Cancel`; `Stop agent` |
+| Starting without a linked terminal | `Starting in Herdr…`; `Couldn’t find this task’s terminal.` |
+| Missing terminal | `The terminal is gone.` |
+| Stopped by exit code | `Exited with code <code> before it finished.` |
+| Stopped by signal | `Stopped by <signal> before it finished.` |
+| Stopped without exit details | `Ended before it finished.` |
+
+### Smart lists
+
+| Element | Copy |
+| ------- | ---- |
+| List titles | `Needs you`; `Running`; `Done` |
+| Waiting for first status | `Waiting for status` |
+| Done summary fallback | `No summary yet.` |
+| Swipe actions | `Follow up`; `Check off` |
+| Done menu | `Check off all` |
+
+### Details sheet
+
+| Element | Copy |
+| ------- | ---- |
+| Header | `Cancel`; `New task`; `Add` |
+| Fields and folder suggestions | `Task`; `Notes for the agent`; `Project`; `New project`; `Name`; `Agent`; `Folder`; `space folder`; `Other…` |
+
+### Offline and read-only states
+
+| Element | Copy or presentation |
+| ------- | -------------------- |
+| Offline go action | `Can’t reach your Mac.` |
+| Watch device | Hide the composer and Add project; disable task circles and answer buttons; hide destructive menu actions. |
+| Offline lists | Keep the last snapshot visible at 60% opacity; disable composers, circles and buttons. |
+
 ## Behavior
 
 - **Order.** Priority view: Needs you, Done, Working, Idle; within a section, the most recent state change first. By-space view: spaces in the `herdr-app` document's order, agents in tab order.
-- **Seen.** Done means it finished while nobody looked. Opening the agent on the phone shows it as idle from then on, until its next turn. The phone keeps this per terminal and turn in the kv store under `seen.<machine>.<terminal>`.
+- **Seen.** On the agent terminal screen and in the legacy agent rows retired by U22-4, Done means it finished while nobody looked. Opening the agent on the phone shows it as idle from then on, until its next turn. The phone keeps this per terminal and turn in the kv store under `seen.<machine>.<terminal>`.
+- **Tasks.** A task stays Done until it is checked off. Its checked state is the shared `checkedTurn` in the task record. Opening a task or its terminal never changes a task's state on any phone.
 - **Watching.** Every attach is `observe: true`. Take over asks first, then attaches without `observe`, which makes the phone the active viewer and resizes the Mac's terminal to the phone.
 - **Sending.** Ordinary composer text uses `terminal.send`, which pastes and presses Enter once nobody has typed for about 3 s. A menu choice, whether tapped or typed as its number, uses `terminal.keys` and never `terminal.send`; the same prompt key guards pending and Sent answers. Key bar input also uses `terminal.keys`.
 - **Spaces.** Read from the `herdr-app` document with `doc.get`, falling back to the `herdr.space` and `herdr.tab` labels. The Spaces header `+` and `Empty tab` still use `herdr-app do` on the Mac, so they need Herdr running there; say so under the list. Agent starts support both window states: use `herdr-app do` when Herdr is open, and `terminal.run` with the `herdr.space` and `herdr.tab` labels when it is closed.
