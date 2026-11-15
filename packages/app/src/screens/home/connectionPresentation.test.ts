@@ -63,6 +63,17 @@ describe("connectionPresentation", () => {
     });
   });
 
+  test("dims retained list content and adds a banner when a connected machine reconnects", () => {
+    const connected = connectionPresentation("connected", "MacBook Pro");
+    const reconnecting = connectionPresentation("reconnecting", "MacBook Pro");
+
+    expect(connected).toEqual({ dimmed: false, banner: undefined });
+    expect(reconnecting).toEqual({
+      dimmed: true,
+      banner: { kind: "reconnecting", message: "Reconnecting to MacBook Pro…", action: "none" },
+    });
+  });
+
   test("uses Mac when the machine name is blank", () => {
     expect(connectionPresentation("connecting", "  ").banner).toEqual({
       kind: "reconnecting",

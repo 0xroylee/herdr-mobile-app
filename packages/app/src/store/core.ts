@@ -1,4 +1,4 @@
-import type { HcEvent, Layout, TasksDocument, Terminal } from "@herdr-mobile/protocol";
+import type { HcEvent, Layout, Status, TasksDocument, Terminal } from "@herdr-mobile/protocol";
 import { create } from "zustand";
 import { applyEvent, applySnapshot, type TerminalTable } from "../model/terminals.ts";
 
@@ -14,6 +14,7 @@ export interface MachineCoreState {
   connection: ConnectionState;
   route?: "direct" | "secure";
   terminals: TerminalTable;
+  lastSeenStatuses?: Readonly<Record<string, Status>>;
   layout: Layout | undefined;
   tasks?: TasksDocument;
   snapshotAt: number | null;
@@ -22,6 +23,7 @@ export interface MachineCoreState {
 export interface CoreStore {
   machines: Record<string, MachineCoreState>;
   setConnection(machineId: string, connection: ConnectionState, route?: "direct" | "secure"): void;
+  removeMachine(machineId: string): void;
   setSnapshot(machineId: string, terminals: readonly Terminal[], at: number): void;
   applyEvent(machineId: string, event: HcEvent, at: number): void;
   setLayout(machineId: string, layout: Layout | undefined): void;
@@ -43,18 +45,28 @@ export function createCoreStore() {
           },
         },
       })),
+    removeMachine: (machineId) =>
+      set((state) => {
+        if (state.machines[machineId] === undefined) return state;
+        const machines = { ...state.machines };
+        delete machines[machineId];
+        return { machines };
+      }),
     setSnapshot: (machineId, terminals, at) =>
-      set((state) => ({
-        machines: {
-          ...state.machines,
-          [machineId]: {
-            ...emptyMachineCore(),
-            ...state.machines[machineId],
-            terminals: applySnapshot(terminals),
-            snapshotAt: at,
+      set((state) => {
+        const current = state.machines[machineId] ?? emptyMachineCore();
+        return {
+          machines: {
+            ...state.machines,
+            [machineId]: {
+              ...current,
+              terminals: applySnapshot(terminals),
+              lastSeenStatuses: rememberSnapshotStatuses(current.lastSeenStatuses ?? {}, terminals),
+              snapshotAt: at,
+            },
           },
-        },
-      })),
+        };
+      }),
     applyEvent: (machineId, event, at) =>
       set((state) => {
         const current = state.machines[machineId] ?? emptyMachineCore();
@@ -62,12 +74,17 @@ export function createCoreStore() {
           const data = asRecord(event.data);
           const records = data?.terminals;
           if (Array.isArray(records)) {
+            const terminals = applySnapshot(records as Terminal[]);
             return {
               machines: {
                 ...state.machines,
                 [machineId]: {
                   ...current,
-                  terminals: applySnapshot(records as Terminal[]),
+                  terminals,
+                  lastSeenStatuses: rememberSnapshotStatuses(
+                    current.lastSeenStatuses ?? {},
+                    Object.values(terminals),
+                  ),
                   snapshotAt: at,
                 },
               },
@@ -75,10 +92,20 @@ export function createCoreStore() {
           }
           return state;
         }
+        const terminals = applyEvent(current.terminals, event, at);
+        const terminalAddress = event.type === "status" ? event.terminal : undefined;
+        const lastSeenStatuses =
+          terminalAddress === undefined
+            ? current.lastSeenStatuses
+            : rememberStatus(
+                current.lastSeenStatuses ?? {},
+                terminalAddress,
+                terminals[terminalAddress]?.status,
+              );
         return {
           machines: {
             ...state.machines,
-            [machineId]: { ...current, terminals: applyEvent(current.terminals, event, at) },
+            [machineId]: { ...current, terminals, lastSeenStatuses },
           },
         };
       }),
@@ -103,10 +130,29 @@ function emptyMachineCore(): MachineCoreState {
   return {
     connection: "offline",
     terminals: {},
+    lastSeenStatuses: {},
     layout: undefined,
     tasks: emptyTasksDocument(),
     snapshotAt: null,
   };
+}
+
+function rememberSnapshotStatuses(
+  previous: Readonly<Record<string, Status>>,
+  terminals: readonly Terminal[],
+): Readonly<Record<string, Status>> {
+  return terminals.reduce(
+    (statuses, terminal) => rememberStatus(statuses, terminal.address, terminal.status),
+    previous,
+  );
+}
+
+function rememberStatus(
+  previous: Readonly<Record<string, Status>>,
+  address: string,
+  status: Status | null | undefined,
+): Readonly<Record<string, Status>> {
+  return status == null ? previous : { ...previous, [address]: status };
 }
 
 function emptyTasksDocument(): TasksDocument {

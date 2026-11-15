@@ -25,11 +25,9 @@ export function TaskRow({
   const detail =
     row.state === "needs-you"
       ? row.question
-      : row.state === "done"
-        ? (summary ?? row.terminal?.status?.msg ?? "No summary yet.")
-        : row.state === "stopped"
-          ? row.stoppedText
-          : undefined;
+      : row.state === "done" || row.state === "stopped"
+        ? summary
+        : undefined;
 
   return (
     <View>
@@ -61,13 +59,13 @@ export function TaskRow({
             ) : null}
             {row.fromHerdr ? <Tag label="from Herdr" /> : null}
           </View>
+          {row.state === "stopped" && row.stoppedText ? (
+            <Text style={{ marginTop: 4 }} numberOfLines={2} tone="danger" variant="callout">
+              {row.stoppedText}
+            </Text>
+          ) : null}
           {detail ? (
-            <Text
-              style={{ marginTop: 4 }}
-              numberOfLines={2}
-              tone={row.state === "stopped" ? "danger" : "muted"}
-              variant="callout"
-            >
+            <Text style={{ marginTop: 4 }} numberOfLines={2} tone="muted" variant="callout">
               {detail}
             </Text>
           ) : null}

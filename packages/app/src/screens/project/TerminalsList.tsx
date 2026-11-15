@@ -1,6 +1,7 @@
-import { View } from "react-native";
+import { ScrollView } from "react-native";
 import type { SpaceTabRow } from "../../model/spaces.ts";
 import { TabPill } from "./TabPill.tsx";
+import { terminalsListContentClassName, terminalsListScrollClassName } from "./viewState.ts";
 
 export function TerminalsList({
   tabs,
@@ -10,10 +11,14 @@ export function TerminalsList({
   onOpenTerminal(address: string): void;
 }) {
   return (
-    <View className="flex-row flex-wrap gap-1.5">
+    <ScrollView
+      className={terminalsListScrollClassName}
+      contentContainerClassName={terminalsListContentClassName}
+      showsVerticalScrollIndicator={false}
+    >
       {tabs.map((tab) => (
         <TabPill key={tab.id} onOpenTerminal={onOpenTerminal} tab={tab} />
       ))}
-    </View>
+    </ScrollView>
   );
 }

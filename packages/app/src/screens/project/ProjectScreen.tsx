@@ -1,6 +1,6 @@
 import type { Layout } from "@herdr-mobile/protocol";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, View } from "react-native";
 import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
@@ -18,17 +18,31 @@ import { Icon } from "../../ui/icon.tsx";
 import { Text } from "../../ui/text.tsx";
 import { ConnectionBanner } from "../home/ConnectionBanner.tsx";
 import { connectionPresentation } from "../home/connectionPresentation.ts";
+import { newTaskLabelTone } from "../home/home-view.ts";
 import { CheckedBar } from "./CheckedBar.tsx";
 import {
-  applyCheckOff,
   type CheckOffChoice,
-  checkOffSheetOptions,
-  needsCheckOffSheet,
+  type CheckOffCurrent,
+  checkOffSheetOptionsFor,
+  resolveTaskRow,
+  runCheckOff as runCheckOffAction,
+  type TaskIdentity,
 } from "./check-off.ts";
-import { deriveProjectView, type ProjectRowAction, projectRowActions } from "./project-view.ts";
+import {
+  deriveProjectView,
+  type ProjectRowAction,
+  projectRowActions,
+  projectTaskRows,
+  shouldReadTaskSummary,
+  type TaskSummaryRow,
+  taskSummary,
+  taskSummaryKey,
+} from "./project-view.ts";
 import { TaskRow } from "./TaskRow.tsx";
+import { projectTaskId } from "./viewState.ts";
 
 const emptyTasks: Record<string, never> = {};
+const emptyLastSeen = {};
 
 export function ProjectScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -42,9 +56,10 @@ export function ProjectScreen() {
     activeId === null ? undefined : state.machines[activeId],
   );
   const projectId = firstParam(params.id) ?? "other";
+  const taskProjectId = projectTaskId(projectId, core?.layout);
   const [showChecked, setShowChecked] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<TaskRowModel>();
-  const [checkTask, setCheckTask] = useState<TaskRowModel>();
+  const [selectedTask, setSelectedTask] = useState<TaskIdentity>();
+  const [checkTask, setCheckTask] = useState<TaskIdentity>();
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [message, setMessage] = useState<string>();
@@ -59,18 +74,25 @@ export function ProjectScreen() {
 
   const taskRows = useMemo(
     () =>
-      deriveTasks(core?.tasks?.tasks ?? emptyTasks, core?.terminals ?? {}, core?.layout, {}, now),
-    [core?.layout, core?.tasks, core?.terminals, now],
+      deriveTasks(
+        core?.tasks?.tasks ?? emptyTasks,
+        core?.terminals ?? {},
+        core?.layout,
+        core?.lastSeenStatuses ?? emptyLastSeen,
+        now,
+      ),
+    [core?.lastSeenStatuses, core?.layout, core?.tasks, core?.terminals, now],
   );
   const project = useMemo(
-    () => findProject(projectId, core?.layout, taskRows.rows),
-    [core?.layout, projectId, taskRows.rows],
+    () => findProject(taskProjectId, core?.layout, taskRows.rows),
+    [core?.layout, taskProjectId, taskRows.rows],
   );
   const connection = core?.connection ?? "offline";
   const connectionState = connectionPresentation(connection, machine?.name);
-  const rows =
-    taskRows.byProject[projectId] ??
-    taskRows.rows.filter((row) => row.project.name === project.name);
+  const rows = useMemo(
+    () => projectTaskRows(taskProjectId, taskRows.rows),
+    [taskProjectId, taskRows.rows],
+  );
   const view = useMemo(
     () => deriveProjectView({ project, rows, role: machine?.role, connection, showChecked }),
     [connection, machine?.role, project, rows, showChecked],
@@ -88,27 +110,42 @@ export function ProjectScreen() {
     [connectionManager],
   );
 
+  const selectedTaskRow = currentRenderTask(selectedTask, activeId, taskRows.rows);
+  const checkTaskRow = currentRenderTask(checkTask, activeId, taskRows.rows);
+
+  const summaryRow = useCallback(
+    (row: TaskRowModel): TaskSummaryRow => ({
+      ...row,
+      lastSeenStatus: row.address === undefined ? undefined : core?.lastSeenStatuses?.[row.address],
+    }),
+    [core?.lastSeenStatuses],
+  );
+
   useEffect(() => {
     if (screenText === undefined || connection !== "connected") return;
-    for (const row of view.rows) {
-      if (row.state !== "done" || row.address === undefined) continue;
-      const key = summaryKey(row);
+    for (const sourceRow of view.rows) {
+      const row = summaryRow(sourceRow);
+      if (!shouldReadTaskSummary(row, summaries) || row.address === undefined) continue;
+      const address = row.address;
+      const key = taskSummaryKey(row);
       if (requestedSummaries.current.has(key)) continue;
       requestedSummaries.current.add(key);
       void screenText
-        .read(row.address, { turn: row.terminal?.turn, state: row.terminal?.status?.state })
+        .read(address, { turn: row.terminal?.turn, state: row.terminal?.status?.state })
         .then((screenRows) => {
+          if (coreStore.getState().machines[activeId ?? ""]?.terminals[address]?.reason != null) {
+            return;
+          }
           setSummaries((previous) => ({
             ...previous,
-            [key]:
-              summarize(row.program.iconKey, row.terminal?.status, screenRows) ?? "No summary yet.",
+            [key]: summarize(row.program.iconKey, undefined, screenRows) ?? "No summary yet.",
           }));
         })
         .catch(() => {
           setSummaries((previous) => ({ ...previous, [key]: "No summary yet." }));
         });
     }
-  }, [connection, screenText, view.rows]);
+  }, [activeId, connection, screenText, summaryRow, summaries, view.rows]);
 
   const openTerminal = (address: string) => router.push(routes.agent(address) as Href);
   const goHome = () => {
@@ -116,19 +153,58 @@ export function ProjectScreen() {
     else router.replace(routes.home as Href);
   };
 
-  function beginCheckOff(row: TaskRowModel) {
-    if (!view.canCheckOff) return;
-    setMessage(undefined);
-    if (needsCheckOffSheet(row, machine?.role)) {
-      setCheckTask(row);
-    } else {
-      void runCheckOff(row);
-    }
+  function identityFor(row: TaskRowModel): TaskIdentity | undefined {
+    return activeId === null ? undefined : { machineId: activeId, taskId: row.id };
   }
 
-  async function runCheckOff(row: TaskRowModel, choice?: CheckOffChoice) {
+  function latestTaskRow(identity: TaskIdentity): TaskRowModel | undefined {
+    const currentMachineId = machinesStore.getState().activeId;
+    if (currentMachineId !== identity.machineId) return undefined;
+    const latestCore = coreStore.getState().machines[identity.machineId];
+    return deriveTasks(
+      latestCore?.tasks?.tasks ?? emptyTasks,
+      latestCore?.terminals ?? {},
+      latestCore?.layout,
+      latestCore?.lastSeenStatuses ?? emptyLastSeen,
+      Date.now(),
+    ).taskFor(identity.taskId);
+  }
+
+  function currentCheckOff(identity: TaskIdentity): CheckOffCurrent {
+    const machineState = machinesStore.getState();
+    const activeMachineId = machineState.activeId;
+    const currentCore =
+      activeMachineId === null ? undefined : coreStore.getState().machines[activeMachineId];
+    const row =
+      activeMachineId === null || currentCore === undefined
+        ? undefined
+        : deriveTasks(
+            currentCore.tasks?.tasks ?? emptyTasks,
+            currentCore.terminals,
+            currentCore.layout,
+            currentCore.lastSeenStatuses ?? emptyLastSeen,
+            Date.now(),
+          ).taskFor(identity.taskId);
+
+    return {
+      activeMachineId,
+      role: activeMachineId === null ? undefined : machineState.machines[activeMachineId]?.role,
+      connection: currentCore?.connection,
+      row,
+    };
+  }
+
+  async function runCheckOff(identity: TaskIdentity, choice?: CheckOffChoice) {
+    setMessage(undefined);
     try {
-      await applyCheckOff(row, machine?.role, choice, actions);
+      const result = await runCheckOffAction(identity, choice, {
+        current: () => currentCheckOff(identity),
+        actions,
+      });
+      if (result === "ask") {
+        setCheckTask(identity);
+        return;
+      }
       setCheckTask(undefined);
       setSelectedTask(undefined);
     } catch (error) {
@@ -141,7 +217,7 @@ export function ProjectScreen() {
     setIsClearing(true);
     setMessage(undefined);
     try {
-      await actions.clear({ spaceId: projectId });
+      await actions.clear({ spaceId: project.id });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Couldn't clear checked-off tasks.");
     } finally {
@@ -149,11 +225,31 @@ export function ProjectScreen() {
     }
   }
 
-  async function selectTaskAction(action: ProjectRowAction) {
-    const row = selectedTask;
+  async function selectTaskAction(identity: TaskIdentity, action: ProjectRowAction) {
     setSelectedTask(undefined);
+    if (action.id === "check-off") {
+      await runCheckOff(identity);
+      return;
+    }
+    const row = latestTaskRow(identity);
     if (row === undefined) return;
-    if (action.id === "open-terminal" && row.address !== undefined) openTerminal(row.address);
+    const machineState = machinesStore.getState();
+    const currentMachineId = machineState.activeId;
+    const currentRole =
+      currentMachineId === null ? undefined : machineState.machines[currentMachineId]?.role;
+    const currentConnection =
+      currentMachineId === null
+        ? undefined
+        : coreStore.getState().machines[currentMachineId]?.connection;
+    if (currentConnection !== "connected") return;
+    if (
+      !projectRowActions(row, currentRole, currentConnection).some(({ id }) => id === action.id)
+    ) {
+      return;
+    }
+    if (action.id === "open-terminal" && row.address !== undefined && row.terminal !== undefined) {
+      openTerminal(row.address);
+    }
     if (action.id === "copy-address" && row.address !== undefined) {
       try {
         await actions.copy(row.address);
@@ -161,13 +257,21 @@ export function ProjectScreen() {
         setMessage(error instanceof Error ? error.message : "Couldn't copy the address.");
       }
     }
-    if (action.id === "check-off") beginCheckOff(row);
   }
 
-  const selectedActions = selectedTask
-    ? projectRowActions(selectedTask, machine?.role, connection)
+  const selectedActions = selectedTaskRow
+    ? projectRowActions(selectedTaskRow, machine?.role, connection)
     : [];
-  const checkOptions = checkTask ? checkOffSheetOptions(checkTask, machine?.role) : [];
+  const checkOptions =
+    checkTask && checkTaskRow
+      ? checkOffSheetOptionsFor(
+          checkTaskRow,
+          checkTask.machineId,
+          activeId,
+          machine?.role,
+          connection,
+        )
+      : [];
 
   return (
     <View className="flex-1 bg-canvas px-3.5 pt-safe">
@@ -215,18 +319,22 @@ export function ProjectScreen() {
             <TaskRow
               canCheckOff={view.canCheckOff}
               key={row.id}
-              onCheckOff={() => beginCheckOff(row)}
+              onCheckOff={() => {
+                const identity = identityFor(row);
+                if (identity !== undefined) void runCheckOff(identity);
+              }}
               onLongPress={() => {
                 if (
                   view.actionsEnabled &&
                   projectRowActions(row, machine?.role, connection).length > 0
                 ) {
-                  setSelectedTask(row);
+                  const identity = identityFor(row);
+                  if (identity !== undefined) setSelectedTask(identity);
                 }
               }}
               onPress={() => router.push(routes.task(row.id) as Href)}
               row={row}
-              summary={summaries[summaryKey(row)]}
+              summary={taskSummary(summaryRow(row), summaries)}
             />
           ))}
         </View>
@@ -252,7 +360,9 @@ export function ProjectScreen() {
             <View className="h-8 w-8 items-center justify-center rounded-full bg-solid">
               <Icon color="solid-fg" name="plus" size={18} />
             </View>
-            <Text variant="buttonLarge">New task</Text>
+            <Text tone={newTaskLabelTone} variant="buttonLarge">
+              New task
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -260,8 +370,10 @@ export function ProjectScreen() {
       <ActionSheet
         actions={selectedActions}
         onClose={() => setSelectedTask(undefined)}
-        onSelect={(action) => void selectTaskAction(action)}
-        title={selectedTask?.title ?? "Task actions"}
+        onSelect={(action) => {
+          if (selectedTask !== undefined) void selectTaskAction(selectedTask, action);
+        }}
+        title={selectedTaskRow?.title ?? "Task actions"}
         visible={selectedTask !== undefined}
       />
       <ActionSheet
@@ -276,7 +388,7 @@ export function ProjectScreen() {
       />
       <CheckOffSheet
         onChoose={(choice) => {
-          if (checkTask) void runCheckOff(checkTask, choice);
+          if (checkTask !== undefined) void runCheckOff(checkTask, choice);
         }}
         onClose={() => setCheckTask(undefined)}
         options={checkOptions}
@@ -344,7 +456,7 @@ function CheckOffSheet({
   onChoose,
   visible,
 }: {
-  options: ReturnType<typeof checkOffSheetOptions>;
+  options: ReturnType<typeof checkOffSheetOptionsFor>;
   onClose(): void;
   onChoose(choice: CheckOffChoice): void;
   visible: boolean;
@@ -362,23 +474,32 @@ function CheckOffSheet({
           style={{ borderWidth: HAIRLINE }}
         >
           <Text variant="title">Check off this task?</Text>
-          {options.map((option) => (
-            <Pressable
-              accessibilityRole="button"
-              key={option.id}
-              onPress={() => onChoose(option.id)}
-            >
-              {({ pressed }) => (
-                <View
-                  className={`mt-1 min-h-12 justify-center rounded-btn px-3 ${pressed ? "bg-raised" : "bg-surface"}`}
-                >
-                  <Text variant="button" tone={option.id === "stop" ? "danger" : "fg"}>
-                    {option.label}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
+          {options
+            .filter((option) => option.id !== "cancel")
+            .map((option) => (
+              <Pressable
+                accessibilityRole="button"
+                key={option.id}
+                onPress={() => onChoose(option.id)}
+              >
+                {({ pressed }) => (
+                  <View
+                    className={`mt-1 min-h-12 justify-center rounded-btn px-3 ${pressed ? "bg-raised" : "bg-surface"}`}
+                  >
+                    <Text variant="button" tone={option.id === "stop" ? "danger" : "fg"}>
+                      {option.label}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            ))}
+          <Pressable accessibilityRole="button" onPress={() => onChoose("cancel")}>
+            <View className="mt-2 min-h-11 items-center justify-center rounded-btn bg-surface">
+              <Text variant="button" tone="muted">
+                Cancel
+              </Text>
+            </View>
+          </Pressable>
         </View>
       </View>
     </Modal>
@@ -397,8 +518,7 @@ function findProject(
     return { id, name, folder };
   }
   return (
-    rows.find((row) => row.project.id === id)?.project ??
-    rows.find((row) => row.project.name === id)?.project ?? {
+    rows.find((row) => row.project.id === id)?.project ?? {
       id,
       name: id === "other" ? "Other" : id,
       folder: undefined,
@@ -406,8 +526,13 @@ function findProject(
   );
 }
 
-function summaryKey(row: TaskRowModel): string {
-  return `${row.address ?? row.id}:${row.terminal?.turn ?? 0}:${row.terminal?.status?.state ?? ""}`;
+function currentRenderTask(
+  identity: TaskIdentity | undefined,
+  activeMachineId: string | null,
+  rows: readonly TaskRowModel[],
+): TaskRowModel | undefined {
+  if (identity === undefined || identity.machineId !== activeMachineId) return undefined;
+  return resolveTaskRow(identity.taskId, rows);
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {

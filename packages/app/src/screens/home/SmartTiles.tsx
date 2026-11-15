@@ -1,8 +1,9 @@
+import { Activity } from "lucide-react-native";
 import { View } from "react-native";
-import { Spinner } from "../../ui/components/Spinner.tsx";
+import { HAIRLINE } from "../../ui/components/classes.ts";
 import { Icon } from "../../ui/icon.tsx";
 import { Text } from "../../ui/text.tsx";
-import type { HomeTile } from "./home-view.ts";
+import { type HomeTile, homeTileGlyph, homeTileIconBackground } from "./home-view.ts";
 
 export function SmartTiles({ tiles }: { tiles: readonly HomeTile[] }) {
   const needsYou = tiles.find((tile) => tile.kind === "needs-you");
@@ -24,16 +25,22 @@ export function SmartTiles({ tiles }: { tiles: readonly HomeTile[] }) {
 }
 
 function Tile({ tile }: { tile: HomeTile }) {
+  const glyph = homeTileGlyph(tile.kind);
   return (
-    <View className="min-h-[106px] flex-1 justify-between rounded-card border-border bg-surface p-3">
+    <View
+      className="min-h-[106px] flex-1 justify-between rounded-card border-border bg-surface p-3"
+      style={{ borderWidth: HAIRLINE }}
+    >
       <View className="flex-row items-center justify-between">
-        <View className={tileIconClasses[tile.kind]}>
-          {tile.kind === "needs-you" ? (
+        <View
+          className={`h-[30px] w-[30px] items-center justify-center rounded-full ${homeTileIconBackground(tile.kind)}`}
+        >
+          {glyph === "!" ? (
             <Text variant="title" tone="solid-fg">
               !
             </Text>
-          ) : tile.kind === "running" ? (
-            <Spinner size={19} />
+          ) : glyph === "activity" ? (
+            <Activity color="white" size={17} strokeWidth={2.4} />
           ) : (
             <Icon color="solid-fg" name="check" size={19} />
           )}
@@ -48,9 +55,3 @@ function Tile({ tile }: { tile: HomeTile }) {
     </View>
   );
 }
-
-const tileIconClasses: Record<HomeTile["kind"], string> = {
-  "needs-you": "h-[30px] w-[30px] items-center justify-center rounded-full bg-blocked",
-  running: "h-[30px] w-[30px] items-center justify-center rounded-full bg-raised",
-  done: "h-[30px] w-[30px] items-center justify-center rounded-full bg-done",
-};

@@ -10,6 +10,7 @@ import { appSecrets, coreStore, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
 import { Button } from "../../ui/components/Button.tsx";
 import { Text } from "../../ui/text.tsx";
+import { pairedTasksMessage } from "./connection-line-state.ts";
 import { ManualEntry } from "./ManualEntry.tsx";
 import { PairingSteps } from "./PairingSteps.tsx";
 import { PairingController } from "./pair-controller.ts";
@@ -85,7 +86,7 @@ export function PairScreen() {
           <Text variant="callout">
             {state.paired.kind === "refreshed"
               ? `Updated the address for ${state.paired.machineName}.`
-              : `Paired with ${state.paired.machineName}. Opening agents…`}
+              : pairedTasksMessage(state.paired.machineName)}
           </Text>
         ) : state.manual ? (
           <ManualEntry

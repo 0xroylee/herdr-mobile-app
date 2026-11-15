@@ -11,13 +11,14 @@ import { Text } from "../../ui/text.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { connectionPresentation } from "./connectionPresentation.ts";
 import { HomeMenu } from "./HomeMenu.tsx";
-import { deriveHomeView } from "./home-view.ts";
+import { deriveHomeView, newTaskLabelTone } from "./home-view.ts";
 import { MachineChip } from "./MachineChip.tsx";
 import { ProjectRow } from "./ProjectRow.tsx";
 import { SearchField } from "./SearchField.tsx";
 import { SmartTiles } from "./SmartTiles.tsx";
 
 const emptyTasks: Record<string, never> = {};
+const emptyLastSeen = {};
 
 export function HomeScreen() {
   const router = useRouter();
@@ -45,8 +46,14 @@ export function HomeScreen() {
 
   const tasks = useMemo(
     () =>
-      deriveTasks(core?.tasks?.tasks ?? emptyTasks, core?.terminals ?? {}, core?.layout, {}, now),
-    [core?.layout, core?.tasks, core?.terminals, now],
+      deriveTasks(
+        core?.tasks?.tasks ?? emptyTasks,
+        core?.terminals ?? {},
+        core?.layout,
+        core?.lastSeenStatuses ?? emptyLastSeen,
+        now,
+      ),
+    [core?.lastSeenStatuses, core?.layout, core?.tasks, core?.terminals, now],
   );
   const connection = core?.connection ?? "offline";
   const view = useMemo(
@@ -126,7 +133,9 @@ export function HomeScreen() {
               <View className="h-8 w-8 items-center justify-center rounded-full bg-solid">
                 <Icon color="solid-fg" name="plus" size={18} />
               </View>
-              <Text variant="buttonLarge">New task</Text>
+              <Text tone={newTaskLabelTone} variant="buttonLarge">
+                New task
+              </Text>
             </View>
           </Pressable>
           <Pressable

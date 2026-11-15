@@ -9,9 +9,13 @@ import { routes } from "../../routes.ts";
 import { coreStore, machinesStore } from "../../store/platform.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
 import { Text } from "../../ui/text.tsx";
+import { ConnectionBanner } from "../home/ConnectionBanner.tsx";
 import { TerminalsList } from "./TerminalsList.tsx";
+import { terminalsPresentation } from "./terminals-view.ts";
+import { findProjectSpace, projectTaskId } from "./viewState.ts";
 
 const emptyTasks: Record<string, never> = {};
+const emptyLastSeen = {};
 
 export function TerminalsScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -24,22 +28,30 @@ export function TerminalsScreen() {
     activeId === null ? undefined : state.machines[activeId],
   );
   const projectId = firstParam(params.id) ?? "other";
+  const taskProjectId = projectTaskId(projectId, core?.layout);
   const taskRows = useMemo(
     () =>
       deriveTasks(
         core?.tasks?.tasks ?? emptyTasks,
         core?.terminals ?? {},
         core?.layout,
-        {},
+        core?.lastSeenStatuses ?? emptyLastSeen,
         Date.now(),
       ),
-    [core?.layout, core?.tasks, core?.terminals],
+    [core?.lastSeenStatuses, core?.layout, core?.tasks, core?.terminals],
   );
-  const project = projectFor(projectId, core?.layout, taskRows.rows);
-  const space = deriveSpaces(core?.terminals ?? {}, core?.layout)
-    .flatMap((group) => (group.machine === undefined ? group.spaces : []))
-    .find((candidate) => candidate.id === projectId || candidate.name === project.name);
+  const project = projectFor(taskProjectId, core?.layout, taskRows.rows);
+  const localSpaces = deriveSpaces(core?.terminals ?? {}, core?.layout).flatMap((group) =>
+    group.machine === undefined ? group.spaces : [],
+  );
+  const space = findProjectSpace(projectId, core?.layout, localSpaces);
   const openTerminal = (address: string) => router.push(routes.agent(address) as Href);
+  const presentation = terminalsPresentation(
+    core?.connection ?? "offline",
+    machine?.name,
+    space?.tabs ?? [],
+    machine?.routes.secure !== undefined,
+  );
 
   return (
     <View className="flex-1 bg-canvas px-3.5 pt-safe">
@@ -61,7 +73,10 @@ export function TerminalsScreen() {
           </Text>
         </View>
       </View>
-      <TerminalsList onOpenTerminal={openTerminal} tabs={space?.tabs ?? []} />
+      <ConnectionBanner presentation={presentation.connection} />
+      <View className="min-h-0 flex-1" style={{ opacity: presentation.contentOpacity }}>
+        <TerminalsList onOpenTerminal={openTerminal} tabs={presentation.pills} />
+      </View>
     </View>
   );
 }

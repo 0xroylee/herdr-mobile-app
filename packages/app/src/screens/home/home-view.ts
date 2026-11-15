@@ -15,6 +15,18 @@ export interface HomeTile {
   count: number;
 }
 
+export const newTaskLabelTone = "fg" as const;
+
+export function homeTileGlyph(kind: HomeTile["kind"]): "!" | "activity" | "check" {
+  if (kind === "needs-you") return "!";
+  return kind === "running" ? "activity" : "check";
+}
+
+export function homeTileIconBackground(kind: HomeTile["kind"]): string {
+  if (kind === "needs-you") return "bg-blocked";
+  return kind === "running" ? "bg-working" : "bg-done";
+}
+
 export interface HomeView {
   rows: TaskRow[];
   projects: HomeProject[];

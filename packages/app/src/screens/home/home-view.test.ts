@@ -3,7 +3,12 @@
 import { describe, expect, test } from "bun:test";
 import type { Layout } from "@herdr-mobile/protocol";
 import type { TaskRow } from "../../model/tasks.ts";
-import { deriveHomeView } from "./home-view.ts";
+import {
+  deriveHomeView,
+  homeTileGlyph,
+  homeTileIconBackground,
+  newTaskLabelTone,
+} from "./home-view.ts";
 
 const layout: Layout = {
   spaces: [
@@ -14,6 +19,15 @@ const layout: Layout = {
 };
 
 describe("deriveHomeView", () => {
+  test("uses the working activity glyph on the filled working color", () => {
+    expect(homeTileGlyph("running")).toBe("activity");
+    expect(homeTileIconBackground("running")).toBe("bg-working");
+  });
+
+  test("uses the theme foreground tone for the New task label", () => {
+    expect(newTaskLabelTone).toBe("fg");
+  });
+
   test("keeps Herdr project order and derives urgent marks and unchecked counts", () => {
     const view = deriveHomeView({
       layout,

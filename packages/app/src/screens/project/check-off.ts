@@ -1,11 +1,26 @@
 import type { CheckTaskRequest, Role } from "@herdr-mobile/protocol";
 import type { TaskRow } from "../../model/tasks.ts";
+import type { TaskActions } from "../../net/task-actions.ts";
+import type { ConnectionState } from "../../store/core.ts";
 
 export type CheckOffChoice = "stop" | "keep-running" | "cancel";
 
-export interface CheckOffActions {
-  check(request: CheckTaskRequest): Promise<unknown>;
-  stop(address: string): Promise<unknown>;
+export interface TaskIdentity {
+  machineId: string;
+  taskId: string;
+}
+
+export interface CheckOffCurrent {
+  activeMachineId: string | null;
+  role: Role | undefined;
+  connection: ConnectionState | undefined;
+  /** Resolve `identity.taskId` from the task list for the active machine. */
+  row: TaskRow | undefined;
+}
+
+export interface CheckOffDependencies {
+  current(): CheckOffCurrent;
+  actions: Pick<TaskActions, "check" | "stop">;
 }
 
 export interface CheckOffSheetOption {
@@ -33,27 +48,57 @@ export function checkOffSheetOptions(row: TaskRow, role: Role | undefined): Chec
   return row.address === undefined ? sheetOptions.slice(1) : [...sheetOptions];
 }
 
-/** Check immediately for Done and Stopped, or carry out the selected active-task sheet action. */
-export async function applyCheckOff(
-  row: TaskRow,
-  role: Role | undefined,
-  choice: CheckOffChoice | undefined,
-  actions: CheckOffActions,
-): Promise<boolean> {
-  if (role !== "control") return false;
-  const request = checkRequest(row);
-  if (request === undefined || row.state === "checked" || row.state === "not-started") return false;
+/** Resolve a delayed row action from the current task list rather than its menu snapshot. */
+export function resolveTaskRow(taskId: string, rows: readonly TaskRow[]): TaskRow | undefined {
+  return rows.find((row) => row.id === taskId);
+}
 
-  if (row.state === "running" || row.state === "needs-you") {
-    if (choice === undefined || choice === "cancel") return false;
-    if (choice === "stop") {
-      if (row.address === undefined) return false;
-      await actions.stop(row.address);
-    }
+/** Gate check-off against the machine, role and connection that are current at submission. */
+export function canSubmitCheckOff(
+  expectedMachineId: string,
+  activeMachineId: string | null,
+  role: Role | undefined,
+  connection: ConnectionState | undefined,
+): boolean {
+  return expectedMachineId === activeMachineId && role === "control" && connection === "connected";
+}
+
+/** Hide every write choice when the open sheet no longer belongs to a writable connection. */
+export function checkOffSheetOptionsFor(
+  row: TaskRow,
+  expectedMachineId: string,
+  activeMachineId: string | null,
+  role: Role | undefined,
+  connection: ConnectionState | undefined,
+): CheckOffSheetOption[] {
+  if (!canSubmitCheckOff(expectedMachineId, activeMachineId, role, connection)) return [];
+  return checkOffSheetOptions(row, role);
+}
+
+/** Re-read writable state before each check-off write, including after stopping a terminal. */
+export async function runCheckOff(
+  identity: TaskIdentity,
+  choice: CheckOffChoice | undefined,
+  deps: CheckOffDependencies,
+): Promise<"refused" | "ask" | "checked"> {
+  let current = deps.current();
+  if (!canWriteCheckOff(identity, current)) return "refused";
+
+  if (choice === "cancel") return "refused";
+  if (isActive(current.row) && choice === undefined) return "ask";
+
+  if (choice === "stop" && isActive(current.row)) {
+    if (current.row.address === undefined) return "refused";
+    await deps.actions.stop(current.row.address);
+
+    current = deps.current();
+    if (!canWriteCheckOff(identity, current)) return "refused";
   }
 
-  await actions.check(request);
-  return true;
+  const request = checkRequest(current.row);
+  if (request === undefined) return "refused";
+  await deps.actions.check(request);
+  return "checked";
 }
 
 function checkRequest(row: TaskRow): CheckTaskRequest | undefined {
@@ -61,4 +106,25 @@ function checkRequest(row: TaskRow): CheckTaskRequest | undefined {
   if (row.record !== undefined) return { id: row.record.id, turn };
   if (row.address !== undefined) return { terminal: row.address, turn };
   return undefined;
+}
+
+function canWriteCheckOff(
+  identity: TaskIdentity,
+  current: CheckOffCurrent,
+): current is CheckOffCurrent & { row: TaskRow } {
+  return (
+    canSubmitCheckOff(
+      identity.machineId,
+      current.activeMachineId,
+      current.role,
+      current.connection,
+    ) &&
+    current.row !== undefined &&
+    current.row.state !== "checked" &&
+    current.row.state !== "not-started"
+  );
+}
+
+function isActive(row: TaskRow | undefined): boolean {
+  return row?.state === "running" || row?.state === "needs-you";
 }
