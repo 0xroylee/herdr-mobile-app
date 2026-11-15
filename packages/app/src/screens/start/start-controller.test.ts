@@ -9,7 +9,7 @@ import type {
   Terminal,
 } from "@herdr-mobile/protocol";
 import { deriveSpaces } from "../../model/spaces.ts";
-import { newTabTarget } from "../../model/spaceTarget.ts";
+import { newTabTarget, type SpaceTargetId } from "../../model/spaceTarget.ts";
 import { deriveStartOptions } from "../../model/startAgent.ts";
 import { BridgeApiError } from "../../net/bridge-api.ts";
 import { createNewTab } from "../spaces/newItems.ts";
@@ -17,6 +17,7 @@ import {
   createStartController,
   dispatchStartAction,
   type StartAgentPort,
+  type StartController,
 } from "./start-controller.ts";
 
 describe("start controller", () => {
@@ -323,68 +324,289 @@ describe("start controller", () => {
     }
   });
 
-  test("keeps a selected Empty tab when its label-backed space gains a layout row", async () => {
-    const routeSpaceId = "label-space:sp1";
-    const terminals = [terminal()];
-    const port = fakePort();
-    const controller = createStartController(port.value, routeSpaceId);
+  test("preserves the preselection when the layout arrives during the first catalog load", async () => {
+    const terminals = [terminal("t1", "sp1"), terminal("t2", "sp2")];
+    let resolveCatalog: ((value: AgentCatalog) => void) | undefined;
+    const port = fakePort({
+      catalog: () => new Promise((resolve) => (resolveCatalog = resolve)),
+    });
+    const controller = createStartController(port.value, "sp1");
+    const loading = controller.load();
+
+    const labelOptions = deriveStartOptions(undefined, undefined, terminals, [], "sp1");
+    expect(labelOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    controller.applyOptions(labelOptions);
+    expect(controller.state.draft).toEqual({
+      run: undefined,
+      folder: "",
+      space: undefined,
+      task: "",
+    });
+    expect(await controller.start()).toBe(false);
+    expect(port.calls.start).toEqual([]);
+
+    const reorderedLayout = twoSpaceLayout(["sp2", "sp1"]);
+    const layoutOptions = deriveStartOptions(undefined, reorderedLayout, terminals, [], "sp1");
+    controller.applyOptions(layoutOptions);
+    resolveCatalog?.(catalog());
+    await loading;
+
+    const options = deriveStartOptions(
+      controller.state.catalog,
+      reorderedLayout,
+      terminals,
+      [],
+      "sp1",
+    );
+    controller.applyOptions(options);
+    expect(options.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp1" });
+    controller.set("run", { kind: "empty" });
+
+    const emptyTab = emptyTabHarness(controller, targetFor("sp1", terminals, reorderedLayout));
+    const result = await dispatchStartAction(controller.state.draft.run, {
+      start: () => controller.start(),
+      createEmptyTab: emptyTab.createEmptyTab,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(emptyTab.calls).toEqual([{ action: "tab.new", args: { space: "sp1" } }]);
+    expect(port.calls.start).toEqual([]);
+  });
+
+  test("selects the preselected target when catalog results arrive before space rows", async () => {
+    const terminals = [terminal("t1", "sp1"), terminal("t2", "sp2")];
+    const controller = createStartController(fakePort().value, "sp1");
     await controller.load();
+
+    const emptyOptions = deriveStartOptions(controller.state.catalog, undefined, [], [], "sp1");
+    controller.applyOptions(emptyOptions);
+    expect(emptyOptions.spaceChoices).toEqual([{ selection: { kind: "new" }, name: "New space" }]);
+    expect(controller.state.draft.space).toEqual({ kind: "new" });
+
     const labelOptions = deriveStartOptions(
       controller.state.catalog,
       undefined,
       terminals,
       [],
-      routeSpaceId,
+      "sp1",
     );
-    expect(labelOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
     controller.applyOptions(labelOptions);
-    controller.set("run", { kind: "empty" });
-
-    const matchingLayout = layout();
-    const layoutOptions = deriveStartOptions(
-      controller.state.catalog,
-      matchingLayout,
-      terminals,
-      [],
-      routeSpaceId,
-      controller.preselectedSpaceTargetId,
-    );
-    expect(layoutOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
-    controller.applyOptions(layoutOptions);
-
     expect(controller.state.draft).toMatchObject({
-      run: { kind: "empty" },
       space: { kind: "existing", id: "sp1" },
+      folder: "/Users/roy/project/src",
     });
 
-    const appDoCalls: Array<{ action: string; args?: Record<string, unknown> }> = [];
-    const dependencies = {
-      calls: {
-        appDo: async (action: "space.new" | "tab.new", args?: Record<string, unknown>) => {
-          appDoCalls.push({ action, args });
-        },
-      },
-    };
-    const machine = { id: "machine", role: "control" as const };
-    const selectedChoice = layoutOptions.spaceChoices.find(
-      (choice) => choice.selection.kind === "existing" && choice.selection.id === "sp1",
+    const layoutOptions = deriveStartOptions(
+      controller.state.catalog,
+      twoSpaceLayout(["sp2", "sp1"]),
+      terminals,
+      [],
+      "sp1",
     );
-    const selectedRow = deriveSpaces(terminals, matchingLayout)
-      .flatMap((group) => group.spaces)
-      .find((space) => space.id === selectedChoice?.displayId);
-    const target = selectedRow ? newTabTarget(selectedRow, matchingLayout) : undefined;
+    controller.applyOptions(layoutOptions);
+    expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp1" });
+    expect(layoutOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+  });
 
+  test("keeps label-backed Empty tab available through a refresh when layout never arrives", async () => {
+    const terminals = [terminal()];
+    const port = fakePort();
+    const controller = createStartController(port.value, "sp1");
+    await controller.load();
+    controller.applyOptions(
+      deriveStartOptions(controller.state.catalog, undefined, terminals, [], "sp1"),
+    );
+
+    await controller.load();
+    controller.applyOptions(
+      deriveStartOptions(controller.state.catalog, undefined, terminals, [], "sp1"),
+    );
+    expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp1" });
+    expect(controller.state.draft.run).toEqual({ kind: "program", id: "claude" });
+    expect(
+      deriveStartOptions(controller.state.catalog, undefined, terminals, [], "sp1").runChoices.some(
+        (choice) => choice.kind === "empty",
+      ),
+    ).toBe(true);
+
+    controller.set("run", { kind: "empty" });
+    const emptyTab = emptyTabHarness(
+      controller,
+      targetFor("label-space:sp1", terminals, undefined),
+    );
     const result = await dispatchStartAction(controller.state.draft.run, {
       start: () => controller.start(),
-      createEmptyTab: () =>
-        controller.createEmptyTabIfAllowed(target, (resolvedTarget) =>
-          createNewTab(dependencies, machine, resolvedTarget),
-        ),
+      createEmptyTab: emptyTab.createEmptyTab,
     });
 
     expect(result).toEqual({ ok: true });
-    expect(appDoCalls).toEqual([{ action: "tab.new", args: { space: "sp1" } }]);
+    expect(emptyTab.calls).toEqual([{ action: "tab.new", args: { space: "sp1" } }]);
     expect(port.calls.start).toEqual([]);
+  });
+
+  test("keeps the target, task, and typed folder through layout reorder and fallback", async () => {
+    const terminals = [terminal("t1", "sp1"), terminal("t2", "sp2")];
+    const controller = createStartController(fakePort().value, "sp1");
+    await controller.load();
+    controller.applyOptions(
+      deriveStartOptions(
+        controller.state.catalog,
+        twoSpaceLayout(["sp1", "sp2"]),
+        terminals,
+        [],
+        "sp1",
+      ),
+    );
+    controller.set("task", "Keep this task");
+    controller.set("folder", "/Users/roy/custom-folder");
+
+    for (const layoutValue of [twoSpaceLayout(["sp2", "sp1"]), undefined]) {
+      const options = deriveStartOptions(
+        controller.state.catalog,
+        layoutValue,
+        terminals,
+        [],
+        "sp1",
+      );
+      controller.applyOptions(options);
+      expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp1" });
+      expect(options.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    }
+
+    expect(controller.state.draft).toMatchObject({
+      task: "Keep this task",
+      folder: "/Users/roy/custom-folder",
+    });
+  });
+
+  test("reconciles automatic folders after space selection, late metadata, and fallback", async () => {
+    const port = fakePort();
+    const controller = createStartController(port.value, "sp1");
+    await controller.load();
+    const terminals = [terminal()];
+    controller.applyOptions(
+      deriveStartOptions(
+        controller.state.catalog,
+        twoSpaceLayoutWithSp2Folder(undefined),
+        terminals,
+        [],
+        "sp1",
+      ),
+    );
+
+    // This is the StartScreen.selectSpace controller call after folder policy moved here.
+    controller.set("space", { kind: "existing", id: "sp2" });
+    expect(controller.state.draft).toMatchObject({
+      space: { kind: "existing", id: "sp2" },
+      folder: "",
+    });
+
+    controller.applyOptions(
+      deriveStartOptions(
+        controller.state.catalog,
+        twoSpaceLayoutWithSp2Folder("/tmp/sp2"),
+        terminals,
+        [],
+        "sp1",
+      ),
+    );
+    expect(controller.state.draft).toMatchObject({
+      space: { kind: "existing", id: "sp2" },
+      folder: "/tmp/sp2",
+    });
+
+    controller.applyOptions(
+      deriveStartOptions(controller.state.catalog, layout(), terminals, [], "sp1"),
+    );
+    expect(controller.state.draft).toMatchObject({
+      space: { kind: "existing", id: "sp1" },
+      folder: "/Users/roy/project",
+    });
+  });
+
+  test("preserves a typed folder across space-list updates and refresh", async () => {
+    const port = fakePort();
+    const controller = createStartController(port.value, "sp1");
+    await controller.load();
+    const terminals = [terminal()];
+    controller.applyOptions(
+      deriveStartOptions(
+        controller.state.catalog,
+        twoSpaceLayoutWithSp2Folder("/Users/roy/research"),
+        terminals,
+        [],
+        "sp1",
+      ),
+    );
+    controller.set("space", { kind: "existing", id: "sp2" });
+    controller.set("folder", "/Users/roy/custom-folder");
+
+    const fallbackOptions = deriveStartOptions(
+      controller.state.catalog,
+      layout(),
+      terminals,
+      [],
+      "sp1",
+    );
+    controller.applyOptions(fallbackOptions);
+    expect(controller.state.draft).toMatchObject({
+      space: { kind: "existing", id: "sp1" },
+      folder: "/Users/roy/custom-folder",
+    });
+
+    await controller.load();
+    controller.applyOptions(fallbackOptions);
+    expect(controller.state.draft).toMatchObject({
+      space: { kind: "existing", id: "sp1" },
+      folder: "/Users/roy/custom-folder",
+    });
+  });
+
+  test("keeps a user-selected space across refresh and ignores space changes while loading", async () => {
+    let catalogCalls = 0;
+    let resolveRefresh: ((value: AgentCatalog) => void) | undefined;
+    const port = fakePort({
+      catalog: () => {
+        catalogCalls += 1;
+        return catalogCalls === 1
+          ? Promise.resolve(catalog())
+          : new Promise((resolve) => (resolveRefresh = resolve));
+      },
+    });
+    const controller = createStartController(port.value, "sp1");
+    controller.set("space", { kind: "existing", id: "sp2" });
+    expect(controller.state.draft.space).toBeUndefined();
+
+    await controller.load();
+    const terminals = [terminal("t1", "sp1"), terminal("t2", "sp2")];
+    controller.applyOptions(
+      deriveStartOptions(
+        controller.state.catalog,
+        twoSpaceLayout(["sp1", "sp2"]),
+        terminals,
+        [],
+        "sp1",
+      ),
+    );
+    controller.set("space", { kind: "existing", id: "sp2" });
+
+    const refresh = controller.load();
+    const reorderedOptions = deriveStartOptions(
+      controller.state.catalog,
+      twoSpaceLayout(["sp2", "sp1"]),
+      terminals,
+      [],
+      "sp1",
+    );
+    controller.applyOptions(reorderedOptions);
+    expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp2" });
+    resolveRefresh?.(catalog());
+    await refresh;
+    controller.applyOptions(reorderedOptions);
+
+    expect(controller.state.draft.space).toEqual({ kind: "existing", id: "sp2" });
+    expect(reorderedOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
   });
 
   test("refuses agent starts for watch devices and offline Macs without changing the draft", async () => {
@@ -567,17 +789,87 @@ function layout(): Layout {
   };
 }
 
-function terminal(): Terminal {
+function twoSpaceLayout(spaceIds: readonly ("sp1" | "sp2")[]): Layout {
   return {
-    address: "t1",
+    spaces: spaceIds.map((id) => ({
+      id,
+      name: id === "sp1" ? "Work" : "Research",
+      folder: id === "sp1" ? "/Users/roy/project" : "/Users/roy/research",
+      tabs: [
+        {
+          id: `tb-${id}`,
+          name: "Main",
+          terminalAddresses: [id === "sp1" ? "t1" : "t2"],
+        },
+      ],
+    })),
+  };
+}
+
+function twoSpaceLayoutWithSp2Folder(sp2Folder: string | undefined): Layout {
+  return {
+    spaces: [
+      {
+        id: "sp1",
+        name: "Work",
+        folder: "/Users/roy/project",
+        tabs: [{ id: "tb-sp1", name: "Main", terminalAddresses: ["t1"] }],
+      },
+      {
+        id: "sp2",
+        name: "Research",
+        folder: sp2Folder ?? null,
+        tabs: [{ id: "tb-sp2", name: "Main", terminalAddresses: [] }],
+      },
+    ],
+  };
+}
+
+function terminal(address = "t1", spaceId = "sp1"): Terminal {
+  return {
+    address,
     argv: ["claude"],
     cols: 80,
     created_ms: 1,
-    cwd: "/Users/roy/project/src",
-    labels: { "herdr.space": "sp1" },
+    cwd: spaceId === "sp1" ? "/Users/roy/project/src" : `/Users/roy/${spaceId}/src`,
+    labels: { "herdr.space": spaceId },
     rows: 24,
     screen: "exact",
     state: "live",
+  };
+}
+
+function targetFor(
+  spaceId: string,
+  terminals: readonly Terminal[],
+  layoutValue: Layout | undefined,
+): SpaceTargetId {
+  const space = deriveSpaces(terminals, layoutValue)
+    .flatMap((group) => group.spaces)
+    .find((row) => row.id === spaceId);
+  if (!space) throw new Error(`Expected a row for ${spaceId}`);
+  const target = newTabTarget(space, layoutValue);
+  if (!target) throw new Error(`Expected a target for ${spaceId}`);
+  return target;
+}
+
+function emptyTabHarness(controller: StartController, target: SpaceTargetId) {
+  const calls: Array<{ action: string; args?: Record<string, unknown> }> = [];
+  const dependencies = {
+    calls: {
+      appDo: async (action: "space.new" | "tab.new", args?: Record<string, unknown>) => {
+        calls.push({ action, args });
+      },
+    },
+  };
+  const machine = { id: "machine", role: "control" as const };
+
+  return {
+    calls,
+    createEmptyTab: () =>
+      controller.createEmptyTabIfAllowed(target, (resolvedTarget) =>
+        createNewTab(dependencies, machine, resolvedTarget),
+      ),
   };
 }
 

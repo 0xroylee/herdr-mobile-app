@@ -57,13 +57,7 @@ describe("start agent model", () => {
 
   test("uses real label targets while keeping the display row key", () => {
     const labelTerminal = { ...terminal("t1", "/Users/roy/src"), labels: { "herdr.space": "sp1" } };
-    const options = deriveStartOptions(
-      undefined,
-      undefined,
-      [labelTerminal],
-      [],
-      "label-space:sp1",
-    );
+    const options = deriveStartOptions(undefined, undefined, [labelTerminal], [], "sp1");
 
     expect(options.spaceChoices).toEqual([
       {
@@ -94,6 +88,29 @@ describe("start agent model", () => {
         undefined,
       )?.id,
     ).toBe("label-space:sp1");
+  });
+
+  test("offers Empty tab only when the preselected target is visible", () => {
+    const labelTerminal = { ...terminal("t1", "/Users/roy/src"), labels: { "herdr.space": "sp1" } };
+    const labelOptions = deriveStartOptions(undefined, undefined, [labelTerminal], [], "sp1");
+    const documentOptions = deriveStartOptions(
+      undefined,
+      layout(),
+      [terminal("t1", "/Users/roy/src")],
+      [],
+      "sp-work",
+    );
+    const unknownTargetOptions = deriveStartOptions(
+      undefined,
+      layout(),
+      [terminal("t1", "/Users/roy/src")],
+      [],
+      "missing",
+    );
+
+    expect(labelOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    expect(documentOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(true);
+    expect(unknownTargetOptions.runChoices.some((choice) => choice.kind === "empty")).toBe(false);
   });
 
   test("omits unresolved aggregate spaces as existing destinations", () => {

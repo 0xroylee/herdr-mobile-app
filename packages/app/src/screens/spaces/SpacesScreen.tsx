@@ -16,7 +16,7 @@ import { Text } from "@/ui/text.tsx";
 import type { SpacesBanner } from "./connectionPresentation.ts";
 import { PairAgainBanner } from "./PairAgainBanner.tsx";
 import { SpaceRow } from "./SpaceRow.tsx";
-import { showSpaceStartEntryPoint } from "./start-entry.ts";
+import { spaceStartTarget } from "./start-entry.ts";
 import { useSpaces } from "./useSpaces.ts";
 import { getSpaceExpansionKey, groupHeading, groupTag, spacesFootnote } from "./viewState.ts";
 
@@ -158,14 +158,20 @@ export function SpacesScreen() {
               <ListGroup>
                 {group.spaces.map((space) => {
                   const expansionKey = getSpaceExpansionKey(group.id, space.id);
+                  const target = spaceStartTarget(machine?.role, space, layout);
                   return (
                     <SpaceRow
                       key={space.id}
-                      canStartAgent={showSpaceStartEntryPoint(machine?.role)}
+                      canStartAgent={target !== undefined}
                       expanded={isExpanded(expansionKey)}
-                      onStartAgent={() =>
-                        router.push({ pathname: routes.start, params: { space: space.id } } as Href)
-                      }
+                      onStartAgent={() => {
+                        if (target !== undefined) {
+                          router.push({
+                            pathname: routes.start,
+                            params: { space: target },
+                          } as Href);
+                        }
+                      }}
                       onOpenTerminal={openAgent}
                       onToggle={() => toggleSpace(expansionKey)}
                       space={space}
