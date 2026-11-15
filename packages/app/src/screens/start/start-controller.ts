@@ -16,7 +16,7 @@ import {
   validateStartDraft,
 } from "../../model/startAgent.ts";
 import { BridgeApiError } from "../../net/bridge-api.ts";
-import type { NewItemResult } from "../spaces/newItems.ts";
+import type { NewItemResult } from "../../net/new-items.ts";
 import { getStartScreenAccess } from "./start-access.ts";
 
 export interface StartAgentPort {

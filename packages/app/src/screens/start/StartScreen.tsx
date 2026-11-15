@@ -27,6 +27,7 @@ import {
   startSpaceKey,
 } from "../../model/startAgent.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
+import { createNewTab } from "../../net/new-items.ts";
 import { routes } from "../../routes.ts";
 import { coreStore, machinesStore, settingsStore } from "../../store/platform.ts";
 import { shortenHomeFolder } from "../../terminal/folder.ts";
@@ -37,7 +38,6 @@ import { Spinner } from "../../ui/components/Spinner.tsx";
 import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
 import { createStartKeyboardTracker } from "../../ui/start-keyboard.ts";
 import { Text } from "../../ui/text.tsx";
-import { createNewTab } from "../spaces/newItems.ts";
 import { RunList } from "./RunList.tsx";
 import { getStartScreenAccess } from "./start-access.ts";
 import { createStartController, dispatchStartAction } from "./start-controller.ts";

@@ -12,7 +12,7 @@ import { deriveSpaces } from "../../model/spaces.ts";
 import { newTabTarget, type SpaceTargetId } from "../../model/spaceTarget.ts";
 import { deriveStartOptions } from "../../model/startAgent.ts";
 import { BridgeApiError } from "../../net/bridge-api.ts";
-import { createNewTab } from "../spaces/newItems.ts";
+import { createNewTab } from "../../net/new-items.ts";
 import {
   createStartController,
   dispatchStartAction,
