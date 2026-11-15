@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>herdr mobile: tasks, Reminders-style</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="kit.css" />
+    <link rel="stylesheet" href="tasks.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute">
+      <defs>
+        <!-- Program icons and the shared glyphs are copied from mockups.html. The added glyphs
+             are from Lucide (ISC). -->
+        <symbol id="claude" viewBox="0 0 24 24">
+          <path
+            fill="#D97757"
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+          />
+        </symbol>
+        <linearGradient id="codex-g" gradientUnits="userSpaceOnUse" x1="12" x2="12" y1="3" y2="21">
+          <stop stop-color="#B1A7FF" />
+          <stop offset=".5" stop-color="#7A9DFF" />
+          <stop offset="1" stop-color="#3941FF" />
+        </linearGradient>
+        <symbol id="codex" viewBox="0 0 24 24">
+          <path
+            fill="#fff"
+            d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z"
+          />
+          <path
+            fill="url(#codex-g)"
+            d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z"
+          />
+        </symbol>
+        <symbol id="spinner" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9.4" fill="none" stroke="currentColor" stroke-width="3.2" stroke-opacity="0.24" />
+          <path d="M12 2.6a9.4 9.4 0 0 1 9.4 9.4" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" />
+        </symbol>
+        <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5" /><path d="m21 21-4.3-4.3" /></symbol>
+        <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></symbol>
+        <symbol id="chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+        <symbol id="chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+        <symbol id="chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+        <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14" /><path d="M12 5v14" /></symbol>
+        <symbol id="more" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
+        </symbol>
+        <symbol id="arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></symbol>
+        <symbol id="branch" viewBox="0 0 24 24">
+          <line x1="6" x2="6" y1="3" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+        </symbol>
+        <symbol id="laptop" viewBox="0 0 24 24">
+          <path d="M18 5a2 2 0 0 1 2 2v8.53a2 2 0 0 0 .21.9l1.07 2.12a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.07-2.12A2 2 0 0 0 4 15.53V7a2 2 0 0 1 2-2z" />
+          <path d="M20.05 16H3.95" />
+        </symbol>
+        <symbol id="terminal" viewBox="0 0 24 24"><path d="M12 19h8" /><path d="m4 17 6-6-6-6" /></symbol>
+        <symbol id="x" viewBox="0 0 24 24"><path d="m18 6-12 12" /><path d="m6 6 12 12" /></symbol>
+        <symbol id="check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5" /></symbol>
+        <symbol id="folder" viewBox="0 0 24 24">
+          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+        </symbol>
+        <symbol id="repeat" viewBox="0 0 24 24">
+          <path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" />
+          <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+        </symbol>
+        <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></symbol>
+        <symbol id="calendar" viewBox="0 0 24 24">
+          <path d="M8 2v4" /><path d="M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" />
+        </symbol>
+        <symbol id="activity" viewBox="0 0 24 24">
+          <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+        </symbol>
+        <symbol id="message" viewBox="0 0 24 24">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </symbol>
+        <symbol id="bell" viewBox="0 0 24 24">
+          <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+          <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="page">
+      <h1>herdr mobile: tasks, Reminders-style</h1>
+      <p>
+        A proposal for a second direction. The official Herdr app already shows which agents need
+        you and lets you reply, so this pass puts tasks first: you write what you want done, the
+        app hands it to an agent in a project, and the list shows how far each one got. The layout
+        follows iOS Reminders, with smart lists on top, projects below, and one row per task with a
+        circle you check off. Colors, type and status marks still follow
+        <a href="design-kit.md">design-kit.md</a>. The v1 screens are in
+        <a href="mockups.html">mockups.html</a>.
+      </p>
+      <div class="legend paper">
+        <span><span class="c"></span>Not started</span>
+        <span><span class="c sched"></span>Scheduled</span>
+        <span><span class="c run"><svg><use href="#spinner" /></svg></span>Running</span>
+        <span><span class="c need">!</span>Needs you</span>
+        <span><span class="c done"></span>Done: the agent finished, waiting for you</span>
+        <span><span class="c checked"><svg class="i"><use href="#check" /></svg></span>Checked off by you</span>
+        <span><span class="c stopped"><svg class="i"><use href="#x" /></svg></span>Stopped: the agent exited before it finished</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- 1. Home -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="topbar">
+            <span class="chip"><span class="dot" style="margin: 0"></span>MacBook Pro<svg class="i"><use href="#chev-d" /></svg></span>
+            <div class="iconbtn boxed"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="search"><svg class="i"><use href="#search" /></svg>Search</div>
+            <div class="smart-grid">
+              <div class="smart">
+                <div class="top"><span class="ic blocked">!</span><span class="n">2</span></div>
+                <div class="l">Needs you</div>
+              </div>
+              <div class="smart">
+                <div class="top"><span class="ic working"><svg class="i"><use href="#activity" /></svg></span><span class="n">3</span></div>
+                <div class="l">Running</div>
+              </div>
+              <div class="smart">
+                <div class="top"><span class="ic done"><svg class="i"><use href="#check" /></svg></span><span class="n">4</span></div>
+                <div class="l">Done</div>
+              </div>
+              <div class="smart">
+                <div class="top"><span class="ic idle"><svg class="i"><use href="#calendar" /></svg></span><span class="n">3</span></div>
+                <div class="l">Scheduled</div>
+              </div>
+            </div>
+
+            <div class="lists-h">Projects</div>
+            <div class="list">
+              <div class="proj">
+                <span class="ic mono">W</span>
+                <div class="pm"><span class="name">website</span><span class="bang">!</span><span class="cnt">6</span><svg class="i chev"><use href="#chev-r" /></svg></div>
+              </div>
+              <div class="proj">
+                <span class="ic mono">C</span>
+                <div class="pm"><span class="name">core</span><svg class="spin"><use href="#spinner" /></svg><span class="cnt">4</span><svg class="i chev"><use href="#chev-r" /></svg></div>
+              </div>
+              <div class="proj">
+                <span class="ic mono">A</span>
+                <div class="pm"><span class="name">api</span><span class="dot"></span><span class="cnt">2</span><svg class="i chev"><use href="#chev-r" /></svg></div>
+              </div>
+              <div class="proj">
+                <span class="ic mono">P</span>
+                <div class="pm"><span class="name">plugins</span><span class="dot"></span><span class="cnt">1</span><svg class="i chev"><use href="#chev-r" /></svg></div>
+              </div>
+            </div>
+          </div>
+          <div class="toolbar">
+            <span class="new"><span class="plus-c"><svg class="i"><use href="#plus" /></svg></span>New task</span>
+            <span class="alt">Add project</span>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>1 · Home</b>
+          Reminders' smart lists become Needs you, Running, Done and Scheduled, counted across every
+          project. Projects are Herdr spaces, each with its folder. A project shows its most urgent
+          task's mark, the rule spaces follow in v1. New task asks which project first, and Add
+          project makes a Herdr space. Settings and paired Macs move into the ⋯ menu, so there is no
+          tab bar.
+        </figcaption>
+      </figure>
+
+      <!-- 2. A project -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>Projects</span>
+            <div class="iconbtn"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="ltitle">website</div>
+            <div class="lsub">~/code/website</div>
+            <div class="checked-bar"><span>2 checked off · <b>Clear</b></span><b>Show</b></div>
+
+            <div class="task">
+              <span class="c need">!</span>
+              <div class="tm">
+                <div class="tt">Move the API pages into one docs section</div>
+                <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code · 1m</div>
+                <div class="q">Do you want to make this edit to nav.md?</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c run"><svg><use href="#spinner" /></svg></span>
+              <div class="tm">
+                <div class="tt">Rewrite the pricing page hero</div>
+                <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code · 4m</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c run"><svg><use href="#spinner" /></svg></span>
+              <div class="tm">
+                <div class="tt">og tags</div>
+                <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code · 2m · <span class="from">from Herdr</span></div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c done"></span>
+              <div class="tm">
+                <div class="tt">Proofread the March blog post</div>
+                <div class="meta"><svg class="p"><use href="#codex" /></svg>Codex · 12m</div>
+                <div class="sum">Fixed six typos and one broken link.</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c"></span>
+              <div class="tm">
+                <div class="tl">
+                  <div>
+                    <div class="tt">Swap the footer to the new logo</div>
+                    <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code</div>
+                  </div>
+                  <span class="pill-start">Start</span>
+                </div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c sched"></span>
+              <div class="tm">
+                <div class="tt">Check every docs link and fix the broken ones</div>
+                <div class="meta">
+                  <svg class="i"><use href="#calendar" /></svg>Tomorrow, 09:00 · <svg class="i"><use href="#repeat" /></svg>Weekdays
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="toolbar">
+            <span class="new"><span class="plus-c"><svg class="i"><use href="#plus" /></svg></span>New task</span>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>2 · A project</b>
+          Tasks keep the order you made them in, as a Reminders list does. The circle is the task's
+          state. Agents started on the Mac show up too, named after their terminal and tagged from
+          Herdr. A task you haven't started has a Start button. Checking a circle moves the task under
+          Show. Checking a running task asks first, and offers to stop its agent.
+        </figcaption>
+      </figure>
+
+      <!-- 3. Adding a task -->
+      <figure>
+        <div class="phone paper">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>Projects</span>
+            <span style="font-weight: 600">Done</span>
+          </div>
+          <div class="scroll">
+            <div class="ltitle">website</div>
+            <div class="task">
+              <span class="c done"></span>
+              <div class="tm">
+                <div class="tt">Proofread the March blog post</div>
+                <div class="meta"><svg class="p"><use href="#codex" /></svg>Codex · 12m</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c"></span>
+              <div class="tm">
+                <div class="tl">
+                  <div>
+                    <div class="tt">Swap the footer to the new logo</div>
+                    <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code</div>
+                  </div>
+                  <span class="pill-start">Start</span>
+                </div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c sched"></span>
+              <div class="tm">
+                <div class="tt">Check every docs link and fix the broken ones</div>
+                <div class="meta">
+                  <svg class="i"><use href="#calendar" /></svg>Tomorrow, 09:00 · <svg class="i"><use href="#repeat" /></svg>Weekdays
+                </div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c"></span>
+              <div class="tm" style="border-bottom: 0">
+                <div class="tt">Compress the hero images under 200 KB<span class="caret"></span></div>
+                <div class="ph-line">Add details for the agent</div>
+              </div>
+            </div>
+          </div>
+          <div class="acc">
+            <span class="chip"><svg class="p"><use href="#claude" /></svg>Claude Code<svg class="i"><use href="#chev-d" /></svg></span>
+            <span class="chip"><svg class="i" style="color: var(--fg)"><use href="#clock" /></svg>Now<svg class="i"><use href="#chev-d" /></svg></span>
+            <span class="chip"><svg class="i" style="color: var(--fg)"><use href="#branch" /></svg>Worktree</span>
+            <span class="grow"></span>
+            <div class="iconbtn"><svg class="i"><use href="#info" /></svg></div>
+          </div>
+          <div class="kb">
+            <div class="r">
+              <span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span>
+            </div>
+            <div class="r">
+              <span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span>
+            </div>
+            <div class="r">
+              <span class="k alt">⇧</span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k alt">⌫</span>
+            </div>
+            <div class="r">
+              <span class="k alt">123</span><span class="k space">space</span><span class="k go">go</span>
+            </div>
+          </div>
+        </div>
+        <figcaption>
+          <b>3 · Adding a task</b>
+          As with New Reminder, you type a line and go starts it. The bar above the keyboard says what
+          go will do: which agent, now or later, and whether it gets its own worktree. ⓘ opens the
+          full details, screen 8. The text becomes the agent's first message, and the line under it
+          adds more for the agent to read.
+        </figcaption>
+      </figure>
+
+      <!-- 4. Needs you -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>Projects</span>
+            <div class="iconbtn"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="ltitle blocked">Needs you</div>
+
+            <div class="grp-h">website</div>
+            <div class="task">
+              <span class="c need">!</span>
+              <div class="tm">
+                <div class="tt">Move the API pages into one docs section</div>
+                <div class="meta"><svg class="p"><use href="#claude" /></svg>Claude Code · 1m</div>
+                <div class="q">Do you want to make this edit to nav.md?</div>
+                <div class="btns">
+                  <span class="btn solid">Yes</span><span class="btn">Yes, don't ask again</span><span class="btn">No</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="grp-h">core</div>
+            <div class="task">
+              <span class="c need">!</span>
+              <div class="tm">
+                <div class="tt">Bump the parser to 0.4 and fix what breaks</div>
+                <div class="meta"><svg class="p"><use href="#codex" /></svg>Codex · 6m</div>
+                <div class="q">Allow command?</div>
+                <div class="ask" style="margin: 6px 0 0; padding: 8px 10px; border-radius: 9px"><div class="file" style="margin: 0">cargo test -p parser</div></div>
+                <div class="btns">
+                  <span class="btn solid">Yes</span><span class="btn">Always this session</span><span class="btn">No</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>4 · Needs you</b>
+          Every blocked task from every project, grouped by project, with its question and answers in
+          the list. A tap sends the same keys as the prompt card does in v1, so you can work through
+          several agents without opening each one. Tapping the row itself opens the task.
+        </figcaption>
+      </figure>
+
+      <!-- 5. A task -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>website</span>
+            <div class="iconbtn"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="tdetail">
+              <h2>Move the API pages into one docs section</h2>
+              <div class="strip">
+                <span class="needs">Needs you · 1m</span>
+                <span class="watch"><svg class="p" style="width: 14px; height: 14px"><use href="#claude" /></svg>Claude Code</span>
+              </div>
+              <div class="ask">
+                <h3 style="margin-top: 0">Do you want to make this edit to nav.md?</h3>
+                <div class="file">docs/nav.md · +3 −1</div>
+                <div class="btns">
+                  <span class="btn solid">Yes</span><span class="btn">Yes, don't ask again</span><span class="btn">No</span>
+                </div>
+              </div>
+              <div class="mini">
+                <div class="pane-h"><svg class="p"><use href="#claude" /></svg><b>Latest output</b><span>~/code/website</span></div>
+                <div class="term"><span class="c-teal">Read</span>  docs/nav.md
+<span class="c-teal">Edit</span>  docs/nav.md
+<span class="c-green">  + - API
+  +   - Authentication
+  +   - Rate limits</span></div>
+                <div class="open"><svg class="i"><use href="#terminal" /></svg>Open terminal</div>
+              </div>
+              <div class="facts">
+                <div class="fact"><span class="k2">Started</span><span class="v">Today, 10:02 on this iPhone</span></div>
+                <div class="fact"><span class="k2">Follow-ups</span><span class="v">1</span><svg class="i chev"><use href="#chev-r" /></svg></div>
+              </div>
+            </div>
+          </div>
+          <div class="composer" style="margin-top: 10px">
+            <div class="ph">Follow up…</div>
+            <div class="send"><svg class="i"><use href="#arrow-up" /></svg></div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>5 · A task</b>
+          Tapping a task opens the task, not the terminal. It shows the state, the prompt card when the
+          agent needs you, the last lines of output and where it runs. Open terminal goes to the v1
+          agent screen. Follow up sends the agent another message, the way a subtask adds a step in
+          Reminders.
+        </figcaption>
+      </figure>
+
+      <!-- 6. Done -->
+      <figure>
+        <div class="phone paper">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>Projects</span>
+            <div class="iconbtn"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="ltitle done">Done</div>
+            <div class="task" style="margin-top: 6px">
+              <span class="c done"></span>
+              <div class="tm">
+                <div class="tt">Proofread the March blog post</div>
+                <div class="meta">website · <svg class="p"><use href="#codex" /></svg>Codex · 12m</div>
+                <div class="sum">Fixed six typos and one broken link.</div>
+              </div>
+            </div>
+            <div class="swiped">
+              <div class="task">
+                <span class="c done"></span>
+                <div class="tm">
+                  <div class="tt" style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Write the readme for the git plugin</div>
+                  <div class="meta">plugins · <svg class="p"><use href="#codex" /></svg>Codex · 4m</div>
+                  <div class="sum" style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Wrote README.md with install and usage.</div>
+                </div>
+              </div>
+              <div class="swipe-acts">
+                <div class="a1"><svg class="i"><use href="#message" /></svg>Follow up</div>
+                <div class="a2"><svg class="i"><use href="#check" /></svg>Check off</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c checked"><svg class="i"><use href="#check" /></svg></span>
+              <div class="tm">
+                <div class="tt dim">Doc comments for the lexer</div>
+                <div class="meta">core · <svg class="p"><use href="#claude" /></svg>Claude Code · 30m</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c done"></span>
+              <div class="tm">
+                <div class="tt">Add rate-limit headers to every response</div>
+                <div class="meta">api · <svg class="p"><use href="#codex" /></svg>Codex · 1h</div>
+                <div class="sum">Added the X-RateLimit headers. Tests pass.</div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="c stopped"><svg class="i"><use href="#x" /></svg></span>
+              <div class="tm">
+                <div class="tt">Migrate the blog to the new theme</div>
+                <div class="meta">website · <svg class="p"><use href="#claude" /></svg>Claude Code · 2h</div>
+                <div class="sum">Exited with code 1 before it finished.</div>
+              </div>
+            </div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>6 · Done</b>
+          Finished agents wait here until you look. The summary line is the agent's last message, when
+          the app can get it. Swipe left to follow up or check off, or tap the circle. A checked task
+          stays a moment, then leaves, as in Reminders. A task whose agent exited early is marked
+          stopped and stays until you check it off.
+        </figcaption>
+      </figure>
+
+      <!-- 7. Scheduled -->
+      <figure>
+        <div class="phone graphite">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="navbar">
+            <span class="back"><svg class="i"><use href="#chev-l" /></svg>Projects</span>
+            <div class="iconbtn"><svg class="i"><use href="#more" /></svg></div>
+          </div>
+          <div class="scroll">
+            <div class="ltitle muted">Scheduled</div>
+
+            <div class="grp-h">Today<span>Sun 15 Nov</span></div>
+            <div class="task">
+              <span class="c sched"></span>
+              <div class="tm">
+                <div class="tt">Run the dependency audit and open a PR for safe bumps</div>
+                <div class="meta">
+                  <svg class="i"><use href="#clock" /></svg>18:00 · <svg class="i"><use href="#repeat" /></svg>Every day · api
+                </div>
+              </div>
+            </div>
+
+            <div class="grp-h">Tomorrow<span>Mon 16 Nov</span></div>
+            <div class="task">
+              <span class="c sched"></span>
+              <div class="tm">
+                <div class="tt">Check every docs link and fix the broken ones</div>
+                <div class="meta">
+                  <svg class="i"><use href="#clock" /></svg>09:00 · <svg class="i"><use href="#repeat" /></svg>Weekdays · website
+                </div>
+              </div>
+            </div>
+
+            <div class="grp-h">Wednesday<span>18 Nov</span></div>
+            <div class="task">
+              <span class="c sched"></span>
+              <div class="tm">
+                <div class="tt">Draft the 0.5 release notes from merged PRs</div>
+                <div class="meta"><svg class="i"><use href="#clock" /></svg>10:00 · core · <svg class="p"><use href="#codex" /></svg>Codex</div>
+              </div>
+            </div>
+
+            <div class="banner" style="margin-top: 22px">
+              <svg class="i" style="width: 17px; height: 17px"><use href="#laptop" /></svg>
+              <span class="grow">The bridge on MacBook Pro starts these, so the Mac needs to be awake.</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <span class="new"><span class="plus-c"><svg class="i"><use href="#plus" /></svg></span>New task</span>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>7 · Scheduled</b>
+          Tasks with a date, grouped by day. A repeating task shows its rule. The bridge starts them on
+          the Mac, so they run with the phone off, but not with the Mac asleep. The phone only edits
+          the schedule.
+        </figcaption>
+      </figure>
+
+      <!-- 8. Details -->
+      <figure>
+        <div class="phone paper" style="background: #000; color: #fff">
+          <div class="island"></div>
+          <div class="statusbar">
+            <span>9:41</span>
+            <span class="sys">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="26" height="12" viewBox="0 0 26 12"><rect x="0.5" y="0.5" width="22" height="11" rx="3.5" fill="none" stroke="currentColor" opacity="0.4" /><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor" /><rect x="24" y="4" width="1.5" height="4" rx="0.75" fill="currentColor" opacity="0.4" /></svg>
+            </span>
+          </div>
+          <div class="sheet-wrap">
+            <div class="under"></div>
+            <div class="sheet" style="color: var(--fg)">
+              <div class="sheet-nav"><span class="l">Cancel</span><b>New task</b><span class="r">Add</span></div>
+              <div class="facts">
+                <div class="entry">Check every docs link and fix the broken ones</div>
+                <div class="entry notes">Open a PR when it's done. Skip external links that time out.</div>
+              </div>
+              <div class="facts">
+                <div class="fact">
+                  <span class="ic mono" style="font-size: 14px">W</span><span class="k2">Project</span><span class="v">website</span><svg class="i chev"><use href="#chev-r" /></svg>
+                </div>
+                <div class="fact">
+                  <span class="ic mono"><svg class="p" style="width: 16px; height: 16px"><use href="#claude" /></svg></span><span class="k2">Agent</span><span class="v">Claude Code</span><svg class="i chev"><use href="#chev-r" /></svg>
+                </div>
+              </div>
+              <div class="facts">
+                <div class="fact">
+                  <span class="ic idle"><svg class="i"><use href="#calendar" /></svg></span>
+                  <span class="k2">Date<span class="sub">Tomorrow</span></span><span class="tog on"></span>
+                </div>
+                <div class="fact">
+                  <span class="ic idle"><svg class="i"><use href="#clock" /></svg></span>
+                  <span class="k2">Time<span class="sub">09:00</span></span><span class="tog on"></span>
+                </div>
+                <div class="fact">
+                  <span class="ic idle"><svg class="i"><use href="#repeat" /></svg></span>
+                  <span class="k2">Repeat</span><span class="v">Weekdays</span><svg class="i chev"><use href="#chev-r" /></svg>
+                </div>
+              </div>
+              <div class="facts">
+                <div class="fact">
+                  <span class="ic mono"><svg class="i"><use href="#branch" /></svg></span>
+                  <span class="k2">New worktree<span class="sub">Works on its own branch</span></span><span class="tog"></span>
+                </div>
+                <div class="fact">
+                  <span class="ic mono"><svg class="i"><use href="#bell" /></svg></span>
+                  <span class="k2">Notify me</span><span class="v">Needs you, Done</span><svg class="i chev"><use href="#chev-r" /></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="home"></div>
+        </div>
+        <figcaption>
+          <b>8 · Details</b>
+          Reminders' Details sheet, from ⓘ or a long press: the task, notes for the agent, project,
+          agent, date, time, repeat, worktree, and which states send a notification. Add saves it.
+          Without a date, the task starts as soon as you add it.
+        </figcaption>
+      </figure>
+    </main>
+
+    <section class="notes-sec">
+      <h2>How Reminders maps</h2>
+      <table>
+        <tr><th>Reminders</th><th>herdr mobile</th><th>Where it comes from</th></tr>
+        <tr><td>Smart lists: Today, Scheduled, All, Flagged, Completed</td><td>Needs you, Running, Done, Scheduled</td><td>Agent status from herdr-core. Scheduled from the bridge</td></tr>
+        <tr><td>My Lists</td><td>Projects</td><td>Herdr spaces and their folders</td></tr>
+        <tr><td>A reminder</td><td>A task: what you hand an agent</td><td>New: a task record on the bridge, linked to the terminal it started</td></tr>
+        <tr><td>The circle</td><td>The task's state. Checking it means you're finished with it</td><td>herdr-core status, plus checked off from the bridge</td></tr>
+        <tr><td>New Reminder</td><td>New task. go starts the agent</td><td>Start, <code>START-1</code> to <code>START-5</code></td></tr>
+        <tr><td>Notes</td><td>More for the agent, sent with the first message</td><td>Start's first message</td></tr>
+        <tr><td>Date, time, repeat</td><td>Run later, or on a schedule</td><td>New: a scheduler in the bridge</td></tr>
+        <tr><td>Subtasks</td><td>Follow-ups</td><td>Messages sent to the agent</td></tr>
+        <tr><td>Flag, tags, location, Assigned to me</td><td>Left out</td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="notes-sec">
+      <h2>Open questions</h2>
+      <ol>
+        <li>Is a project a Herdr space, or any folder? Recommended: a space, which already has a folder, an order and a layout on the Mac.</li>
+        <li>Do agents started on the Mac show up as tasks? Recommended: yes, named after their terminal and tagged <code>from Herdr</code>, so nothing running is hidden.</li>
+        <li>Does go start the agent at once, or add the task as not started? Recommended: start at once. The bar above the keyboard shows what it will start.</li>
+        <li>The task's text is the agent's first message. Today a built-in program only gets a first message while Herdr is open on the Mac (<code>START-4</code>). Passing the text as the program's argument, as in <code>claude "&lt;task&gt;"</code> or <code>codex "&lt;task&gt;"</code>, would remove that limit.</li>
+        <li>Where does Done's summary line come from: the screen text, or Claude Code and Codex hooks? Hooks are more reliable but change your agent configs.</li>
+        <li>Scheduled tasks need a scheduler in the bridge and an awake Mac. In the first version, or later?</li>
+        <li>Plain terminals and shells aren't tasks. Reach them from a project's ⋯ menu, or keep a Terminals tab?</li>
+        <li>Reminders gives each list a color. Recommended: no. Color stays for status, as design-kit.md says.</li>
+      </ol>
+    </section>
+  </body>
+</html>
