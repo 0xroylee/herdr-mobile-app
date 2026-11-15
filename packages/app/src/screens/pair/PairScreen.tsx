@@ -2,6 +2,7 @@ import * as Device from "expo-device";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
+import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import { createBridgeApi } from "../../net/bridge-api.ts";
 import { routes } from "../../routes.ts";
@@ -26,8 +27,8 @@ const textActionClasses = {
 export function PairScreen() {
   const router = useRouter();
   const manager = useConnectionManager();
-  const activeMachineId = machinesStore((state) => state.activeId);
-  const connectionRoute = coreStore((state) =>
+  const activeMachineId = useStore(machinesStore, (state) => state.activeId);
+  const connectionRoute = useStore(coreStore, (state) =>
     activeMachineId === null ? undefined : state.machines[activeMachineId]?.route,
   );
   const controller = useMemo(

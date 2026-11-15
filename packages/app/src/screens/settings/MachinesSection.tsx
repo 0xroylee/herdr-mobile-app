@@ -1,5 +1,6 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import { View } from "react-native";
+import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import { appSecrets, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
@@ -17,8 +18,8 @@ import {
 } from "./settings-actions.ts";
 
 export function MachinesSection() {
-  const machineMap = machinesStore((state) => state.machines);
-  const activeId = machinesStore((state) => state.activeId);
+  const machineMap = useStore(machinesStore, (state) => state.machines);
+  const activeId = useStore(machinesStore, (state) => state.activeId);
   const manager = useConnectionManager();
   const activeIdRef = useRef(activeId);
   const managerRef = useRef(manager);

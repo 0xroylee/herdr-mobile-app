@@ -1,5 +1,6 @@
 import { BRIDGE_PROTOCOL_VERSION, type PairMessage, type PairReply } from "@herdr-mobile/protocol";
 import { type BridgeApi, BridgeApiError } from "../../net/bridge-api.ts";
+import { type Clock, systemClock } from "../../net/connection.ts";
 import { type PairInput, parsePairFragment, parseTypedPairInput } from "../../net/pair-link.ts";
 import type { RouteOpener } from "../../net/route-opener.ts";
 import type { Machine } from "../../store/machines.ts";
@@ -22,6 +23,7 @@ export interface PairingDependencies {
   openRoute: RouteOpener;
   secrets: Secrets;
   machines: typeof machinesStore;
+  clock?: Clock;
   restartConnection?: (machineId: string) => void;
 }
 
@@ -59,7 +61,7 @@ export async function pairAndStore(
 
   if (offer.secure && offer.bridgeKey) {
     try {
-      reply = await pairOverSecureRoute(offer, deps.openRoute, request);
+      reply = await pairOverSecureRoute(offer, deps.openRoute, request, deps.clock ?? systemClock);
       pairedOverSecure = true;
     } catch (error) {
       if (!offer.direct || !canFallBackToDirect(error)) throw error;
@@ -111,6 +113,7 @@ function pairOverSecureRoute(
   offer: PairInput,
   openRoute: RouteOpener,
   request: { code: string; name?: string },
+  clock: Clock,
 ): Promise<PairReply> {
   if (!offer.secure || !offer.bridgeKey) {
     return Promise.reject(new PairingChannelError(undefined, false));
@@ -127,14 +130,14 @@ function pairOverSecureRoute(
     const { socket } = connection;
     let settled = false;
     let codeMayHaveBeenRedeemed = false;
-    const timeout = setTimeout(() => {
+    const timeout = clock.setTimeout(() => {
       finishReject(new PairingChannelError(undefined, codeMayHaveBeenRedeemed));
     }, PAIR_REPLY_TIMEOUT_MS);
 
     const finish = () => {
       if (settled) return false;
       settled = true;
-      clearTimeout(timeout);
+      clock.clearTimeout(timeout);
       socket.onopen = null;
       socket.onmessage = null;
       socket.onclose = null;
@@ -277,11 +280,18 @@ export function pairingErrorMessage(error: unknown, offer?: PairInput): string {
     if (error.status === 4402 || error.code === "bad_pair_code") {
       return "That pairing code is invalid or has expired. Generate a new code on your Mac.";
     }
-    if (error.status === 403) {
-      return "This bridge is unavailable to this device. Check that Tailscale is on.";
-    }
     if (error.status === 400 && error.code === "bad_code") {
       return "That pairing code is invalid or has expired. Generate a new code on your Mac.";
+    }
+    if (
+      offer &&
+      !offer.bridgeKey &&
+      (error.status === 403 || error.status === 404 || error.status >= 500)
+    ) {
+      return "Typing works over Tailscale. Without it, scan the code or paste the full link.";
+    }
+    if (error.status === 403) {
+      return "This bridge is unavailable to this device. Check that Tailscale is on.";
     }
     if (error.status === 400) {
       return "The pairing link or address is invalid. Check the bridge URL and code.";
@@ -302,7 +312,12 @@ export function pairingErrorMessage(error: unknown, offer?: PairInput): string {
 }
 
 export function pairingCanRetry(error: unknown): boolean {
-  if (error instanceof PairingChannelError && error.codeMayHaveBeenRedeemed) return false;
+  if (error instanceof PairingChannelError) {
+    if (error.closeCode === 4402 || error.closeCode === 4003 || error.codeMayHaveBeenRedeemed) {
+      return false;
+    }
+    return true;
+  }
   return (
     error instanceof TypeError ||
     (error instanceof BridgeApiError && (error.status === 403 || error.status >= 500))

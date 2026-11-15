@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { BridgeApiError, type BridgeFetch, createBridgeApi } from "../../net/bridge-api.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
-import type { ConnectionManager } from "../../net/connection.ts";
+import type { Clock, ConnectionManager } from "../../net/connection.ts";
 import type { RouteOpener } from "../../net/route-opener.ts";
 import type { Socket } from "../../net/socket.ts";
 import type { ConnectionState } from "../../store/core.ts";
@@ -274,6 +274,150 @@ describe("pairing flow", () => {
       direct: "https://mac.tailnet.ts.net",
       secure: { url: "https://edge.example.test", key: bridgeKey },
     });
+  });
+
+  test("pairs from a secure-only offer without calling HTTP or inventing a direct route", async () => {
+    const bridgeKey = makeBridgeKey();
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    let httpCalls = 0;
+    const api = createBridgeApi(async () => {
+      httpCalls += 1;
+      throw new Error("secure-only pairing must not call HTTP");
+    });
+    const openRoute: RouteOpener = (route) => {
+      expect(route).toEqual({ kind: "secure", url: "https://edge.example.test", key: bridgeKey });
+      return createPairingConnection((_data, socket) => {
+        queueMicrotask(() => socket.onmessage?.(JSON.stringify(makeSecureOnlyPairReply())));
+      });
+    };
+
+    await pairAndStore(
+      { secure: "https://edge.example.test", bridgeKey, code: "ABCD2345" },
+      { api, openRoute, secrets, machines },
+    );
+
+    expect(httpCalls).toBe(0);
+    expect(machines.getState().machines["mac-1"]?.routes).toEqual({
+      secure: { url: "https://edge.example.test", key: bridgeKey },
+    });
+  });
+
+  test("does not call HTTP or invent a direct route when secure-only pairing fails", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    let httpCalls = 0;
+    const api = createBridgeApi(async () => {
+      httpCalls += 1;
+      throw new Error("secure-only pairing must not call HTTP");
+    });
+    const openRoute: RouteOpener = () => createPairingConnection(() => {}, 1006);
+
+    await expect(
+      pairAndStore(
+        { secure: "https://edge.example.test", bridgeKey: makeBridgeKey(), code: "ABCD2345" },
+        { api, openRoute, secrets, machines },
+      ),
+    ).rejects.toThrow("Secure pairing failed");
+
+    expect(httpCalls).toBe(0);
+    expect(machines.getState().machines).toEqual({});
+  });
+
+  test("times out before sending PairMessage and clears the pairing deadline", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    const clock = new FakeClock();
+    let sendCount = 0;
+    const openRoute: RouteOpener = () =>
+      createPairingConnection(
+        () => {
+          sendCount += 1;
+        },
+        undefined,
+        false,
+      );
+    const pairing = pairAndStore(
+      { secure: "https://edge.example.test", bridgeKey: makeBridgeKey(), code: "ABCD2345" },
+      {
+        api: createBridgeApi(async () => {
+          throw new Error("there is no direct route to fall back to");
+        }),
+        openRoute,
+        secrets,
+        machines,
+        clock,
+      },
+    );
+
+    expect(clock.pendingCount).toBe(1);
+    clock.advance(5_000);
+    await expect(pairing).rejects.toThrow("Secure pairing failed");
+    expect(sendCount).toBe(0);
+    expect(clock.clearCount).toBe(1);
+    expect(clock.pendingCount).toBe(0);
+  });
+
+  test("times out after sending PairMessage without falling back to HTTP", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    const clock = new FakeClock();
+    let httpCalls = 0;
+    let sent!: () => void;
+    const messageSent = new Promise<void>((resolve) => {
+      sent = resolve;
+    });
+    const pairing = pairAndStore(
+      {
+        direct: "https://mac.tailnet.ts.net",
+        secure: "https://edge.example.test",
+        bridgeKey: makeBridgeKey(),
+        code: "ABCD2345",
+      },
+      {
+        api: createBridgeApi(async () => {
+          httpCalls += 1;
+          throw new Error("a redeemed code must not fall back to HTTP");
+        }),
+        openRoute: () => createPairingConnection(() => sent()),
+        secrets,
+        machines,
+        clock,
+      },
+    );
+
+    await messageSent;
+    clock.advance(5_000);
+    await expect(pairing).rejects.toThrow("Secure pairing failed");
+    expect(httpCalls).toBe(0);
+    expect(clock.clearCount).toBe(1);
+    expect(clock.pendingCount).toBe(0);
+  });
+
+  test("clears the pairing deadline when the secure reply arrives", async () => {
+    const secrets = createMemorySecrets();
+    const machines = createMachinesStore(createMemoryStorage(), secrets);
+    const clock = new FakeClock();
+
+    await pairAndStore(
+      { secure: "https://edge.example.test", bridgeKey: makeBridgeKey(), code: "ABCD2345" },
+      {
+        api: createBridgeApi(async () => {
+          throw new Error("secure pairing must not call HTTP");
+        }),
+        openRoute: () =>
+          createPairingConnection((_data, socket) => {
+            queueMicrotask(() => socket.onmessage?.(JSON.stringify(makeSecureOnlyPairReply())));
+          }),
+        secrets,
+        machines,
+        clock,
+      },
+    );
+
+    expect(clock.setCount).toBe(1);
+    expect(clock.clearCount).toBe(1);
+    expect(clock.pendingCount).toBe(0);
   });
 
   test("falls back to the direct route when the secure handshake fails before pairing", async () => {
@@ -618,6 +762,7 @@ const noSecureRoute: RouteOpener = () => {
 function createPairingConnection(
   onSend: (data: string, socket: Socket) => void,
   closeBeforeOpen?: number,
+  autoOpen = true,
 ): ReturnType<RouteOpener> {
   let socket: Socket;
   socket = {
@@ -631,10 +776,12 @@ function createPairingConnection(
     },
     close() {},
   };
-  queueMicrotask(() => {
-    if (closeBeforeOpen === undefined) socket.onopen?.();
-    else socket.onclose?.({ code: closeBeforeOpen });
-  });
+  if (closeBeforeOpen !== undefined || autoOpen) {
+    queueMicrotask(() => {
+      if (closeBeforeOpen === undefined) socket.onopen?.();
+      else socket.onclose?.({ code: closeBeforeOpen });
+    });
+  }
   return { socket, fetch: async () => new Response(null) };
 }
 
@@ -735,6 +882,10 @@ function makePairReply() {
   };
 }
 
+function makeSecureOnlyPairReply() {
+  return { ...makePairReply(), routes: { secure: "https://edge.example.test" } };
+}
+
 function makeBridgeKey(): string {
   return base64Url("x".repeat(32));
 }
@@ -744,4 +895,47 @@ function jsonResponse(value: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+class FakeClock implements Clock {
+  private time = 0;
+  private nextId = 0;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
+  setCount = 0;
+  clearCount = 0;
+
+  get pendingCount(): number {
+    return this.timers.size;
+  }
+
+  now(): number {
+    return this.time;
+  }
+
+  setTimeout(callback: () => void, delayMs: number): unknown {
+    const id = ++this.nextId;
+    this.setCount += 1;
+    this.timers.set(id, { at: this.time + delayMs, callback });
+    return id;
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.clearCount += 1;
+    this.timers.delete(handle as number);
+  }
+
+  advance(milliseconds: number): void {
+    const end = this.time + milliseconds;
+    while (true) {
+      const next = [...this.timers.entries()]
+        .filter(([, timer]) => timer.at <= end)
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!next) break;
+      const [id, timer] = next;
+      this.time = timer.at;
+      this.timers.delete(id);
+      timer.callback();
+    }
+    this.time = end;
+  }
 }

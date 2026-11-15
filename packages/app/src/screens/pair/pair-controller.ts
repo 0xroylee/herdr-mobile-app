@@ -1,5 +1,5 @@
 import type { BridgeApi } from "../../net/bridge-api.ts";
-import type { ConnectionManager } from "../../net/connection.ts";
+import { type Clock, type ConnectionManager, systemClock } from "../../net/connection.ts";
 import type { PairInput } from "../../net/pair-link.ts";
 import { defaultRouteOpener, type RouteOpener } from "../../net/route-opener.ts";
 import type { ConnectionState } from "../../store/core.ts";
@@ -45,6 +45,7 @@ export class PairingController {
   private readonly machines: typeof machinesStore;
   private readonly deviceName: string;
   private readonly openRoute: RouteOpener;
+  private readonly clock: Clock;
 
   constructor(
     api: BridgeApi,
@@ -52,12 +53,14 @@ export class PairingController {
     machines: typeof machinesStore,
     deviceName: string,
     openRoute: RouteOpener = defaultRouteOpener,
+    clock: Clock = systemClock,
   ) {
     this.api = api;
     this.secrets = secrets;
     this.machines = machines;
     this.deviceName = deviceName;
     this.openRoute = openRoute;
+    this.clock = clock;
   }
 
   getSnapshot = (): PairingViewState => this.state;
@@ -139,6 +142,7 @@ export class PairingController {
           openRoute: this.openRoute,
           secrets: this.secrets,
           machines: this.machines,
+          clock: this.clock,
           restartConnection: (machineId) => this.connectionManager?.restartConnection(machineId),
         },
         this.deviceName,
