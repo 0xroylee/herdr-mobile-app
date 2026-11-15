@@ -260,42 +260,77 @@ describe("AgentStarter", () => {
     expect(JSON.stringify(calls)).not.toContain('"line"');
   });
 
-  for (const task of [
-    "--dangerously-skip-permissions",
-    "-p",
-    "update",
-    "login",
-    "Inspect the change",
-  ]) {
-    test(`keeps a built-in first message out of argv when Herdr is open: ${task}`, async () => {
-      const { starter, runner, calls } = setup();
-      runner.lsExitCode = 0;
-      runner.doOutput = '{"address":"t41","space_id":"sp-existing","tab_id":"tb41"}';
+  test("logs task false when the agent starts without first-message text", async () => {
+    const output: string[] = [];
+    const { starter } = setup({ output: (line) => output.push(line) });
 
-      await starter.start(request({ run: { kind: "program", id: "codex" }, task }), control);
+    await starter.start(request(), control);
 
-      const args = JSON.parse(runner.argv[1]?.[3] ?? "{}") as Record<string, unknown>;
-      expect(args.argv).toEqual(["codex"]);
-      expect(args.task).toBe(task);
-      expect(calls).toEqual([]);
+    expect(output).toHaveLength(1);
+    expect(parseAuditLine(output[0])).toMatchObject({ task: false });
+  });
+
+  test("starts Claude Code with its first message while Herdr is closed", async () => {
+    const { starter, runner, calls } = setup();
+    const task = "Inspect the change and explain the risks";
+
+    await starter.start(request({ run: { kind: "program", id: "claude" }, task }), control);
+
+    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
+    expect(calls[0]).toMatchObject({
+      method: "terminal.run",
+      params: { argv: ["claude", "--", task] },
     });
+    expect(JSON.stringify(calls)).not.toContain('"task"');
+    expect(JSON.stringify(calls)).not.toContain('"line"');
+  });
 
-    test(`refuses a built-in first message when Herdr is closed: ${task}`, async () => {
+  test("keeps built-in first messages in Herdr's task field when its window is open", async () => {
+    const { starter, runner, calls } = setup();
+    const task = "Inspect the change and explain the risks";
+    runner.lsExitCode = 0;
+    runner.doOutput = '{"address":"t41","space_id":"sp-existing","tab_id":"tb41"}';
+
+    await starter.start(request({ run: { kind: "program", id: "codex" }, task }), control);
+
+    const args = JSON.parse(runner.argv[1]?.[3] ?? "{}") as Record<string, unknown>;
+    expect(args.argv).toEqual(["codex"]);
+    expect(args.task).toBe(task);
+    expect(calls).toEqual([]);
+  });
+
+  for (const task of ["--dangerously-skip-permissions", "-p", "update", "login"]) {
+    test(`refuses an unsafe built-in first message on the core path: ${task}`, async () => {
       const { starter, runner, calls } = setup();
 
       await expect(
         starter.start(request({ run: { kind: "program", id: "claude" }, task }), control),
       ).rejects.toMatchObject({
         status: 422,
-        code: "run_not_allowed",
-        message:
-          "First messages for claude need Herdr open on your Mac. Open Herdr, or leave the message empty.",
+        code: "task_not_allowed",
+        message: "Write the task as a sentence.",
       });
 
       expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
       expect(calls).toEqual([]);
     });
   }
+
+  test("keeps the closed-window refusal for programs added with --run-program", async () => {
+    const { starter, runner, calls } = setup();
+    await expect(
+      starter.start(
+        request({ run: { kind: "program", id: "aider" }, task: "Inspect this change" }),
+        control,
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      code: "first_message_not_allowed",
+      message: "A first message requires Herdr to be open.",
+    });
+    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
+    expect(calls).toEqual([]);
+  });
 
   test("creates stable-shape ids for a new core space and tab", async () => {
     const { starter, calls } = setup();
@@ -337,43 +372,125 @@ describe("AgentStarter", () => {
     expect(calls).toEqual([]);
   });
 
-  for (const task of ["--dangerously-skip-permissions", "-p", "update", "login", "Review this"]) {
-    test(`keeps a template first message in herdr-core argv: ${task}`, async () => {
+  test("keeps a template first message in herdr-core argv", async () => {
+    const { starter, calls } = setup();
+    const task = "Review this change";
+    await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
+
+    expect(calls[1]).toMatchObject({
+      method: "terminal.run",
+      params: { argv: ["review", task] },
+    });
+  });
+
+  test("keeps a template first message separate from argv when Herdr is open", async () => {
+    const { starter, runner, calls } = setup();
+    const task = "Review this change";
+    runner.lsExitCode = 0;
+    runner.doOutput = '{"address":"t41","space_id":"sp-existing","tab_id":"tb41"}';
+
+    await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
+
+    const args = JSON.parse(runner.argv[1]?.[3] ?? "{}") as Record<string, unknown>;
+    expect(args.argv).toEqual(["review"]);
+    expect(args.task).toBe(task);
+    expect(calls).toEqual([{ method: "templates.list", params: {} }]);
+  });
+
+  test.each(["Inspect", "-p inspect this change"])(
+    "keeps template text unchanged on the core path: %s",
+    async (task) => {
       const { starter, calls } = setup();
+
       await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
 
       expect(calls[1]).toMatchObject({
         method: "terminal.run",
         params: { argv: ["review", task] },
       });
-    });
+    },
+  );
 
-    test(`keeps a template first message separate from argv when Herdr is open: ${task}`, async () => {
-      const { starter, runner, calls } = setup();
+  test.each(["Inspect", "-p inspect this change"])(
+    "keeps template text unchanged on the window path: %s",
+    async (task) => {
+      const { starter, runner } = setup();
       runner.lsExitCode = 0;
-      runner.doOutput = '{"address":"t41","space_id":"sp-existing","tab_id":"tb41"}';
+      runner.doOutput = '{"address":"t41"}';
 
       await starter.start(request({ run: { kind: "template", name: "review" }, task }), control);
 
       const args = JSON.parse(runner.argv[1]?.[3] ?? "{}") as Record<string, unknown>;
-      expect(args.argv).toEqual(["review"]);
-      expect(args.task).toBe(task);
-      expect(calls).toEqual([{ method: "templates.list", params: {} }]);
-    });
-  }
+      expect(args).toMatchObject({ argv: ["review"], task });
+    },
+  );
 
   test("accepts successful herdr-app output that has no address or location ids", async () => {
-    const { starter, runner } = setup();
+    const clock = new ManualClock();
+    const { starter, runner, calls } = setup({
+      clock,
+      coreCall: async (method) => {
+        calls.push({ method, params: {} });
+        if (method === "terminal.list") return { terminals: [] };
+        return { address: "t27" };
+      },
+    });
     runner.lsExitCode = 0;
     runner.doOutput = "Started.\n";
 
-    const reply = await starter.start(request(), control);
+    const pending = starter.start(request(), control);
+    for (let index = 0; index < 50 && !clock.pending().includes(1_000); index += 1) {
+      await settle();
+    }
+    expect(clock.pending()).toEqual([1_000]);
+    await clock.advance(1_000);
+    const reply = await pending;
 
     expect(reply).toEqual({
       placement: "window",
       space: { id: "sp-existing", isNew: false },
       tab: { id: "", isNew: true },
     });
+    expect(calls.filter((call) => call.method === "terminal.list")).toHaveLength(2);
+  });
+
+  test("matches the newest recent live terminal after the second window lookup", async () => {
+    const clock = new ManualClock();
+    let lists = 0;
+    const terminal = {
+      address: "t-matched",
+      argv: ["claude"],
+      cols: 80,
+      created_ms: 500,
+      cwd: "/home/owner/project",
+      labels: { "herdr.space": "sp-existing" },
+      rows: 24,
+      screen: "exact",
+      state: "live",
+    };
+    const { starter, runner } = setup({
+      clock,
+      coreCall: async (method) => {
+        if (method === "terminal.list") {
+          lists += 1;
+          return { terminals: lists === 1 ? [] : [terminal] };
+        }
+        return { address: "t27" };
+      },
+    });
+    runner.lsExitCode = 0;
+    runner.doOutput = "Started.\n";
+
+    const pending = starter.start(request(), control);
+    for (let index = 0; index < 50 && !clock.pending().includes(1_000); index += 1) {
+      await settle();
+    }
+    expect(clock.pending()).toEqual([1_000]);
+    await clock.advance(1_000);
+    const reply = await pending;
+
+    expect(reply.address).toBe("t-matched");
+    expect(lists).toBe(2);
   });
 
   test("uses a template only after a fresh templates.list result", async () => {
@@ -716,6 +833,7 @@ describe("AgentStarter", () => {
       device: { id: "device-9", name: "Phone", role: "control" },
       run: { kind: "template", name: "review" },
       folder: "/home/owner/project",
+      task: true,
       placement: "core",
       address: "t27",
       space: { id: "sp-existing", isNew: false },
@@ -741,6 +859,7 @@ describe("AgentStarter", () => {
       device: { id: "device-9", name: "Phone", role: "control" },
       run: { kind: "program", id: "claude" },
       folder: "/home/owner/project",
+      task: true,
       placement: "window",
       address: "t41",
       space: { id: "sp-existing", isNew: false },

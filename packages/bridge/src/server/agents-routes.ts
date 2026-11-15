@@ -58,6 +58,25 @@ function startError(error: StartAgentError): Response {
   );
 }
 
+function legacyStartError(error: StartAgentError, request: StartAgentRequest): Response {
+  const guardedBuiltin =
+    request.run.kind === "program" && (request.run.id === "claude" || request.run.id === "codex");
+  if (
+    request.run.kind === "program" &&
+    (error.code === "first_message_not_allowed" ||
+      (error.code === "task_not_allowed" && guardedBuiltin))
+  ) {
+    return json(
+      {
+        error: "run_not_allowed",
+        message: `First messages for ${request.run.id} need Herdr open on your Mac. Open Herdr, or leave the message empty.`,
+      },
+      422,
+    );
+  }
+  return startError(error);
+}
+
 /** Handles the agent catalog and start routes for the resolved device caller. */
 export async function handleAgentsRoutes(
   request: Request,
@@ -90,7 +109,7 @@ export async function handleAgentsRoutes(
   try {
     return json(await starter.start(body, caller.device));
   } catch (error) {
-    if (error instanceof StartAgentError) return startError(error);
+    if (error instanceof StartAgentError) return legacyStartError(error, body);
     return json({ error: "internal_error" }, 500);
   }
 }

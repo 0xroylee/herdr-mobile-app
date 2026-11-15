@@ -168,6 +168,22 @@ describe("callCore", () => {
     });
   });
 
+  test.each([
+    ["doc.get", { name: "herdr-mobile.tasks" }, { value: null, version: 0 }],
+    ["doc.set", { name: "herdr-mobile.tasks", version: 0, value: null }, { version: 1 }],
+    ["terminal.list", {}, { terminals: [], machines: [], hidden_finished: 0 }],
+  ] as const)("supports the task core method %s", async (method, params, result) => {
+    const child = new ScriptedChild(() => result);
+    const response = await callCore(
+      { runner: new FakeRunner(child), hcPath: "hc", env: {}, cwd: "/" },
+      method,
+      params,
+    );
+
+    expect(response).toEqual(result);
+    expect(child.request).toMatchObject({ method, params });
+  });
+
   test("preserves a core JSON-RPC error", async () => {
     const child = new ScriptedChild(() => ({
       error: { code: -32000, message: "invalid template", data: { kind: "invalid_template" } },

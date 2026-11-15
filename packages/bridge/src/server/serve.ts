@@ -9,12 +9,15 @@ import {
 import type { Clock } from "../prototype/deadline.ts";
 import { systemClock } from "../prototype/deadline.ts";
 import { bunRunner, type ProcessRunner } from "../prototype/process.ts";
+import type { TaskRoutesContext } from "../tasks/task-routes.ts";
+import { TaskStore } from "../tasks/task-store.ts";
 import { handleAdminApi } from "./admin-routes.ts";
 import { createAdvertisedRoutes } from "./advertised-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import { headerCaller, headerPairingAuthorization } from "./caller.ts";
 import type { BridgeConfig } from "./config.ts";
 import { assertLoopbackHost } from "./config.ts";
+import { callCore } from "./core-call.ts";
 import { DeviceStore, nodeStoreFs } from "./devices.ts";
 import {
   checkIdentity,
@@ -28,7 +31,7 @@ import { type ApiContext, dispatchApi } from "./routes.ts";
 import { type SecureListenerDependencies, startSecureListener } from "./secure-listener.ts";
 import { startSession } from "./session.ts";
 import type { Socket } from "./socket.ts";
-import { AgentStarter } from "./start-agent.ts";
+import { AgentStarter, type CoreCaller } from "./start-agent.ts";
 import { type StaticFs, serveStatic } from "./static.ts";
 import { authenticateFirstRecord } from "./ws-auth.ts";
 
@@ -55,6 +58,7 @@ export interface BridgeHttpContext {
   api: ApiContext;
   appCli: AppCliContext;
   agentStarter?: AgentStarter;
+  taskRoutes?: TaskRoutesContext;
   identity: IdentityConfig;
   whois?: WhoisLookup;
   webDir: string;
@@ -75,6 +79,7 @@ export function createBridgeFetchHandler(context: BridgeHttpContext) {
     api: context.api,
     appCli: context.appCli,
     agentStarter: context.agentStarter,
+    taskRoutes: context.taskRoutes,
   };
   return async (
     request: Request,
@@ -232,6 +237,19 @@ export async function serveBridge(
     herdrAppPath: config.herdrAppPath,
     clock,
   };
+  const coreCaller: CoreCaller = (method, params) =>
+    callCore(
+      {
+        runner,
+        hcPath: config.hcPath,
+        ...(config.session === undefined ? {} : { session: config.session }),
+        env: config.env,
+        cwd: config.cwd,
+        clock,
+      },
+      method,
+      params,
+    );
   const agentStarter = new AgentStarter({
     runner,
     programs: config.programs,
@@ -243,8 +261,15 @@ export async function serveBridge(
     env: config.env,
     cwd: config.cwd,
     clock,
+    coreCall: coreCaller,
     output: dependencies.stdout ?? ((text) => console.log(text)),
   });
+  const taskStore = await TaskStore.open(coreCaller, clock);
+  const taskRoutes: TaskRoutesContext = {
+    starter: agentStarter,
+    store: taskStore,
+    coreCall: coreCaller,
+  };
   const api: ApiContext = {
     devices,
     pairing,
@@ -345,6 +370,7 @@ export async function serveBridge(
       api,
       appCli,
       agentStarter,
+      taskRoutes,
       identity,
       ...(whois === undefined ? {} : { whois }),
       webDir: config.webDir,
@@ -505,7 +531,7 @@ export async function serveBridge(
         machine,
         routes: () => advertisedRoutes.snapshot(),
         bridgeKey,
-        dispatch: { api, appCli, agentStarter },
+        dispatch: { api, appCli, agentStarter, taskRoutes },
         runner,
         env: config.env,
         hc: config.hcPath,

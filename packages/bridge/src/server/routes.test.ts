@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { PairReply } from "@herdr-mobile/protocol";
+import type { PairReply, TaskRecord, TasksDocument } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
+import type { ProcessRunner } from "../prototype/process.ts";
+import type { TaskRoutesContext } from "../tasks/task-routes.ts";
+import type { TaskCoreCaller } from "../tasks/task-store.ts";
+import { TaskStore } from "../tasks/task-store.ts";
+import type { AppCliContext } from "./app-cli.ts";
 import { headerCaller, headerPairingAuthorization } from "./caller.ts";
+import type { CoreMethod } from "./core-call.ts";
 import type { StoreFs } from "./devices.ts";
 import { DeviceStore } from "./devices.ts";
 import { PairingCodes } from "./pairing.ts";
 import type { ApiContext } from "./routes.ts";
-import { handleApi } from "./routes.ts";
+import { dispatchApi, handleApi } from "./routes.ts";
+import { AgentStarter } from "./start-agent.ts";
 
 class MapFs implements StoreFs {
   readonly files = new Map<string, string>();
@@ -240,5 +247,103 @@ describe("handleApi", () => {
       context,
     );
     expect(unknown?.status).toBe(404);
+  });
+});
+
+describe("dispatchApi task routes", () => {
+  test("dispatches control checks and rejects watch checks through the shared dispatcher", async () => {
+    const { devices, context } = await setup();
+    await devices.add({ token: "task-control", role: "control", name: "Phone" });
+    await devices.add({ token: "task-watch", role: "watch", name: "Display" });
+    const id = `tk${"a".repeat(32)}`;
+    let document: TasksDocument = {
+      v: 1,
+      tasks: {
+        [id]: {
+          id,
+          origin: "phone",
+          text: "Review this change",
+          run: { kind: "program", id: "claude" },
+          folder: "/repo",
+          terminal: "t12",
+          createdAt: 1,
+        } satisfies TaskRecord,
+      },
+    };
+    let version = 1;
+    const coreCall: TaskCoreCaller = async (method: CoreMethod, params: unknown) => {
+      if (method === "doc.get") return { value: document, version };
+      if (method === "terminal.list") return { terminals: [] };
+      if (method === "doc.set") {
+        document = structuredClone((params as { value: TasksDocument }).value);
+        version += 1;
+        return { version };
+      }
+      throw new Error(`unexpected method ${method}`);
+    };
+    const store = await TaskStore.open(coreCall);
+    const runner: ProcessRunner = {
+      spawn: () => {
+        throw new Error("start is not used");
+      },
+    };
+    const appCli: AppCliContext = { runner, env: {}, cwd: "/", herdrAppPath: "herdr-app" };
+    const starter = new AgentStarter({
+      runner,
+      programs: ["claude", "codex"],
+      roots: ["/"],
+      home: "/",
+      herdrAppPath: "herdr-app",
+      hcPath: "hc",
+      env: {},
+      cwd: "/",
+      coreCall,
+      statFs: {
+        async realPath(path) {
+          return path;
+        },
+        async stat() {
+          return { isDirectory: () => true };
+        },
+      },
+    });
+    const taskRoutes: TaskRoutesContext = { starter, store, coreCall };
+    const response = await dispatchApi(
+      request("/api/tasks/check", {
+        method: "POST",
+        headers: ownerHeaders({ Authorization: "Bearer task-control" }),
+        body: JSON.stringify({ id, turn: 2 }),
+      }),
+      headerCaller({ ownerLogin: OWNER }, undefined, devices),
+      { api: context, appCli, agentStarter: starter, taskRoutes },
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ id, checkedTurn: 2 });
+    expect(document.tasks[id]?.checkedTurn).toBe(2);
+
+    const confirmed = structuredClone(document);
+    let bodyRead = false;
+    const watchRequest = request("/api/tasks/check", {
+      method: "POST",
+      headers: ownerHeaders({ Authorization: "Bearer task-watch" }),
+      body: JSON.stringify({ id, turn: 3 }),
+    });
+    Object.defineProperty(watchRequest, "text", {
+      value: async () => {
+        bodyRead = true;
+        return JSON.stringify({ id, turn: 3 });
+      },
+    });
+    const watchResponse = await dispatchApi(
+      watchRequest,
+      headerCaller({ ownerLogin: OWNER }, undefined, devices),
+      { api: context, appCli, agentStarter: starter, taskRoutes },
+    );
+
+    expect(watchResponse?.status).toBe(403);
+    expect(await watchResponse?.json()).toEqual({ error: "forbidden" });
+    expect(bodyRead).toBe(false);
+    expect(document).toEqual(confirmed);
   });
 });

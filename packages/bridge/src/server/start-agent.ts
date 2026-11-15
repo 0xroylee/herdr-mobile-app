@@ -8,10 +8,13 @@ import type {
   StartAgentErrorCode,
   StartAgentReply,
   StartAgentRequest,
+  Terminal,
 } from "@herdr-mobile/protocol";
+import { matchTerminal } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import { DeadlineError, systemClock, within } from "../prototype/deadline.ts";
 import type { ProcessRunner } from "../prototype/process.ts";
+import { launchArgv } from "../tasks/launch-argv.ts";
 import { runHerdrApp } from "./app-cli.ts";
 import { type CoreMethod, callCore, HcConnectError } from "./core-call.ts";
 import { AllowedRoots } from "./roots.ts";
@@ -56,10 +59,15 @@ export interface AgentStarterConfig {
 
 export class StartAgentError extends Error {
   readonly status: number;
-  readonly code: StartAgentErrorCode;
+  readonly code: StartAgentErrorCode | "task_not_allowed" | "first_message_not_allowed";
   readonly kind: string | undefined;
 
-  constructor(status: number, code: StartAgentErrorCode, message: string, kind?: string) {
+  constructor(
+    status: number,
+    code: StartAgentErrorCode | "task_not_allowed" | "first_message_not_allowed",
+    message: string,
+    kind?: string,
+  ) {
     super(message);
     this.name = "StartAgentError";
     this.status = status;
@@ -281,24 +289,43 @@ export class AgentStarter {
       throw new StartAgentError(403, "forbidden", "This device is read-only.");
     }
     validateRequest(request);
+    if (request.task === "") request.task = undefined;
     const run = await this.resolveRun(request.run);
     const folder = await this.resolveFolder(request.folder);
+    request.folder = folder;
     const windowOpen = await this.probeWindow();
+
+    if (
+      !windowOpen &&
+      run.kind === "program" &&
+      request.task &&
+      run.name !== "claude" &&
+      run.name !== "codex"
+    ) {
+      throw new StartAgentError(
+        422,
+        "first_message_not_allowed",
+        "A first message requires Herdr to be open.",
+      );
+    }
+
+    const taskArgv =
+      request.task === undefined
+        ? undefined
+        : launchArgv(
+            run.kind === "program"
+              ? { kind: "program", id: run.name }
+              : { kind: "template", name: run.name },
+            request.task,
+          );
 
     let reply: StartAgentReply;
     if (windowOpen) {
       reply = await this.startInWindow(request, run, folder);
     } else {
-      if (run.kind === "program" && request.task) {
-        throw new StartAgentError(
-          422,
-          "run_not_allowed",
-          `First messages for ${run.name} need Herdr open on your Mac. Open Herdr, or leave the message empty.`,
-        );
-      }
-      reply = await this.startInCore(request, run, folder, caller);
+      reply = await this.startInCore(request, run, folder, caller, taskArgv);
     }
-    this.logSuccessfulStart(caller, run, folder, reply);
+    this.logSuccessfulStart(caller, run, folder, reply, request.task !== undefined);
     return reply;
   }
 
@@ -377,6 +404,7 @@ export class AgentStarter {
     run: ResolvedRun,
     folder: string,
     reply: StartAgentReply,
+    hasTask: boolean,
   ): void {
     const record = {
       time: new Date(this.clock.now()).toISOString(),
@@ -386,6 +414,7 @@ export class AgentStarter {
           ? { kind: run.kind, id: run.name }
           : { kind: run.kind, name: run.name },
       folder,
+      task: hasTask,
       placement: reply.placement,
       ...(reply.address === undefined ? {} : { address: reply.address }),
       space: reply.space,
@@ -462,15 +491,50 @@ export class AgentStarter {
 
     const parsed = parseAppOutput(result.stdout);
     const isNewSpace = request.space.kind === "new";
+    const spaceId = request.space.kind === "existing" ? request.space.id : parsed.spaceId;
+    let address = parsed.address;
+    if (address === undefined) {
+      address = await this.matchWindowTerminal(run.name, folder, spaceId);
+    }
     return {
       placement: "window",
-      ...(parsed.address === undefined ? {} : { address: parsed.address }),
+      ...(address === undefined ? {} : { address }),
       space: {
-        id: request.space.kind === "existing" ? request.space.id : (parsed.spaceId ?? ""),
+        id: spaceId ?? "",
         isNew: isNewSpace,
       },
       tab: { id: parsed.tabId ?? "", isNew: true },
     };
+  }
+
+  private async matchWindowTerminal(
+    program: string,
+    folder: string,
+    spaceId: string | undefined,
+  ): Promise<string | undefined> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise<void>((resolveDelay) => {
+          this.clock.setTimeout(resolveDelay, 1_000);
+        });
+      }
+      try {
+        const result = await this.coreCall("terminal.list", {});
+        if (!isRecord(result) || !Array.isArray(result.terminals)) continue;
+        const terminals = result.terminals.filter(
+          isTerminalMatchCandidate,
+        ) as unknown as Terminal[];
+        const match = matchTerminal(
+          terminals,
+          { program, folder, ...(spaceId === undefined ? {} : { spaceId }) },
+          this.clock.now(),
+        );
+        if (match) return match.address;
+      } catch {
+        // A successful window start stays successful when its terminal cannot be matched yet.
+      }
+    }
+    return undefined;
   }
 
   private async startInCore(
@@ -478,12 +542,12 @@ export class AgentStarter {
     run: ResolvedRun,
     folder: string,
     caller: DeviceRecordView,
+    taskArgv: string[] | undefined,
   ): Promise<StartAgentReply> {
     const spaceIsNew = request.space.kind === "new";
     const spaceId = request.space.kind === "new" ? this.idGenerator("sp") : request.space.id;
     const tabId = this.idGenerator("tb");
-    const argv = [run.name];
-    if (run.kind === "template" && request.task) argv.push(request.task);
+    const argv = taskArgv ?? [run.name];
     const params = {
       argv,
       cwd: folder,
@@ -511,4 +575,25 @@ export class AgentStarter {
       throw mapCoreError(error);
     }
   }
+}
+
+function isTerminalMatchCandidate(value: unknown): value is Record<string, unknown> & {
+  address: string;
+  argv: string[];
+  cwd: string;
+  created_ms: number;
+  labels: Record<string, string>;
+  state: string;
+} {
+  return (
+    isRecord(value) &&
+    typeof value.address === "string" &&
+    Array.isArray(value.argv) &&
+    value.argv.every((part) => typeof part === "string") &&
+    typeof value.cwd === "string" &&
+    typeof value.created_ms === "number" &&
+    isRecord(value.labels) &&
+    Object.values(value.labels).every((label) => typeof label === "string") &&
+    typeof value.state === "string"
+  );
 }
