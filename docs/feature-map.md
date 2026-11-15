@@ -203,10 +203,16 @@ No user-visible features are in flight.
 
 ## Planned
 
-| Feature                                                  | Tracking                          | Rows       |
-| -------------------------------------------------------- | --------------------------------- | ---------- |
-| Push notifications for Needs you and Done                | #17, waiting for push credentials | SETTINGS-2 |
-| Pair another Mac from the app, such as a row in Settings | Needs a planning round            | PAIR-5     |
+| Feature                                                  | Tracking                          | Rows             |
+| -------------------------------------------------------- | --------------------------------- | ---------------- |
+| Push notifications for Needs you and Done                | #17, waiting for push credentials | SETTINGS-2       |
+| Pair another Mac from the app, such as a row in Settings | Needs a planning round            | PAIR-5           |
+| Home                                                     | #84, #79                          | New IDs in U22-4 |
+| Project tasks                                            | #84, #79                          | New IDs in U22-4 |
+| New task composer and details sheet                      | #84, #80                          | New IDs in U22-5 |
+| Task detail screen                                       | #84, #81                          | New IDs in U22-6 |
+| Needs you, Running and Done lists                        | #84, #82                          | New IDs in U22-7 |
+| Bridge task records and routes                           | #84, #77                          | New IDs in U22-2 |
 
 ## Known gaps
 

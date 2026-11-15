@@ -606,7 +606,7 @@
           <b>7 · Scheduled</b>
           Tasks with a date, grouped by day. A repeating task shows its rule. The bridge starts them on
           the Mac, so they run with the phone off, but not with the Mac asleep. The phone only edits
-          the schedule.
+          the schedule. Scheduled is for a later version.
         </figcaption>
       </figure>
 
@@ -691,16 +691,16 @@
     </section>
 
     <section class="notes-sec">
-      <h2>Open questions</h2>
+      <h2>Decisions</h2>
       <ol>
-        <li>Is a project a Herdr space, or any folder? Recommended: a space, which already has a folder, an order and a layout on the Mac.</li>
-        <li>Do agents started on the Mac show up as tasks? Recommended: yes, named after their terminal and tagged <code>from Herdr</code>, so nothing running is hidden.</li>
-        <li>Does go start the agent at once, or add the task as not started? Recommended: start at once. The bar above the keyboard shows what it will start.</li>
-        <li>The task's text is the agent's first message. Today a built-in program only gets a first message while Herdr is open on the Mac (<code>START-4</code>). Passing the text as the program's argument, as in <code>claude "&lt;task&gt;"</code> or <code>codex "&lt;task&gt;"</code>, would remove that limit.</li>
-        <li>Where does Done's summary line come from: the screen text, or Claude Code and Codex hooks? Hooks are more reliable but change your agent configs.</li>
-        <li>Scheduled tasks need a scheduler in the bridge and an awake Mac. In the first version, or later?</li>
-        <li>Plain terminals and shells aren't tasks. Reach them from a project's ⋯ menu, or keep a Terminals tab?</li>
-        <li>Reminders gives each list a color. Recommended: no. Color stays for status, as design-kit.md says.</li>
+        <li>Projects are Herdr spaces, with their folders and order from Herdr.</li>
+        <li>Agents started on the Mac appear as tasks tagged <code>from Herdr</code>; idle ones start under Done.</li>
+        <li><code>go</code> starts the agent at once; there is no not-started state or Start pill.</li>
+        <li>The task starts Claude Code or Codex: Herdr's window receives its <code>task</code> field, and core receives <code>[program, "--", task]</code>; one-word and dash-leading program tasks are refused.</li>
+        <li>Done uses the task's status message or terminal screen text for its summary; no hooks or agent configuration changes.</li>
+        <li>Scheduled tasks are for a later version.</li>
+        <li>Plain terminals and shells open from a project's ⋯ menu, under Terminals; there is no Terminals tab.</li>
+        <li>Projects have no colors; color marks task status.</li>
       </ol>
     </section>
   </body>
