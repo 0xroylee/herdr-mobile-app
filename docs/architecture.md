@@ -6,22 +6,28 @@ This page describes the integrated v1 app and bridge. The transport and security
 
 ```mermaid
 flowchart LR
-  subgraph client["Phone or browser on the tailnet"]
+  subgraph client["Phone or browser"]
     app["Expo app"]
     web["Web export in packages/app/dist"]
   end
 
+  edge["Cloudflare edge"]
   subgraph mac["Agent Mac"]
     serve["Tailscale Serve: HTTPS and identity header"]
+    cloudflared["cloudflared"]
     subgraph bridge["herdr-bridge: Bun, 127.0.0.1"]
-      identity["Owner identity check"]
+      direct["Direct listener: 8787"]
+      secure["Secure listener: 8788, GET /ws only"]
+      identity["Tailscale identity and token check"]
+      channel["Noise channel and device token"]
       api["HTTP API"]
+      channelApi["API inside the channel"]
       starter["AgentStarter"]
       roots["AllowedRoots"]
       corecall["callCore"]
       pairing["Pairing codes and device store"]
       static["Web assets and index.html fallback"]
-      ws["WebSocket token check"]
+      ws["Direct WebSocket and token check"]
       session["One hc connect child per app session"]
       gate["Role policy and protocol gate"]
       admin["Private admin.sock"]
@@ -32,7 +38,8 @@ flowchart LR
     herdr["herdr-app CLI and window"]
   end
 
-  app -- "HTTPS and WebSocket" --> serve --> identity
+  app -- "HTTPS and WebSocket" --> serve --> direct --> identity
+  app -- "TLS WebSocket with Noise" --> edge --> cloudflared --> secure --> channel
   identity --> api
   api --> starter
   starter --> roots
@@ -41,24 +48,39 @@ flowchart LR
   api --> pairing
   identity --> static
   identity --> ws --> session --> gate --> hc --> core
+  channel --> session
+  channel --> channelApi --> starter
+  channelApi --> pairing
   static --> web
   api --> herdr
   cli -- "Unix socket" --> admin
   admin --> pairing
 ```
 
-Tailscale Serve forwards tailnet requests to the loopback bridge and supplies `Tailscale-User-Login`. The bridge checks that identity before handling API, static-file or WebSocket requests. Pairing uses the identity header and a one-time code. Other API calls and WebSocket sessions also need a paired device token.
+Tailscale Serve forwards direct-route requests to the loopback bridge and supplies
+`Tailscale-User-Login`. The direct listener checks that identity before handling API, static-file or
+WebSocket requests. Pairing uses the identity header and a one-time code. Other API calls and
+WebSocket sessions also need a paired device token.
 
-The app's web export uses the same hostname and bridge as the native app. The bridge serves files from `--web`; missing paths fall back to `index.html` for app routes. See [bridge setup](bridge.md) for the build, Serve and pairing commands.
+`cloudflared` forwards the secure route to the second loopback listener. That listener trusts no
+headers and accepts only `GET /ws`; all API requests travel inside the Noise channel. The app pins
+the bridge's public key before it sends a token or pairing code. The secure listener returns `404`
+for every other path, including `/api`. The two listeners share pairing, the role policy and the
+herdr-core session code. The secure listener never changes the direct route.
+
+The direct listener serves the app's web export from `--web`; missing paths fall back to `index.html`
+for app routes. The secure listener does not serve the web build. Browser secure-route checks use the
+local Expo development server. See [bridge setup](bridge.md) for the build, Serve and pairing
+commands.
 
 ## Packages
 
-| Package              | Boundary                                                                                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/protocol`  | Pinned `schema/hc.openrpc.json` and wire types shared by the bridge and app. `bun run protocol:check` checks generated types.                                                                             |
-| `packages/hc-client` | Runtime-neutral JSON-RPC, line and frame codecs, attach streams and events. It has no runtime dependencies and imports no Node built-ins.                                                                 |
-| `packages/bridge`    | Bun CLI, loopback HTTP and WebSocket server, Unix admin socket, pairing and device storage, process sessions, gate, `AgentStarter`, `AllowedRoots`, `callCore`, herdr-app actions and static web serving. |
-| `packages/app`       | Expo Router client for iOS, Android and web. Expo CLI and Metro run with Node 24.                                                                                                                         |
+| Package              | Boundary                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`  | Pinned `schema/hc.openrpc.json` and wire types shared by the bridge and app. `bun run protocol:check` checks generated types.                                                                                              |
+| `packages/hc-client` | Runtime-neutral JSON-RPC, line and frame codecs, attach streams and events. It has no runtime dependencies and imports no Node built-ins.                                                                                  |
+| `packages/bridge`    | Bun CLI, direct and secure loopback listeners, Noise channel, Unix admin socket, pairing and device storage, process sessions, gate, `AgentStarter`, `AllowedRoots`, `callCore`, herdr-app actions and static web serving. |
+| `packages/app`       | Expo Router client for iOS, Android and web. Expo CLI and Metro run with Node 24.                                                                                                                                          |
 
 The bridge's `hc connect` child communicates with herdr-core over stdio. The child receives only the configured environment, including an optional `HC_SESSION`. `Gate` checks channel-zero JSON-RPC calls against the paired device's role and forwards allowed core bytes unchanged. Nonzero attachment channels pass through. See [bridge details](bridge.md) for the full policy and API.
 
@@ -84,7 +106,7 @@ The settings store selects `system`, `graphite` or `paper` before the first rout
 3. **Needs-you prompt.** The Claude Code and Codex recognizers read the terminal status and screen snapshot. A recognized prompt adds answer choices. A watch-role device sees the prompt without answer controls. An unrecognized prompt leaves the composer available for direct input.
 4. **Spaces.** `deriveSpaces` combines the `herdr-app` layout document with core terminals. The screen keeps document and tab order, uses fallback labels when the document is missing, and shows connection state by machine. New space and tab actions call the bridge's `/api/app/do` route, which invokes the configured `herdr-app` executable.
 5. **Agents by space.** With `agents.sort` set to `space`, the Agents screen groups the same derived rows by document order and tab order.
-6. **Pairing.** The app reads a `#pair=` fragment, pasted link or typed URL and code. It sends the one-time code to `/api/pair`, saves the returned token through `Secrets`, adds the public machine record and makes it active. `ConnectionManager` then opens the bridge WebSocket. The connection line reports the paired device name and connection state.
+6. **Pairing.** The app reads a v1 or v2 `#pair=` fragment, pasted link or typed URL and code. A v2 offer with a secure URL and key pairs over the Noise channel first. The app sends the one-time code only after it verifies the pinned bridge key, saves the returned token through `Secrets`, adds the routes and makes the Mac active. `ConnectionManager` then races the stored routes. A matching known key in a fresh link updates only the secure route; it does not change the direct route or redeem the code.
 7. **Settings.** Theme and notification preferences persist in the settings store. Notification switches do not send push notifications. The Machines section revokes a device through `/api/devices/self`, then removes local machine data even if the bridge cannot be reached. About shows app and protocol versions and explains web storage.
 8. **Start agent.** The Start screen loads `/api/agents/catalog` and submits `/api/agents/start`. `AgentStarter` checks the request and chooses `herdr-app do` when the window is open or `callCore` and `terminal.run` when it is closed. `AllowedRoots` checks the folder against real paths for home and configured roots. A first message for a built-in requires the window to be open; a template can use herdr-core's first-message path. On success, the app opens the agent when the reply has an address, or Spaces otherwise.
 
@@ -92,6 +114,6 @@ The settings store selects `system`, `graphite` or `paper` before the first rout
 
 Run `bun run build:web` from the repository root to export the app into `packages/app/dist`. `herdr-bridge serve --owner <login> --web packages/app/dist` serves that directory through the same identity-gated handler as the API and WebSocket routes. The handler applies COOP and COEP headers to static responses.
 
-The first simulator, physical-device and browser runs are still pending. The web export checks bundling, and bridge tests use fake filesystems and handlers without opening a port. Use the [smoke checklist](smoke-checklist.md) for the native and browser checks.
+The web export checks bundling, and bridge tests use fake filesystems and handlers without opening a port. Use the [smoke checklist](smoke-checklist.md) for the isolated secure-route, native-device and browser checks.
 
 Push delivery is the remaining product feature. The notification settings only persist preferences. U15 waits for push credentials.
