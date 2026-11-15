@@ -35,8 +35,10 @@ platform, OS version and screen where they occur.
 
   Pass `--herdr-app "$root/herdr-app-stub"` to every scratch bridge command. The stub prevents
   `herdr-app` from inspecting or changing the real Herdr window. Health, devices, pairing,
-  connection and terminal-record checks remain in scope. Start's catalog and Herdr space or tab
-  actions report an error and stay out of the checks.
+  connection and terminal-record checks remain in scope. The stub makes Herdr appear closed: Start's
+  catalog still lists the configured programs, templates and roots with `windowOpen: false`. Only
+  actions that run `herdr-app` fail: starting in the Herdr window and creating a space or tab. Keep
+  the catalog assessment and those actions out of these checks.
 
 - [ ] Build the web app with `bun run build:web`. Confirm that `packages/app/dist/index.html` exists.
 - [ ] Start the bridge with the wrapper as its `hc` executable. Set the bridge's state directory to the same scratch root so its `devices.json` and `admin.sock` are isolated too. The explicit `--session` is required because the bridge does not inherit the shell's `HC_SESSION`.
@@ -230,8 +232,11 @@ actions stay out. The stand-in edges bind to loopback.
 - [ ] From the browser control device, use Start only to create one fixture terminal: choose the
   allowed `sh` program, run it in the scratch core with no first message, and choose a folder under
   `$root/home`. The scratch-only `--run-program sh` and `--run-root "$root/home"` settings allow
-  this `terminal.run` request through `hc-scratch` with the recorded session. The stub makes
-  `herdr-app ls` fail, so do not assess Start's catalog. Do not choose any Herdr space or tab action.
+  this `terminal.run` request through `hc-scratch` with the recorded session. The stub makes Herdr
+  appear closed; Start's catalog still lists the configured programs, templates and roots with
+  `windowOpen: false`. Only actions that run `herdr-app` fail: starting in the Herdr window and
+  creating a space or tab. Keep the catalog assessment outside this fixture check. Do not choose any
+  Herdr space or tab action.
 
   Send `printf 'CONTROL_INPUT_OK\n'` from the control device's terminal input. Confirm that the
   scratch shell prints `CONTROL_INPUT_OK`. Then stage a 1 MiB output fixture in that same terminal:
@@ -251,11 +256,13 @@ actions stay out. The stand-in edges bind to loopback.
   ```
 
   **Needs your separate go-ahead:** open the scratch terminal on the simulator and time from opening
-  it until `ATTACH_REPLAY_COMPLETE` appears; record this as the 1 MiB attach-replay measurement.
-  Confirm the watch device can read the terminal records but cannot send input. If input controls are
-  visible, try sending `printf 'WATCH_INPUT_SHOULD_NOT_ARRIVE\n'`; the shell must not receive it. If
-  controls are absent, record that read-only refusal. Do not test Start's catalog or Herdr space/tab
-  actions.
+  it until the screen first renders; record this as the simulator's terminal first-paint measurement.
+  Confirm `ATTACH_REPLAY_COMPLETE` is visible on the current screen. The 1 MiB attach-replay
+  measurement remains pending: the app omits `history` from attach requests, so it receives the
+  current screen rather than the preceding 1 MiB of output. Confirm the watch device can read the
+  terminal records but cannot send input. If input controls are visible, try sending
+  `printf 'WATCH_INPUT_SHOULD_NOT_ARRIVE\n'`; the shell must not receive it. If controls are absent,
+  record that read-only refusal. Do not test Start's catalog or Herdr space/tab actions.
 - [ ] **Needs your separate go-ahead:** stop the secure stand-in edge with Ctrl+C. Confirm both
   clients show `Reconnecting…`. Start it again with the same command. Confirm both clients reconnect
   through the secure route.
@@ -282,16 +289,30 @@ actions stay out. The stand-in edges bind to loopback.
   bun packages/bridge/scripts/stand-in-edge.ts --serve 9444 --to 8788 --owner smoke@example.com
   ```
 
-  Update the address and create a fresh link for each device. Open each browser link in a fresh tab
-  at `http://localhost:8081/#pair=...`. Paste the simulator link into Pair. Confirm the known-key
-  update shows `Updated the address for <Mac>.` briefly, the direct route and token remain stored,
-  and `admin devices` shows no additional device. A known-key link must not redeem its code. The
-  bridge should still list the same two devices.
+  Update the address. Create only the browser link first.
 
   ```sh
   admin secure url http://127.0.0.1:9444
+  ```
+
+  ```sh
   admin pair --name "Refresh browser address"
+  ```
+
+  Open it in a fresh tab at `http://localhost:8081/#pair=...` and finish the known-key address
+  update before generating the simulator link. Confirm the app briefly shows `Updated the address for
+  <Mac>.`. The bridge keeps one pairing code at a time, and each `admin pair` replaces the previous
+  code.
+
+  ```sh
   admin pair --watch --name "Refresh simulator address"
+  ```
+
+  Paste the simulator link into Pair and finish its known-key address update. A known-key link must
+  not redeem its code. Confirm the direct route and token remain stored for both devices, and that
+  `admin devices` still lists the same two devices with no additional device.
+
+  ```sh
   admin devices
   ```
 
@@ -304,10 +325,20 @@ actions stay out. The stand-in edges bind to loopback.
 
   **Needs your separate go-ahead:** confirm each secure session closes, the app shows the
   identity-changed message and `Pair again`, and reconnect does not accept the old pinned key. Create
-  a new link for each device and pair both again. The new key should work after pairing.
+  a browser link, open it in a fresh tab, and finish pairing it before generating the simulator link.
+  The bridge keeps one pairing code at a time, and each `admin pair` replaces the previous code.
+  The new key should work after pairing.
 
   ```sh
   admin pair --name "Re-pair browser"
+  ```
+
+  Open the browser link in a fresh tab and finish pairing it with the new key.
+
+  **Needs your separate go-ahead:** create the simulator link and finish pairing it in Pair. The
+  browser must have finished re-pairing before you run this command.
+
+  ```sh
   admin pair --watch --name "Re-pair simulator"
   ```
 
