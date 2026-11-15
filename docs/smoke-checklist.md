@@ -50,6 +50,7 @@ platform, OS version and screen where they occur.
     --web packages/app/dist \
     --hc "$root/hc-scratch" \
     --herdr-app "$root/herdr-app-stub" \
+    --run-root "$root/home" \
     --session "$session"
   ```
 
@@ -63,6 +64,57 @@ platform, OS version and screen where they occur.
 
 - [ ] Open the app on the test device and connect to the bridge. Confirm the connection is Connected and the Agents screen is empty before anything runs in this scratch core. If agents already appear, stop the smoke run and do not interact with them. This first check uses the wrapper's fresh session and does not inspect the default core.
 - [ ] Space and tab creation are pending until an isolated `herdr-app` target is verified. The current app actions use the bridge's full environment and have no isolated target. Do not create a space or tab against the user's Herdr window.
+
+## Tasks on an isolated scratch core
+
+Use this section only with the root and session from [Prepare an isolated run](#prepare-an-isolated-run).
+The fake programs must be on the scratch core's `PATH` before that core starts or restarts; the
+bridge's own `PATH` does not control programs spawned inside the core.
+
+- [ ] Create wrappers for Claude Code and Codex. The fake agent prints its argv, reports `working`,
+  then waits at a numbered menu, accepts input, reports `working` and `done`, and exits with the
+  configured code.
+
+  ```sh
+  repo=$PWD
+  mkdir -p "$root/bin"
+  cat > "$root/fake-agent.json" <<'EOF'
+  {"mode":"blocked","delayMs":400,"exitCode":0,"msg":"Scratch task finished","lastLine":"Fake agent finished the task."}
+  EOF
+  for agent in claude codex; do
+    cat > "$root/bin/$agent" <<EOF
+  #!/bin/sh
+  exec env HERDR_FAKE_AGENT_CONFIG="$root/fake-agent.json" bun "$repo/packages/bridge/scripts/fake-agent.ts" "\$@"
+  EOF
+  done
+  chmod 700 "$root/bin/claude" "$root/bin/codex"
+  PATH="$root/bin:$PATH"
+  ```
+
+- [ ] Start or restart only the scratch core with this `PATH`, using the same `HC_SESSION`,
+  `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR` wrapper values from the isolated setup.
+  Keep `--run-root "$root/home"` on the scratch bridge.
+- [ ] With a control token from the test pairing, send `POST /api/tasks` to the direct listener with
+  `text: "Review the scratch task"`, `run: {"kind":"program","id":"claude"}`, `folder:
+  "$root/home"` and a new space. Confirm the reply has both `record` and `start`, and that the
+  `Agent started` line contains `task: true` but no task text.
+- [ ] Through the same scratch session wrapper, call `terminal.list`. Confirm the new terminal has
+  `argv: ["claude", "--", "Review the scratch task"]`, `cwd: "$root/home"`, and the
+  `herdr.space`, `herdr.tab` and `herdr-mobile.origin` labels. Read `herdr-mobile.tasks` with
+  `doc.get`; confirm the record has the matching terminal address.
+- [ ] Try a one-word task and a task beginning with `-`. Each returns 422 `task_not_allowed` with
+  `Write the task as a sentence.`. Confirm neither adds a task record. Try each task route with a
+  watch token; each returns 403. Unknown body keys return 400.
+- [ ] Check the running task with its current turn, then uncheck it. Check a terminal started outside
+  the phone by its address; confirm a `herdr` record appears. Clear a space and confirm only checked
+  tasks whose terminals ended or disappeared are removed.
+- [ ] Stop and restart the scratch bridge and confirm the core document is unchanged. Restart the
+  scratch core only through the wrapper's `server.stop` procedure in [Cleanup](#cleanup), reconnect
+  with the same scratch session, and confirm the document survives. Never run a core stop command
+  outside that scratch wrapper.
+- [ ] Repeat the task calls through a paired secure channel when the secure scratch listener is in
+  use. The secure listener still returns 404 for direct `/api` HTTP requests; task calls travel
+  inside the channel.
 
 ## Your Mac: Herdr window and real agents
 
@@ -86,9 +138,9 @@ Use a control device, keep the bridge log open, and choose folders under home or
   normal bridge log does not show the raw JSON.
 - [ ] Close Herdr. Start Codex without a first message. Confirm that the phone opens its agent screen
   and says `Started in herdr-core. Herdr shows it when it opens.`
-- [ ] With Herdr still closed, try a built-in program with a first message. Confirm that it is
-  refused with `First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the
-  message empty.` and that the message remains in the form.
+- [ ] With Herdr still closed, start Claude Code and Codex with task sentences. Confirm both start
+  in herdr-core with the task as one argv item after `--`. A program added with `--run-program`
+  should still refuse a first message while Herdr is closed.
 - [ ] Open Herdr. Find the Codex terminal in the space and tab named by its `herdr.space` and
   `herdr.tab` labels. Compare those ids with its `Agent started` line.
 - [ ] With Herdr closed, start one template from `~/.config/herdr-core/templates` without a first

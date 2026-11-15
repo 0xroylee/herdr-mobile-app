@@ -6,6 +6,7 @@ import type {
   PairReply,
   PairRequest,
 } from "@herdr-mobile/protocol";
+import { handleTaskRoutes, type TaskRoutesContext } from "../tasks/task-routes.ts";
 import { handleAgentsRoutes } from "./agents-routes.ts";
 import { type AppCliContext, handleAppCli } from "./app-cli.ts";
 import type { ResolveCaller } from "./caller.ts";
@@ -28,6 +29,7 @@ export interface ApiDispatchContext {
   api: ApiContext;
   appCli: AppCliContext;
   agentStarter?: AgentStarter;
+  taskRoutes?: TaskRoutesContext;
 }
 
 function json<T>(value: T, status = 200): Response {
@@ -146,6 +148,10 @@ export async function dispatchApi(
   resolveCaller: ResolveCaller,
   context: ApiDispatchContext,
 ): Promise<Response | undefined> {
+  if (context.taskRoutes) {
+    const tasksResponse = await handleTaskRoutes(request, context.taskRoutes, resolveCaller);
+    if (tasksResponse) return tasksResponse;
+  }
   if (context.agentStarter) {
     const agentsResponse = await handleAgentsRoutes(request, context.agentStarter, resolveCaller);
     if (agentsResponse) return agentsResponse;

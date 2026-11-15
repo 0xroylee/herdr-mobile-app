@@ -93,6 +93,27 @@ describe("channel API multiplexing", () => {
     ]);
   });
 
+  test("carries task routes through the authenticated channel API", async () => {
+    const session = new FakeSession();
+    const paths: string[] = [];
+    const api = createChannelApi(session, DEVICE, async (request) => {
+      paths.push(new URL(request.url).pathname);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    api.receive(
+      requestRecord(4, "/api/tasks/check", "POST", JSON.stringify({ id: "tk1", turn: 1 })),
+    );
+    await settle();
+
+    expect(paths).toEqual(["/api/tasks/check"]);
+    expect(responses(session)).toEqual([
+      { t: "res", id: 4, status: 200, body: JSON.stringify({ ok: true }) },
+    ]);
+  });
+
   test("ignores unknown channel control message types", () => {
     const session = new FakeSession();
     let dispatched = 0;

@@ -146,21 +146,40 @@ When the Herdr window is closed, the bridge uses herdr-core's `terminal.run` thr
 `hc connect` call. It sets `keep: true` and labels the terminal with `herdr.space`, `herdr.tab` and
 `herdr-mobile.origin`. The phone reports `Started in herdr-core. Herdr shows it when it opens.`
 
-Built-in programs, including programs added with `--run-program`, need Herdr open to receive a first
-message. If the window is closed, the bridge refuses that start with HTTP 422 and
+Claude Code and Codex can receive a task while Herdr is closed. The bridge passes a task as one
+argument after `--`, such as `argv: ["claude", "--", "Review this change"]`; it never builds a
+shell `line`. It refuses task text that starts with `-`, has no whitespace, contains NUL or exceeds
+8 KiB, returning 422 `task_not_allowed` with `Write the task as a sentence.` Templates receive the
+task as their second `argv` item. Other programs added with `--run-program` keep the refusal:
 `First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the message empty.`
-Templates use herdr-core's
-template first-message path when they start in core. In this path, `AgentStarter` passes the task as
-the second item in `terminal.run`'s `argv`; scratch verification confirmed that herdr-core delivers
-it as the template's first message. Built-in task text is not added to a program's `argv`.
+
+When Herdr is open, the bridge keeps `argv: [program]` and puts the task in Herdr's typed `task`
+field. After a successful window start without an address, it checks `terminal.list` twice at most,
+with a one-second pause, and matches the newest recent live terminal by program, folder and known
+space id. The task record stays unlinked if no terminal matches.
+
+`POST /api/tasks` starts the agent and writes the record only after the start succeeds. `POST
+/api/tasks/check`, `/api/tasks/uncheck`, `/api/tasks/link` and `/api/tasks/clear` update records; all
+five routes require a control device. Watch devices receive 403. The direct listener and secure
+channel use the same route dispatcher.
+
+The bridge is the only writer of the herdr-core document `herdr-mobile.tasks`. It reads the document
+and version with `doc.get`, then writes with `doc.set`. Writes are serialized, retry a version
+conflict once after re-reading, keep unchecked tasks, drop checked tasks older than 30 days, and keep
+at most 200 recent checked tasks whose terminals ended or disappeared. It prunes further checked
+records as needed to target 768 KiB, then enforces the core's 1 MiB document limit. If the document
+still cannot fit, the route returns `tasks_full` and `Check off and clear old tasks first.` The
+document holds task identity, launch text, placement, space/tab ids, terminal address and shared
+check-off fields. The phone derives task state from that record and its terminal snapshot; the bridge
+adds no event watcher.
 
 In the 2026-11-04 scratch verification, `hc templates --help` named
 `~/.config/herdr-core/templates`. The checked format was a `.md` file with front matter fields
 `description` and `command`, followed by a body. herdr-core did not read `.toml` or `.json` files.
 
 After a successful start, the bridge writes one `Agent started` line with JSON fields for time,
-device id, name and role, run, canonical folder, placement, optional address, space and tab. It does
-not include the first message or device token.
+device id, name and role, run, canonical folder, `task: true|false`, placement, optional address,
+space and tab. It does not include task text or a device token.
 
 ## Launch at login with launchd
 
