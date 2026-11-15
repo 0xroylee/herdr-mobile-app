@@ -181,6 +181,40 @@ describe("runCheckOff", () => {
     ]);
   });
 
+  test("stops a task that is Done when Stop is submitted, then checks its current turn", async () => {
+    let current = snapshot(row("done", { id: identity.taskId, turn: 4 }));
+    let enterStop!: () => void;
+    let releaseStop!: () => void;
+    const stopEntered = new Promise<void>((resolve) => {
+      enterStop = resolve;
+    });
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const calls: unknown[] = [];
+    const operation = runCheckOff(identity, "stop", {
+      current: () => current,
+      actions: {
+        stop: async (address) => {
+          calls.push(["stop", address]);
+          enterStop();
+          await stopGate;
+        },
+        check: async (request) => calls.push(["check", request]),
+      },
+    });
+
+    await stopEntered;
+    current = snapshot(row("done", { address: "terminal-running", id: identity.taskId, turn: 5 }));
+    releaseStop();
+
+    await expect(operation).resolves.toBe("checked");
+    expect(calls).toEqual([
+      ["stop", "terminal-done"],
+      ["check", { id: identity.taskId, turn: 5 }],
+    ]);
+  });
+
   test("checks Done and Stopped without asking or stopping", async () => {
     for (const state of ["done", "stopped"] as const) {
       const calls: unknown[] = [];

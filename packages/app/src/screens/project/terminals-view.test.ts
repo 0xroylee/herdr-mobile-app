@@ -1,8 +1,13 @@
 /// <reference types="bun" />
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { SpaceTabRow } from "../../model/spaces.ts";
-import { terminalsPresentation } from "./terminals-view.ts";
+
+mock.module("@/store/platform.ts", () => ({
+  machinesStore: { getState: () => ({ activeId: null, machines: {} }) },
+}));
+
+const { terminalsPresentation } = await import("./terminals-view.ts");
 
 describe("Terminals screen connection presentation", () => {
   test("keeps the project pills and dims them when a connected machine reconnects", () => {

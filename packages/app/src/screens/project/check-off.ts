@@ -87,7 +87,7 @@ export async function runCheckOff(
   if (choice === "cancel") return "refused";
   if (isActive(current.row) && choice === undefined) return "ask";
 
-  if (choice === "stop" && isActive(current.row)) {
+  if (choice === "stop") {
     if (current.row.address === undefined) return "refused";
     await deps.actions.stop(current.row.address);
 
