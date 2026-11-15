@@ -1,6 +1,7 @@
 # First-run smoke checklist
 
-No simulator, physical device or browser run has been completed for this build. Use this checklist for the first run. Record failures with the platform, OS version and screen where they occur.
+Run the isolated sections before checks that use a real Mac or device. Record failures with the
+platform, OS version and screen where they occur.
 
 ## Prepare an isolated run
 
@@ -23,9 +24,19 @@ No simulator, physical device or browser run has been completed for this build. 
     XDG_CONFIG_HOME="$root/config" \
     hc connect
   EOF
-  chmod 700 "$root/hc-scratch"
+  cat > "$root/herdr-app-stub" <<'EOF'
+  #!/bin/sh
+  printf '%s\n' 'herdr-app is disabled in this scratch run' >&2
+  exit 1
+  EOF
+  chmod 700 "$root/hc-scratch" "$root/herdr-app-stub"
   printf 'Smoke root: %s\nSession: %s\n' "$root" "$session"
   ```
+
+  Pass `--herdr-app "$root/herdr-app-stub"` to every scratch bridge command. The stub prevents
+  `herdr-app` from inspecting or changing the real Herdr window. Health, devices, pairing,
+  connection and terminal-record checks remain in scope. Start's catalog and Herdr space or tab
+  actions report an error and stay out of the checks.
 
 - [ ] Build the web app with `bun run build:web`. Confirm that `packages/app/dist/index.html` exists.
 - [ ] Start the bridge with the wrapper as its `hc` executable. Set the bridge's state directory to the same scratch root so its `devices.json` and `admin.sock` are isolated too. The explicit `--session` is required because the bridge does not inherit the shell's `HC_SESSION`.
@@ -36,6 +47,7 @@ No simulator, physical device or browser run has been completed for this build. 
     --port 8787 \
     --web packages/app/dist \
     --hc "$root/hc-scratch" \
+    --herdr-app "$root/herdr-app-stub" \
     --session "$session"
   ```
 
@@ -142,9 +154,171 @@ Repeat on at least one iOS or Android device. Check device-specific items that t
 
 Space and tab creation remain pending until an isolated `herdr-app` target is verified. Do not run those actions against the user's Herdr window.
 
+## Secure route on an isolated bridge
+
+Repeat the root, session and both wrapper setups in [Prepare an isolated run](#prepare-an-isolated-run)
+with new values. Skip that section's bridge startup, Tailscale Serve and pairing steps. Keep the real
+Herdr window, default core, Tailscale Serve and Cloudflare out of this run. Health, devices, pairing,
+connection and terminal-record checks remain in scope; Start's catalog and Herdr space or tab
+actions stay out. The stand-in edges bind to loopback.
+
+- [ ] Build and serve the app in development mode. Expo's CLI and Metro use Node 24.
+
+  ```sh
+  bun run build:web
+  (cd packages/app && npx expo start --web --port 8081)
+  ```
+
+  **Needs your separate go-ahead:** open the U19-5 app in the iOS simulator for the simulator checks
+  below. Each later task that uses the simulator is marked separately too.
+
+- [ ] Start the scratch bridge with both listeners. The direct URL points at the direct stand-in
+  edge, which adds the required Tailscale identity header. Plain HTTP is allowed here because the
+  advertised URL is loopback.
+
+  ```sh
+  XDG_STATE_HOME="$root/state" bun run bridge serve \
+    --owner smoke@example.com \
+    --port 8790 \
+    --public-url http://127.0.0.1:9450 \
+    --secure-port 8788 \
+    --web packages/app/dist \
+    --run-program sh \
+    --run-root "$root/home" \
+    --hc "$root/hc-scratch" \
+    --session "$session" \
+    --herdr-app "$root/herdr-app-stub"
+  ```
+
+- [ ] In another terminal, start the secure stand-in edge. Its default is `127.0.0.1:9443` to
+  `127.0.0.1:8788` and it forwards `Cf-Connecting-Ip`.
+
+  ```sh
+  bun packages/bridge/scripts/stand-in-edge.ts
+  ```
+
+  Confirm it prints `Stand-in edge listening on 127.0.0.1:9443`.
+
+- [ ] In a second terminal, set `root` to the scratch root and define an admin helper. Set the
+  secure URL before you make any pairing links.
+
+  ```sh
+  root=/tmp/herdr-smoke-REPLACE_WITH_PRINTED_ROOT
+  admin() { XDG_STATE_HOME="$root/state" bun run bridge "$@"; }
+  admin secure url http://127.0.0.1:9443
+  ```
+
+  Confirm both requests return `404`.
+
+  ```sh
+  curl -i http://127.0.0.1:8788/api/health
+  curl -i -H 'Tailscale-User-Login: smoke@example.com' http://127.0.0.1:8788/api/health
+  ```
+
+- [ ] Create a control-device link for the browser while the direct stand-in edge is stopped. The
+  bridge prints a link whose `#pair=` fragment contains both routes and the bridge key. Open a new
+  browser tab at `http://localhost:8081/#pair=...`, using the printed fragment unchanged. A fresh
+  tab matters because changing only the `#` part of the current URL does not reload the app.
+
+  ```sh
+  admin pair --name "Scratch browser"
+  ```
+
+  Confirm the browser pairs and shows `Connected via the secure route`. If the Pair screen dismisses
+  to Agents before you can read its route line, record that behavior and continue. The line is only
+  visible briefly.
+- [ ] From the browser control device, use Start only to create one fixture terminal: choose the
+  allowed `sh` program, run it in the scratch core with no first message, and choose a folder under
+  `$root/home`. The scratch-only `--run-program sh` and `--run-root "$root/home"` settings allow
+  this `terminal.run` request through `hc-scratch` with the recorded session. The stub makes
+  `herdr-app ls` fail, so do not assess Start's catalog. Do not choose any Herdr space or tab action.
+
+  Send `printf 'CONTROL_INPUT_OK\n'` from the control device's terminal input. Confirm that the
+  scratch shell prints `CONTROL_INPUT_OK`. Then stage a 1 MiB output fixture in that same terminal:
+
+  ```sh
+  yes x | head -c 1048576
+  printf '\nATTACH_REPLAY_COMPLETE\n'
+  ```
+
+- [ ] **Needs your separate go-ahead:** create a watch-device link for the iOS simulator. Before
+  submitting the full link in Pair, start a timer; stop it when the app first shows
+  `Connected via the secure route` and record the elapsed time as the simulator's secure pairing
+  handshake measurement. Do not reuse the browser's one-time code.
+
+  ```sh
+  admin pair --watch --name "Scratch simulator"
+  ```
+
+  **Needs your separate go-ahead:** open the scratch terminal on the simulator and time from opening
+  it until `ATTACH_REPLAY_COMPLETE` appears; record this as the 1 MiB attach-replay measurement.
+  Confirm the watch device can read the terminal records but cannot send input. If input controls are
+  visible, try sending `printf 'WATCH_INPUT_SHOULD_NOT_ARRIVE\n'`; the shell must not receive it. If
+  controls are absent, record that read-only refusal. Do not test Start's catalog or Herdr space/tab
+  actions.
+- [ ] **Needs your separate go-ahead:** stop the secure stand-in edge with Ctrl+C. Confirm both
+  clients show `Reconnecting…`. Start it again with the same command. Confirm both clients reconnect
+  through the secure route.
+- [ ] **Needs your separate go-ahead:** start the direct stand-in edge in another terminal and force
+  the simulator to reconnect. The
+  stand-in adds `Tailscale-User-Login` and forwards to the direct listener.
+
+  ```sh
+  bun packages/bridge/scripts/stand-in-edge.ts --serve 9450 --to 8790 --owner smoke@example.com
+  ```
+
+  Confirm it prints `Stand-in edge listening on 127.0.0.1:9450`.
+
+  **Needs your separate go-ahead:** stop the secure edge with Ctrl+C. Background and foreground the
+  simulator app to reconnect. Confirm the simulator stays connected over the direct route. Restart
+  the secure edge, stop the direct stand-in edge, and background and foreground the app again. Confirm
+  the secure route reconnects.
+- [ ] **Needs your separate go-ahead:** refresh the advertised secure address without changing the
+  bridge key. Stop the default edge,
+  then start a second local forwarder on `9444`. The secure listener ignores its added Tailscale
+  header; the channel still authenticates the bridge key.
+
+  ```sh
+  bun packages/bridge/scripts/stand-in-edge.ts --serve 9444 --to 8788 --owner smoke@example.com
+  ```
+
+  Update the address and create a fresh link for each device. Open each browser link in a fresh tab
+  at `http://localhost:8081/#pair=...`. Paste the simulator link into Pair. Confirm the known-key
+  update shows `Updated the address for <Mac>.` briefly, the direct route and token remain stored,
+  and `admin devices` shows no additional device. A known-key link must not redeem its code. The
+  bridge should still list the same two devices.
+
+  ```sh
+  admin secure url http://127.0.0.1:9444
+  admin pair --name "Refresh browser address"
+  admin pair --watch --name "Refresh simulator address"
+  admin devices
+  ```
+
+- [ ] **Needs your separate go-ahead:** confirm that the direct stand-in edge is stopped so neither
+  device has a working direct route. Rotate the scratch bridge identity.
+
+  ```sh
+  admin identity rotate
+  ```
+
+  **Needs your separate go-ahead:** confirm each secure session closes, the app shows the
+  identity-changed message and `Pair again`, and reconnect does not accept the old pinned key. Create
+  a new link for each device and pair both again. The new key should work after pairing.
+
+  ```sh
+  admin pair --name "Re-pair browser"
+  admin pair --watch --name "Re-pair simulator"
+  ```
+
+Use only this scratch bridge and its scratch state for every check. Never point it at the user's
+normal `herdr-core` session.
+
 ## Cleanup
 
-- [ ] Stop the bridge with Ctrl+C in its terminal. If the scratch core is still running, use only the wrapper and the recorded scratch root and session. This follows [prototype.md's kept-core procedure](prototype.md#stopping-a-kept-scratch-core-by-hand).
+- [ ] Stop only the Expo server, stand-in edges and bridge started for this checklist, using Ctrl+C
+  in their terminals. If the scratch core is still running, use only the wrapper and the recorded
+  scratch root and session. This follows [prototype.md's kept-core procedure](prototype.md#stopping-a-kept-scratch-core-by-hand).
 
   ```sh
   root=/tmp/herdr-smoke-XXXXXX

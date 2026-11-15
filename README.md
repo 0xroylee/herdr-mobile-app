@@ -1,22 +1,25 @@
 # herdr mobile
 
-A phone and web client for herdr-core agents. The app connects to a bridge on the agent's Mac through Tailscale.
+A phone and web client for herdr-core agents. The app connects to a bridge on the agent's Mac
+through Tailscale or a Noise-protected secure route. The phone can use its proxy app with Tailscale
+off on the secure route.
 
 ## Packages
 
-| Package              | Purpose                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `packages/protocol`  | Pinned herdr-core schema and shared wire types.                                             |
-| `packages/hc-client` | JSON-RPC, framed streams, attachments and events for Bun and the app.                       |
-| `packages/bridge`    | Bun service for pairing, device access, herdr-core sessions, app actions and the web build. |
-| `packages/app`       | Expo app for iOS, Android and web.                                                          |
+| Package              | Purpose                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `packages/protocol`  | Pinned herdr-core schema and shared wire types.                                                                          |
+| `packages/hc-client` | JSON-RPC, framed streams, attachments and events for Bun and the app.                                                    |
+| `packages/bridge`    | Bun service for direct and secure listeners, pairing, device access, herdr-core sessions, app actions and the web build. |
+| `packages/app`       | Expo app for iOS, Android and web.                                                                                       |
 
 ## Requirements
 
 - Bun 1.4 or newer for workspace commands, tests and the bridge.
 - Node 24 or newer for Expo's CLI and Metro.
 - `herdr-app` with herdr-core on the agent Mac.
-- Tailscale on the Mac and phone. Enable MagicDNS and HTTPS certificates. Keep the devices on the same tailnet.
+- Tailscale on the Mac for the direct route. Enable MagicDNS and HTTPS certificates.
+- For a phone without Tailscale, follow [Set up the secure route](docs/secure-route.md). A Quick Tunnel needs `cloudflared` on the Mac.
 
 ## Build and check
 
@@ -50,7 +53,10 @@ bun run bridge serve \
 tailscale serve --bg --https=443 http://127.0.0.1:8787
 ```
 
-The bridge listens on `127.0.0.1`. Tailscale Serve provides the HTTPS address and identity header. Never expose the bridge with Tailscale Funnel.
+The bridge listens on `127.0.0.1`. Tailscale Serve provides the direct route's HTTPS address and
+identity header. When enabled with `--secure-port`, the secure listener stays on loopback and
+accepts only `/ws`; the channel protects app traffic behind Cloudflare Tunnel. Never expose the
+bridge with Tailscale Funnel.
 
 In another terminal, create a pairing link and QR code:
 
@@ -58,11 +64,14 @@ In another terminal, create a pairing link and QR code:
 bun run bridge pair --name "My phone"
 ```
 
-Scan the QR code in the app or enter the link and code on the Pair screen. The bridge guide covers launchd, watch-only devices and revoking a device in [docs/bridge.md](docs/bridge.md).
+Scan the QR code in the app or enter the link and code on the Pair screen. For a phone with
+Tailscale off, set up the Quick Tunnel and phone proxy rule in [docs/secure-route.md](docs/secure-route.md).
+The bridge guide covers launchd, watch-only devices and revoking a device in [docs/bridge.md](docs/bridge.md).
 
 ## First-run status
 
-This build has not run in a simulator, on a device or in a browser. Use an isolated scratch herdr-core session for the first run. The [smoke checklist](docs/smoke-checklist.md) lists the checks and expected results.
+Use an isolated scratch herdr-core session for the first run. The [smoke checklist](docs/smoke-checklist.md)
+lists the checks and expected results, including the secure route on a browser and simulator.
 
 Push notifications are not built. Settings currently save notification preferences only. U15 is waiting for push credentials.
 

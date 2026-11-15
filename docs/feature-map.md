@@ -195,12 +195,11 @@ The user runs these on the Mac. From a checkout, `bun run bridge <command>` runs
 | BRIDGE-10 | Runs `herdr-bridge secure url` with an origin, `--from-cloudflared [host:port]` or `--clear` | Sets or clears the in-memory secure route advertised by the bridge. The cloudflared option reads the local Quick Tunnel metrics endpoint. Plain HTTP origins are accepted only for loopback or private-network hosts.                                                                                                                                                                                                                                         | `server/cli.ts`, `server/admin-routes.ts`, `server/advertised-routes.ts`, `packages/protocol/src/pair-offer.ts` |
 | BRIDGE-11 | Runs `herdr-bridge identity` or `herdr-bridge identity rotate`                               | Prints the bridge's public identity key, or creates a new identity and says secure-only devices must pair again. The secret key stays in the private bridge state directory.                                                                                                                                                                                                                                                                                  | `server/cli.ts`, `server/admin-routes.ts`, `server/identity-key.ts`                                             |
 | BRIDGE-12 | Runs `herdr-bridge pair`                                                                     | Prints a v2 pair link and QR code carrying the direct route, the secure route when set, and the bridge's public key. The secure route is the link's base when present.                                                                                                                                                                                                                                                                                        | `server/cli.ts`, `server/routes.ts`, `packages/protocol/src/pair-offer.ts`                                      |
+| BRIDGE-13 | Runs `herdr-bridge serve` with `--secure-port <port>`                                        | Starts a second listener on `127.0.0.1`. It accepts only `GET /ws`, authenticates the bridge with the pinned Noise key, and carries API calls inside the channel. It trusts no headers and returns `404` for `/api` and every other path.                                                                                                                                                                                                                     | `server/cli.ts`, `server/serve.ts`, `server/secure-listener.ts`, `server/channel-api.ts`                        |
 
 ## In flight
 
-| Feature                                                             | Tracking | Rows                                   |
-| ------------------------------------------------------------------- | -------- | -------------------------------------- |
-| Reach the bridge without Tailscale on the phone over a secure route | #61      | CONN-3, CONN-4, CONN-6, CONN-7, PAIR-5 |
+No user-visible features are in flight.
 
 ## Planned
 
@@ -219,6 +218,7 @@ These are on `main` today.
 - The Spaces header's `New space` action remains available while the Mac is offline or unauthorized. The expanded-space `+` pill still opens Start for a control device, but Start and `Empty tab` are disabled until the bridge reconnects. `SPACES-4`, `SPACES-5`, `START-7`.
 - Prompt recognition knows Claude Code and Codex only. Other agents get the composer. `TERM-8`.
 - The Pair snippet copies `herdr-bridge pair`, which works only if the bridge's bin is on `PATH`. From a checkout the command is `bun run bridge pair`. `PAIR-1`.
+- After a fresh link updates a known Mac's secure route, the Pair screen returns to Agents immediately. The route line and `Updated the address for <Mac>.` message are visible only briefly. `PAIR-8`.
 - Nobody has run the app on Android yet.
 
 ## Change log
@@ -227,6 +227,7 @@ Newest first. One line per user-visible change, with the PR or commit and the ro
 
 - 2026-11-13, #62. Pairing links use the secure channel first, known keys refresh only the secure address, connection status names its route and uses route-aware recovery copy, and Settings lists each route. `PAIR-1`, `PAIR-3` to `PAIR-8`, `CONN-4`, `CONN-6`, `CONN-7`, `SETTINGS-5`.
 - 2026-11-13, #51. Space launches carry the Herdr target id, preserving Start's preselection across layout and catalog arrival; rows without a tab target no longer show the `+` pill. `SPACES-5`, `START-1`, `START-6`.
+- 2026-11-12, `c87dd32`, `5a12c1b`. The bridge adds a separate secure listener for Noise sessions, handles the channel API, closes secure sessions on identity rotation and device revocation. `BRIDGE-13`.
 - 2026-11-12, #59. Status now shows the bridge public key and secure listener details. Pair links carry both advertised routes and the public key. The bridge can set or clear the secure URL, read a Quick Tunnel URL from cloudflared metrics, and rotate its identity. `BRIDGE-4`, `BRIDGE-10`, `BRIDGE-11`, `BRIDGE-12`.
 - 2026-11-12, #61. The app stores direct and secure routes, races them for its core connection, carries API calls over the authenticated secure channel, and stops retrying when the pinned identity changes. The visible “Connected via” line comes with U19-5. `CONN-3`, `CONN-6`, `CONN-7`, `SETTINGS-3`, `SPACES-5`, `START-1`.
 - 2026-11-07, #53. iOS modal sheets no longer add a second top inset, and the Start, folder-entry and manual-pair controls stay visible when the keyboard opens. `START-1`, `START-3`, `START-4`, `PAIR-3`.
