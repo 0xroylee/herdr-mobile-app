@@ -1,11 +1,15 @@
 /// <reference types="bun" />
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { ConnectionState } from "@/store/core.ts";
-import {
-  connectionPresentation,
-  type SpacesConnectionPresentation,
-} from "./connectionPresentation.ts";
+
+mock.module("@/store/platform.ts", () => ({
+  machinesStore: { getState: () => ({ activeId: null, machines: {} }) },
+}));
+
+const { connectionPresentation } = await import("./connectionPresentation.ts");
+type SpacesConnectionPresentation =
+  import("./connectionPresentation.ts").SpacesConnectionPresentation;
 
 const expected: Record<ConnectionState, SpacesConnectionPresentation> = {
   connected: { dimmed: false, banner: undefined },
@@ -37,7 +41,7 @@ const expected: Record<ConnectionState, SpacesConnectionPresentation> = {
     dimmed: true,
     banner: {
       kind: "unauthorized",
-      message: "This Mac's bridge identity changed. Pair again.",
+      message: "This Mac's bridge identity changed.",
       action: "pair",
     },
   },
@@ -65,6 +69,14 @@ describe("connectionPresentation", () => {
       kind: "reconnecting",
       message: "Connecting to Mac…",
       action: "none",
+    });
+  });
+
+  test("uses the secure-route offline copy when that route is available", () => {
+    expect(connectionPresentation("offline", "MacBook Pro", true).banner).toEqual({
+      kind: "offline",
+      message: "Can't reach your Mac. Check it's awake and online.",
+      action: "retry",
     });
   });
 });

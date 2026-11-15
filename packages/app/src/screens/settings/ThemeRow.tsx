@@ -1,4 +1,5 @@
 import { Pressable, View } from "react-native";
+import { useStore } from "zustand";
 import { settingsStore } from "../../store/platform.ts";
 import type { ThemeChoice } from "../../store/settings.ts";
 import { HAIRLINE } from "../../ui/components/classes.ts";
@@ -19,7 +20,7 @@ const optionClasses = {
 } as const;
 
 export function ThemeRow() {
-  const theme = settingsStore((state) => state.ui.theme);
+  const theme = useStore(settingsStore, (state) => state.ui.theme);
 
   const selectTheme = (value: ThemeChoice) => {
     settingsStore.getState().setTheme(value);

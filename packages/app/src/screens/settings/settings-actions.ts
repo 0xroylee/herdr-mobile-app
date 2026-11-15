@@ -105,3 +105,23 @@ export function machineHostName(machine: Machine): string {
     return machine.name;
   }
 }
+
+/** Label each configured way to reach this Mac with the route's host. */
+export function machineRouteLines(machine: Machine): string[] {
+  const lines: string[] = [];
+  if (machine.routes.direct) {
+    lines.push(`Tailscale: ${routeHost(machine.routes.direct)}`);
+  }
+  if (machine.routes.secure) {
+    lines.push(`Secure route: ${routeHost(machine.routes.secure.url)}`);
+  }
+  return lines;
+}
+
+function routeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}

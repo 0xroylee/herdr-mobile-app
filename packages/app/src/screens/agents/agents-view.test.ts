@@ -1,5 +1,5 @@
 /// <reference types="bun" />
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { Layout, Terminal } from "@herdr-mobile/protocol";
 import { deriveAgents } from "../../model/agents.ts";
 import { createCoreStore } from "../../store/core.ts";
@@ -7,7 +7,12 @@ import { createMachinesStore, type Machine } from "../../store/machines.ts";
 import { createMemorySecrets, createMemoryStorage } from "../../store/memory.ts";
 import { createSeenStore } from "../../store/seen.ts";
 import { createSettingsStore } from "../../store/settings.ts";
-import {
+
+mock.module("../../store/platform.ts", () => ({
+  machinesStore: { getState: () => ({ activeId: null, machines: {} }) },
+}));
+
+const {
   agentSearchFilter,
   blockedQuestionCallout,
   connectionPresentation,
@@ -18,7 +23,7 @@ import {
   selectActiveAgentMachine,
   startAgentAgeRefresh,
   toggleAgentSort,
-} from "./agents-view.ts";
+} = await import("./agents-view.ts");
 
 const agent = {
   title: "pricing page",
@@ -283,7 +288,7 @@ describe("Agents screen decisions", () => {
       if (state === "identity_changed") {
         expect(cold.banner).toEqual({
           kind: "unauthorized",
-          message: "This Mac's bridge identity changed. Pair again.",
+          message: "This Mac's bridge identity changed.",
           action: "pair",
         });
         expect(cached.banner).toEqual(cold.banner);
@@ -298,6 +303,14 @@ describe("Agents screen decisions", () => {
       expect(cached.banner).toEqual(cold.banner);
     });
   }
+
+  test("uses the secure-route recovery copy when that route is available", () => {
+    expect(connectionPresentation("offline", true, "MacBook Pro", true).banner).toEqual({
+      kind: "offline",
+      message: "Can't reach your Mac. Check it's awake and online.",
+      action: "retry",
+    });
+  });
 });
 
 function machine(id: string, name: string): Machine {

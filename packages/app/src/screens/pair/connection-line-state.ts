@@ -10,14 +10,21 @@ export function connectionLineState(
   state: ConnectionState | undefined,
   machineName: string,
   deviceName: string,
+  route?: "direct" | "secure",
 ): ConnectionLineState {
   switch (state) {
-    case "connected":
+    case "connected": {
       return {
-        message: `Connected as ${deviceName}`,
+        message:
+          route === "secure"
+            ? "Connected via the secure route"
+            : route === "direct"
+              ? "Connected via Tailscale"
+              : `Connected as ${deviceName}`,
         tone: "done",
         indicator: "done",
       };
+    }
     case "unauthorized":
       return {
         message: "Pairing must be repeated for this device.",

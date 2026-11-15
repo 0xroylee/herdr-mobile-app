@@ -1,5 +1,6 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import { View } from "react-native";
+import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import { appSecrets, machinesStore } from "../../store/platform.ts";
 import { Banner } from "../../ui/components/Banner.tsx";
@@ -10,11 +11,15 @@ import { HAIRLINE } from "../../ui/components/classes.ts";
 import { ListGroup } from "../../ui/components/ListGroup.tsx";
 import { Tag } from "../../ui/components/Tag.tsx";
 import { Text } from "../../ui/text.tsx";
-import { createMachineRemovalController, machineHostName } from "./settings-actions.ts";
+import {
+  createMachineRemovalController,
+  machineHostName,
+  machineRouteLines,
+} from "./settings-actions.ts";
 
 export function MachinesSection() {
-  const machineMap = machinesStore((state) => state.machines);
-  const activeId = machinesStore((state) => state.activeId);
+  const machineMap = useStore(machinesStore, (state) => state.machines);
+  const activeId = useStore(machinesStore, (state) => state.activeId);
   const manager = useConnectionManager();
   const activeIdRef = useRef(activeId);
   const managerRef = useRef(manager);
@@ -46,29 +51,40 @@ export function MachinesSection() {
         </View>
       ) : (
         <ListGroup>
-          {machines.map((machine) => (
-            <View
-              className="min-h-[58px] flex-row items-center gap-3 px-3.5 py-2.5"
-              key={machine.id}
-            >
-              <View className="min-w-0 flex-1 gap-0.5">
-                <Text numberOfLines={1} variant="headline">
-                  {machine.name}
-                </Text>
-                <Text numberOfLines={1} variant="subhead">
-                  {machineHostName(machine)}
-                </Text>
-              </View>
-              <Tag label={machine.role} />
-              <Button
-                disabled={state.confirming || state.removingId !== undefined}
-                onPress={() => void controller.remove(machine)}
-                variant="danger"
+          {machines.map((machine) => {
+            const routeLines = machineRouteLines(machine);
+            return (
+              <View
+                className="min-h-[58px] flex-row items-center gap-3 px-3.5 py-2.5"
+                key={machine.id}
               >
-                {state.removingId === machine.id ? "Removing…" : "Remove"}
-              </Button>
-            </View>
-          ))}
+                <View className="min-w-0 flex-1 gap-0.5">
+                  <Text numberOfLines={1} variant="headline">
+                    {machine.name}
+                  </Text>
+                  {routeLines.length > 0 ? (
+                    routeLines.map((line) => (
+                      <Text key={line} numberOfLines={1} variant="subhead">
+                        {line}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text numberOfLines={1} variant="subhead">
+                      {machineHostName(machine)}
+                    </Text>
+                  )}
+                </View>
+                <Tag label={machine.role} />
+                <Button
+                  disabled={state.confirming || state.removingId !== undefined}
+                  onPress={() => void controller.remove(machine)}
+                  variant="danger"
+                >
+                  {state.removingId === machine.id ? "Removing…" : "Remove"}
+                </Button>
+              </View>
+            );
+          })}
         </ListGroup>
       )}
     </View>

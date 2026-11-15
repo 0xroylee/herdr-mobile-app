@@ -1,11 +1,12 @@
 import { Pressable, View } from "react-native";
+import { useStore } from "zustand";
 import { settingsStore } from "../../store/platform.ts";
 import { ListGroup } from "../../ui/components/ListGroup.tsx";
 import { Text } from "../../ui/text.tsx";
 
 export function NotificationsRows() {
-  const blocked = settingsStore((state) => state.notify.blocked);
-  const done = settingsStore((state) => state.notify.done);
+  const blocked = useStore(settingsStore, (state) => state.notify.blocked);
+  const done = useStore(settingsStore, (state) => state.notify.done);
 
   return (
     <ListGroup>

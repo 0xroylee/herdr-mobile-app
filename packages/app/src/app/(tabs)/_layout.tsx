@@ -2,6 +2,7 @@ import { Redirect, Tabs } from "expo-router";
 import { StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable } from "uniwind";
+import { useStore } from "zustand";
 import { Icon } from "@/ui/icon.tsx";
 import { calculateTabBarLayout } from "@/ui/tab-bar-layout.ts";
 import { routes } from "../../routes.ts";
@@ -9,7 +10,7 @@ import { shouldRedirectToPair } from "../../screens/pair/pair-fragment.ts";
 import { machinesStore } from "../../store/platform.ts";
 
 export default function TabsLayout() {
-  const hasMachine = machinesStore((state) => Object.keys(state.machines).length > 0);
+  const hasMachine = useStore(machinesStore, (state) => Object.keys(state.machines).length > 0);
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
   const tabBarLayout = calculateTabBarLayout(
