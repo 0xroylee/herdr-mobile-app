@@ -94,7 +94,7 @@ export function HomeScreen() {
         style={view.dimmed ? { opacity: 0.6 } : undefined}
       >
         <SearchField onChangeText={setQuery} value={query} />
-        <SmartTiles tiles={view.tiles} />
+        <SmartTiles onOpen={(kind) => router.push(routes.list(kind) as Href)} tiles={view.tiles} />
         <View className="gap-2">
           <View className="px-1">
             <Text variant="title">Projects</Text>
