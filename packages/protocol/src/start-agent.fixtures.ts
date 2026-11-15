@@ -3,6 +3,9 @@
 import type {
   AgentCatalog,
   AgentCatalogTemplate,
+  CheckTaskRequest,
+  ClearTasksRequest,
+  LinkTaskRequest,
   StartAgentErrorBody,
   StartAgentErrorCode,
   StartAgentLocation,
@@ -11,7 +14,12 @@ import type {
   StartAgentRequest,
   StartAgentRun,
   StartAgentSpace,
+  StartTaskReply,
+  StartTaskRequest,
+  TaskErrorCode,
+  UncheckTaskRequest,
 } from "./bridge.ts";
+import type { TaskRecord } from "./tasks.ts";
 
 export const programRun: StartAgentRun = { kind: "program", id: "claude" };
 export const templateRun: StartAgentRun = { kind: "template", name: "review" };
@@ -62,6 +70,56 @@ export const startError: StartAgentErrorBody = {
   message: "herdr-core could not start the agent",
   kind: "invalid_template",
 };
+
+export const taskProgramRequest: StartTaskRequest = {
+  text: "Review the API",
+  run: programRun,
+  folder: "/Users/roy/project",
+  space: existingSpace,
+};
+export const taskTemplateRequest: StartTaskRequest = {
+  text: "Inspect the current branch",
+  run: templateRun,
+  folder: "/Users/roy/project",
+  space: newSpace,
+  tab: { id: "tb2" },
+  placement: "window",
+};
+export const checkTaskById: CheckTaskRequest = {
+  id: "tk00000000000000000000000000000001",
+  turn: 2,
+};
+export const checkTaskByTerminal: CheckTaskRequest = { terminal: "t1", turn: 1 };
+export const uncheckTask: UncheckTaskRequest = { id: "tk00000000000000000000000000000001" };
+export const linkTask: LinkTaskRequest = {
+  id: "tk00000000000000000000000000000001",
+  terminal: "t1",
+};
+export const clearTasks: ClearTasksRequest = { spaceId: "sp1" };
+export const clearAllTasks: ClearTasksRequest = {};
+export const taskReply: StartTaskReply = {
+  record: {
+    id: "tk00000000000000000000000000000001",
+    origin: "phone",
+    terminal: "t1",
+    text: "Review the API",
+    createdAt: 1,
+  },
+  start: windowReply,
+};
+export const taskErrorCodes: TaskErrorCode[] = [
+  "forbidden",
+  "run_not_allowed",
+  "folder_not_allowed",
+  "folder_missing",
+  "core_unavailable",
+  "herdr_app_failed",
+  "herdr_app_timeout",
+  "task_not_allowed",
+  "tasks_full",
+  "task_not_found",
+  "task_linked",
+];
 
 /** True only when A and B have the same type. */
 type Equals<A, B> =
@@ -119,6 +177,30 @@ const startAgentErrorBodyShape: Equals<
   StartAgentErrorBody,
   { error: StartAgentErrorCode; message?: string; kind?: string }
 > = true;
+const startTaskRequestShape: Equals<
+  StartTaskRequest,
+  {
+    text: string;
+    run: StartAgentRun;
+    folder: string;
+    space: StartAgentSpace;
+    tab?: { id: string };
+    placement?: StartAgentPlacement;
+  }
+> = true;
+const startTaskReplyShape: Equals<StartTaskReply, { record: TaskRecord; start: StartAgentReply }> =
+  true;
+const checkTaskRequestShape: Equals<
+  CheckTaskRequest,
+  { id: string; turn: number } | { terminal: string; turn: number }
+> = true;
+const uncheckTaskRequestShape: Equals<UncheckTaskRequest, { id: string }> = true;
+const linkTaskRequestShape: Equals<LinkTaskRequest, { id: string; terminal: string }> = true;
+const clearTasksRequestShape: Equals<ClearTasksRequest, { spaceId?: string }> = true;
+const taskErrorCodeShape: Equals<
+  TaskErrorCode,
+  StartAgentErrorCode | "task_not_allowed" | "tasks_full" | "task_not_found" | "task_linked"
+> = true;
 
 export const exactShapes = [
   startAgentPlacementShape,
@@ -131,6 +213,13 @@ export const exactShapes = [
   agentCatalogShape,
   startAgentErrorShape,
   startAgentErrorBodyShape,
+  startTaskRequestShape,
+  startTaskReplyShape,
+  checkTaskRequestShape,
+  uncheckTaskRequestShape,
+  linkTaskRequestShape,
+  clearTasksRequestShape,
+  taskErrorCodeShape,
 ] as const;
 
 // @ts-expect-error program runs require an id
@@ -145,3 +234,7 @@ export const locationWithoutIsNew: StartAgentLocation = { id: "sp1" };
 export const unsupportedPlacement: StartAgentPlacement = "shell";
 // @ts-expect-error unsupported start errors must remain outside the union
 export const unknownStartError: StartAgentErrorCode = "unknown_error";
+// @ts-expect-error task check requests require a selector and turn
+export const checkTaskWithoutTurn: CheckTaskRequest = { id: "tk00000000000000000000000000000001" };
+// @ts-expect-error task error codes are a closed union
+export const unknownTaskError: TaskErrorCode = "unknown_task_error";

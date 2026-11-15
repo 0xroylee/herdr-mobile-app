@@ -14,6 +14,11 @@ export const keys: HcParams<"terminal.keys"> = { terminal: "t1", keys: ["esc", "
 export const kill: HcParams<"terminal.kill"> = { terminal: "t1" };
 export const send: HcParams<"terminal.send"> = { terminal: "t1", text: "hi", if: "idle" };
 export const subscribe: HcParams<"events.subscribe"> = { labels: { "herdr.space": "sp1" } };
+export const docSet: HcParams<"doc.set"> = {
+  name: "herdr-mobile.tasks",
+  value: { v: 1, tasks: {} },
+  version: 1,
+};
 export const stop: HcParams<"server.stop"> = {};
 export const exitedNull: Pick<HcResult<"terminal.get">, "exit_code" | "status"> = {
   exit_code: null,
@@ -48,6 +53,7 @@ export const subscribeSeq: Equals<HcResult<"events.subscribe">["seq"], number> =
 export const helloGeneration: Equals<HcResult<"hello">["generation"], number> = true;
 export const runAddress: Equals<HcResult<"terminal.run">["address"], string> = true;
 export const stopped: Equals<HcResult<"server.stop">["stopped"], boolean> = true;
+export const docSetVersion: Equals<HcResult<"doc.set">["version"], number> = true;
 
 /** Every required method has an entry in the generated map. */
 export const covered: (typeof REQUIRED_HC_METHODS)[number] extends keyof HcMethodMap

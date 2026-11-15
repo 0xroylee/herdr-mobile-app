@@ -17,6 +17,7 @@ export const REQUIRED_HC_METHODS = [
   "terminal.run",
   "events.subscribe",
   "doc.get",
+  "doc.set",
 ] as const;
 
 export type RequiredHcMethod = (typeof REQUIRED_HC_METHODS)[number];
@@ -26,4 +27,7 @@ export type * from "./generated/hc-api.ts";
 export * from "./herdr-app-doc.ts";
 export * from "./pair-offer.ts";
 export * from "./policy.ts";
+export * from "./program.ts";
+export * from "./tasks.ts";
+export * from "./terminal-match.ts";
 export * from "./wire.ts";
