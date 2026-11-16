@@ -2,6 +2,7 @@ import type { BridgeCalls } from "../../net/bridge-calls.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import type { ConnectionManager } from "../../net/connection.ts";
 import { createNewSpace, type NewItemMachine, type NewItemResult } from "../../net/new-items.ts";
+import type { SettingsStore } from "../../store/settings.ts";
 import type { NewTaskContext, NewTaskController, NewTaskPort } from "./new-task-controller.ts";
 
 export interface NewTaskPreferences {
@@ -9,17 +10,28 @@ export interface NewTaskPreferences {
   rememberFolder(machineId: string, folder: string): void;
 }
 
-/** Bind either task-entry screen to its active connection manager and current context. */
-export function bindNewTaskController(
+/** Bind either task-entry screen to its active connection manager, settings, and context. */
+export function bindNewTaskScreen(
   controller: NewTaskController,
   manager: Pick<ConnectionManager, "calls"> | undefined,
   context: NewTaskContext,
-  preferences: NewTaskPreferences,
+  settings: Pick<SettingsStore, "setLastRun" | "pushRecentFolder">,
 ): void {
   const calls = manager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac.");
-  controller.setPort(createNewTaskPort(calls, preferences));
+  controller.setPort(
+    createNewTaskPort(calls, {
+      rememberRun: (machineId, run) => settings.setLastRun(machineId, run),
+      rememberFolder: (machineId, folder) => settings.pushRecentFolder(machineId, folder),
+    }),
+  );
   controller.setContext(context);
 }
+
+/** Safe initial port; screens replace it with the current binding before use. */
+export const unavailableNewTaskPort = createNewTaskPort(
+  unavailableBridgeCalls("Not connected to the selected Mac."),
+  { rememberRun: () => undefined, rememberFolder: () => undefined },
+);
 
 /** Bind the task controller to bridge requests and per-machine settings. */
 export function createNewTaskPort(

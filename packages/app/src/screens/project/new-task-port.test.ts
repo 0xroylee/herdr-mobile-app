@@ -10,14 +10,19 @@ import type {
 } from "@herdr-mobile/protocol";
 import { BridgeApiError } from "../../net/bridge-api.ts";
 import type { BridgeCalls } from "../../net/bridge-calls.ts";
-import type { ConnectionManager } from "../../net/connection.ts";
+import { createConnectionManager } from "../../net/connection.ts";
+import { connect, FakeClock, FakeSocket, routeConnection } from "../../net/testing.ts";
+import { createCoreStore } from "../../store/core.ts";
+import type { Machine } from "../../store/machines.ts";
+import { createMemorySecrets, createMemoryStorage } from "../../store/memory.ts";
+import { createSettingsStore } from "../../store/settings.ts";
 import {
   createNewTaskDetailsController,
   type NewTaskContext,
   NewTaskController,
   submitNewTaskSheet,
 } from "./new-task-controller.ts";
-import { bindNewTaskController, createHomeProject, createNewTaskPort } from "./new-task-port.ts";
+import { bindNewTaskScreen, createHomeProject, unavailableNewTaskPort } from "./new-task-port.ts";
 import { leaveNewTaskSheet } from "./project-view.ts";
 
 describe("Home project creation adapter", () => {
@@ -60,80 +65,70 @@ describe("Home project creation adapter", () => {
   });
 });
 
-describe("NewTaskPort adapter", () => {
-  test("persists the selected run and folder through the current settings adapter", () => {
-    const remembered: unknown[][] = [];
-    const port = createNewTaskPort(
-      {
-        agentCatalog: async () => ({
-          programs: [],
-          templates: [],
-          roots: [],
-          home: "/Users/roy",
-          windowOpen: true,
-        }),
-        startTask: async () => {
-          throw new Error("Start is not used by this test");
-        },
-      },
-      {
-        rememberRun: (...args) => remembered.push(args),
-        rememberFolder: (...args) => remembered.push(args),
-      },
-    );
+describe("NewTask screen binding", () => {
+  test("Project binding after a Mac switch uses the replacement manager and real settings", async () => {
+    const settings = createSettingsStore(createMemoryStorage());
+    const first = managerHarness("mac-a");
+    const selectedMac = managerHarness("mac-b");
+    const firstContext = context("mac-a");
+    const controller = new NewTaskController(unavailableNewTaskPort, firstContext, {
+      project: { kind: "existing", id: "sp1" },
+    });
 
-    port.rememberRun("machine-1", { kind: "program", id: "codex" });
-    port.rememberFolder("machine-1", "/Users/roy/project");
-
-    expect(remembered).toEqual([
-      ["machine-1", { kind: "program", id: "codex" }],
-      ["machine-1", "/Users/roy/project"],
-    ]);
-  });
-
-  test("Project screen binding uses the replacement manager after a Mac switch", async () => {
-    const preferences = noPreferences();
-    const first = managerHarness();
-    const selectedMac = managerHarness();
-    const taskContext = context("mac-a");
-    const controller = new NewTaskController(
-      createNewTaskPort(first.manager.calls(), preferences),
-      taskContext,
-      { project: { kind: "existing", id: "sp1" } },
-    );
-
-    bindNewTaskController(controller, first.manager, taskContext, preferences);
+    await connect(first.manager, first.socket);
+    await connect(selectedMac.manager, selectedMac.socket);
+    bindNewTaskScreen(controller, first.manager, firstContext, settings.getState());
     await controller.load();
-    bindNewTaskController(controller, selectedMac.manager, context("mac-b"), preferences);
+
+    bindNewTaskScreen(controller, selectedMac.manager, context("mac-b"), settings.getState());
     controller.setText("Start on the selected Mac");
 
-    expect(await controller.go()).toBe("started");
-    expect(first.state.catalogCalls).toBe(1);
-    expect(first.state.requests).toEqual([]);
-    expect(selectedMac.state.requests).toEqual([
-      {
-        text: "Start on the selected Mac",
-        run: { kind: "program", id: "claude" },
-        folder: "/Users/roy/project",
-        space: { kind: "existing", id: "sp1" },
-      },
-    ]);
+    try {
+      expect(await controller.go()).toBe("started");
+      expect(first.requests).toEqual([
+        {
+          url: "https://mac-a.bridge.test/api/agents/catalog",
+          authorization: "Bearer token-mac-a",
+          method: "GET",
+        },
+      ]);
+      expect(selectedMac.requests).toEqual([
+        {
+          url: "https://mac-b.bridge.test/api/tasks",
+          authorization: "Bearer token-mac-b",
+          method: "POST",
+        },
+      ]);
+      expect(settings.getState().lastRun).toEqual({
+        "mac-b": { kind: "program", id: "claude" },
+      });
+      expect(settings.getState().recentFolders).toEqual({
+        "mac-b": ["/Users/roy/project"],
+      });
+
+      first.manager.stop();
+      const requestsBeforeStoppedCall = first.requests.length;
+      await expect(first.manager.calls().startTask(startRequest())).rejects.toMatchObject({
+        code: "not_connected",
+      });
+      expect(first.requests).toHaveLength(requestsBeforeStoppedCall);
+    } finally {
+      first.manager.stop();
+      selectedMac.manager.stop();
+    }
   });
 
-  test("Details Retry uses the replacement manager and routes the accepted request", async () => {
-    const preferences = noPreferences();
-    const first = managerHarness(async () => {
-      throw new Error("The first manager is unavailable");
+  test("Details Retry after a failed start uses the replacement manager", async () => {
+    const settings = createSettingsStore(createMemoryStorage());
+    const first = managerHarness("retry-a", { failStarts: true });
+    const replacement = managerHarness("retry-b");
+    const firstContext = context("retry-a");
+    const controller = createNewTaskDetailsController(unavailableNewTaskPort, firstContext, "sp1", {
+      project: { kind: "existing", id: "sp1" },
     });
-    const replacement = managerHarness();
-    const taskContext = context("mac-a");
-    const controller = createNewTaskDetailsController(
-      createNewTaskPort(first.manager.calls(), preferences),
-      taskContext,
-      "sp1",
-      { project: { kind: "existing", id: "sp1" } },
-    );
-    bindNewTaskController(controller, first.manager, taskContext, preferences);
+    await connect(first.manager, first.socket);
+    await connect(replacement.manager, replacement.socket);
+    bindNewTaskScreen(controller, first.manager, firstContext, settings.getState());
     await controller.load();
     controller.setText("Keep this task for Retry");
     const navigation: unknown[] = [];
@@ -142,46 +137,137 @@ describe("NewTaskPort adapter", () => {
       replace: (href: unknown) => navigation.push(href),
     };
     const submit = () =>
-      submitNewTaskSheet(controller, "sp1", taskContext.layout, (destination) =>
+      submitNewTaskSheet(controller, "sp1", firstContext.layout, (destination) =>
         leaveNewTaskSheet(router, destination),
       );
 
-    expect(await submit()).toBe("failed");
-    expect(controller.state.draft.text).toBe("Keep this task for Retry");
-    expect(navigation).toEqual([]);
+    try {
+      expect(await submit()).toBe("failed");
+      expect(controller.state.draft.text).toBe("Keep this task for Retry");
+      expect(navigation).toEqual([]);
+      expect(first.requests.map(({ url }) => url)).toEqual([
+        "https://retry-a.bridge.test/api/agents/catalog",
+        "https://retry-a.bridge.test/api/tasks",
+      ]);
 
-    bindNewTaskController(controller, replacement.manager, taskContext, preferences);
-    expect(await submit()).toBe("started");
-    expect(replacement.state.requests).toHaveLength(1);
-    expect(replacement.state.requests[0]?.text).toBe("Keep this task for Retry");
-    expect(navigation).toEqual(["back"]);
-    expect(controller.state.draft.text).toBe("");
+      bindNewTaskScreen(controller, replacement.manager, context("retry-b"), settings.getState());
+      expect(await submit()).toBe("started");
+      expect(replacement.requests).toEqual([
+        {
+          url: "https://retry-b.bridge.test/api/tasks",
+          authorization: "Bearer token-retry-b",
+          method: "POST",
+        },
+      ]);
+      expect(navigation).toEqual(["back"]);
+      expect(controller.state.draft.text).toBe("");
+    } finally {
+      first.manager.stop();
+      replacement.manager.stop();
+    }
+  });
+
+  test("a binding made before connected uses the manager facade after it connects", async () => {
+    const settings = createSettingsStore(createMemoryStorage());
+    const harness = managerHarness("early-binding");
+    const taskContext = context("early-binding");
+    const controller = new NewTaskController(unavailableNewTaskPort, taskContext, {
+      project: { kind: "existing", id: "sp1" },
+    });
+    const calls = harness.manager.calls();
+
+    bindNewTaskScreen(controller, harness.manager, taskContext, settings.getState());
+    expect(harness.requests).toEqual([]);
+    await connect(harness.manager, harness.socket);
+
+    try {
+      expect(harness.manager.calls()).toBe(calls);
+      await controller.load();
+      controller.setText("Wait for the connection");
+      expect(await controller.go()).toBe("started");
+      expect(harness.requests).toEqual([
+        {
+          url: "https://early-binding.bridge.test/api/agents/catalog",
+          authorization: "Bearer token-early-binding",
+          method: "GET",
+        },
+        {
+          url: "https://early-binding.bridge.test/api/tasks",
+          authorization: "Bearer token-early-binding",
+          method: "POST",
+        },
+      ]);
+    } finally {
+      harness.manager.stop();
+    }
+  });
+
+  test("a missing manager binds the unavailable calls fallback", async () => {
+    const settings = createSettingsStore(createMemoryStorage());
+    const taskContext = context("offline");
+    const controller = new NewTaskController(unavailableNewTaskPort, taskContext, {
+      project: { kind: "existing", id: "sp1" },
+    });
+
+    bindNewTaskScreen(controller, undefined, taskContext, settings.getState());
+    await controller.load();
+
+    expect(controller.state.catalog).toBeUndefined();
+    expect(controller.state.catalogError).toContain("Not connected to the selected Mac.");
   });
 });
 
-function managerHarness(
-  start: (request: StartTaskRequest) => Promise<StartTaskReply> = async (request) =>
-    acceptedReply(request),
-) {
-  const state = { catalogCalls: 0, requests: [] as StartTaskRequest[] };
-  const manager: Pick<ConnectionManager, "calls"> = {
-    calls: () =>
-      ({
-        agentCatalog: async () => {
-          state.catalogCalls += 1;
-          return taskCatalog();
-        },
-        startTask: async (request) => {
-          state.requests.push(request);
-          return start(request);
-        },
-      }) as BridgeCalls,
-  };
-  return { manager, state };
+interface CapturedRequest {
+  url: string;
+  authorization: string | null;
+  method: string;
 }
 
-function noPreferences() {
-  return { rememberRun: () => undefined, rememberFolder: () => undefined };
+function managerHarness(id: string, options: { failStarts?: boolean } = {}) {
+  const machine: Machine = {
+    id,
+    name: id,
+    routes: { secure: { url: `https://${id}.bridge.test`, key: `${id}-bridge-key` } },
+    role: "control",
+    deviceId: `device-${id}`,
+  };
+  const requests: CapturedRequest[] = [];
+  const socket = new FakeSocket({ machine });
+  const manager = createConnectionManager({
+    machine,
+    secrets: createMemorySecrets([[machine.id, `token-${id}`]]),
+    core: createCoreStore().getState(),
+    openRoute: () =>
+      routeConnection(socket, async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        requests.push({
+          url,
+          authorization: new Headers(init?.headers).get("Authorization"),
+          method,
+        });
+        const path = new URL(url).pathname;
+        if (path === "/api/agents/catalog") return Response.json(taskCatalog());
+        if (path === "/api/tasks" && method === "POST") {
+          if (options.failStarts) {
+            return Response.json(
+              { error: "start_failed", message: "The first manager rejected the start." },
+              { status: 503 },
+            );
+          }
+          const request = JSON.parse(String(init?.body)) as StartTaskRequest;
+          return Response.json(acceptedReply(request));
+        }
+        return Response.json(
+          { error: "not_found", message: "No fake response for this path." },
+          {
+            status: 404,
+          },
+        );
+      }),
+    clock: new FakeClock(),
+  });
+  return { manager, machine, requests, socket };
 }
 
 function context(machineId: string): NewTaskContext {
@@ -216,10 +302,19 @@ function taskCatalog(): AgentCatalog {
   };
 }
 
+function startRequest(): StartTaskRequest {
+  return {
+    text: "Not sent after stop",
+    run: { kind: "program", id: "claude" },
+    folder: "/Users/roy/project",
+    space: { kind: "existing", id: "sp1" },
+  };
+}
+
 function acceptedReply(request: StartTaskRequest): StartTaskReply {
   const spaceId = request.space.kind === "existing" ? request.space.id : "created-space";
   const record: TaskRecord = {
-    id: "tk0000000000000000000000000000001",
+    id: `tk${"1".repeat(32)}`,
     origin: "phone",
     text: request.text,
     run: request.run,
