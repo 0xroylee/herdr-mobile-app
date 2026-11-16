@@ -1,0 +1,212 @@
+import type { Role, Status } from "@herdr-mobile/protocol";
+import type { Href } from "expo-router";
+import { oneLine } from "../../model/summary.ts";
+import type { TaskProject, TaskRow } from "../../model/tasks.ts";
+import { routes } from "../../routes.ts";
+import type { ConnectionState } from "../../store/core.ts";
+import { shortenHomeFolder } from "../../terminal/folder.ts";
+import type { NewTaskSheetDestination } from "./new-task-controller.ts";
+
+export interface ProjectView {
+  project: TaskProject;
+  rows: TaskRow[];
+  checkedCount: number;
+  showChecked: boolean;
+  dimmed: boolean;
+  canCheckOff: boolean;
+  canClear: boolean;
+  showClear: boolean;
+  showComposer: boolean;
+  actionsEnabled: boolean;
+}
+
+export type ProjectRowActionId = "open-terminal" | "copy-address" | "check-off";
+
+export interface ProjectRowAction {
+  id: ProjectRowActionId;
+  label: "Open terminal" | "Copy address" | "Check off";
+}
+
+export type TaskSummaryRow = TaskRow & { lastSeenStatus?: Status | null };
+export type TaskSummaryTerminal = NonNullable<TaskSummaryRow["terminal"]>;
+
+export interface AccessoryBarView {
+  agentLabel: string;
+  folderLabel: string;
+  labelLines: 1;
+  detailsDisabled: boolean;
+}
+
+/** Derive the labels and availability shown by the inline task accessory bar. */
+export function accessoryBarView(input: {
+  agentName: string | undefined;
+  folder: string;
+  home: string | undefined;
+  disabled: boolean;
+}): AccessoryBarView {
+  return {
+    agentLabel: input.agentName ?? "Choose agent",
+    folderLabel: input.folder ? shortenHomeFolder(input.folder, input.home) : "Choose folder",
+    labelLines: 1,
+    detailsDisabled: input.disabled,
+  };
+}
+
+/** Route the project's details button with the draft visible in its composer. */
+export function openProjectTaskDetails(
+  router: { push(href: Href): void },
+  projectId: string,
+  draft: unknown,
+): void {
+  router.push(routes.taskNew(projectId, JSON.stringify(draft)) as Href);
+}
+
+/** Return from the sheet or replace it with the project chosen by a successful start. */
+export function leaveNewTaskSheet(
+  router: { back(): void; replace(href: Href): void },
+  destination: NewTaskSheetDestination,
+): void {
+  if (destination.kind === "back") {
+    router.back();
+    return;
+  }
+  router.replace(routes.project(destination.projectId, "composer") as Href);
+}
+
+/** Order project tasks by creation time and derive controls from the current role and connection. */
+export function deriveProjectView(input: {
+  project: TaskProject;
+  rows: readonly TaskRow[];
+  role: Role | undefined;
+  connection: ConnectionState;
+  showChecked: boolean;
+}): ProjectView {
+  const ordered = [...input.rows].sort(
+    (left, right) =>
+      left.createdAt - right.createdAt ||
+      (left.terminal?.created_ms ?? left.createdAt) -
+        (right.terminal?.created_ms ?? right.createdAt) ||
+      left.id.localeCompare(right.id),
+  );
+  const checkedCount = ordered.filter((row) => row.checked).length;
+  const connected = input.connection === "connected";
+  const control = input.role === "control";
+
+  return {
+    project: input.project,
+    rows: input.showChecked ? ordered : ordered.filter((row) => !row.checked),
+    checkedCount,
+    showChecked: input.showChecked,
+    dimmed: !connected,
+    canCheckOff: control && connected,
+    canClear: control && connected && checkedCount > 0,
+    showClear: control && checkedCount > 0,
+    showComposer: control && connected && input.project.id !== "other",
+    actionsEnabled: connected,
+  };
+}
+
+/** Select task rows by the project's stable id, never by its display name. */
+export function projectTaskRows(projectId: string, rows: readonly TaskRow[]): TaskRow[] {
+  return rows.filter((row) => row.project.id === projectId);
+}
+
+/** Whether a Done row needs a lazy screen read to fill its missing summary. */
+export function shouldReadTaskSummary(
+  row: TaskSummaryRow,
+  cache: Readonly<Record<string, string>>,
+): boolean {
+  return (
+    row.state === "done" &&
+    row.address !== undefined &&
+    isReadableTaskSummaryTerminal(row.terminal) &&
+    statusMessage(row) === undefined &&
+    !Object.hasOwn(cache, taskSummaryKey(row))
+  );
+}
+
+/** A finished terminal keeps its final screen; only a live shell has lost the program's screen. */
+export function isReadableTaskSummaryTerminal(
+  terminal: TaskSummaryRow["terminal"],
+): terminal is TaskSummaryTerminal {
+  return terminal !== undefined && !(terminal.state === "live" && terminal.reason != null);
+}
+
+/** Cache a successful screen read, or its empty-result fallback, for a still-readable terminal. */
+export function cacheTaskSummaryRead(
+  cache: Record<string, string>,
+  row: TaskSummaryRow,
+  terminal: TaskSummaryRow["terminal"],
+  summary: string | undefined,
+): Record<string, string> {
+  if (!isReadableTaskSummaryTerminal(terminal)) return cache;
+  return { ...cache, [taskSummaryKey(row)]: summary ?? "No summary yet." };
+}
+
+/** Keep smart-list summary caches isolated by the selected Mac. */
+export function cacheTaskSummaryReadByMachine(
+  cache: Record<string, Record<string, string>>,
+  machineId: string,
+  row: TaskSummaryRow,
+  terminal: TaskSummaryRow["terminal"],
+  summary: string | undefined,
+): Record<string, Record<string, string>> {
+  const machineCache = cache[machineId] ?? {};
+  const nextMachineCache = cacheTaskSummaryRead(machineCache, row, terminal, summary);
+  if (nextMachineCache === machineCache) return cache;
+  return { ...cache, [machineId]: nextMachineCache };
+}
+
+/** Key cached output by task address and turn so clearing status does not discard it. */
+export function taskSummaryKey(row: TaskRow): string {
+  return `${row.address ?? row.id}:${row.terminal?.turn ?? 0}`;
+}
+
+/** Choose the Done or Stopped summary in one fixed source order. */
+export function taskSummary(
+  row: TaskSummaryRow,
+  cache: Readonly<Record<string, string>>,
+): string | undefined {
+  if (row.state !== "done" && row.state !== "stopped") return undefined;
+
+  const message = statusMessage(row);
+  if (message !== undefined) return message;
+
+  const key = taskSummaryKey(row);
+  if (Object.hasOwn(cache, key)) return cache[key];
+
+  if (
+    row.state !== "done" ||
+    row.address === undefined ||
+    !isReadableTaskSummaryTerminal(row.terminal)
+  ) {
+    return "No summary yet.";
+  }
+
+  return undefined;
+}
+
+function statusMessage(row: TaskSummaryRow): string | undefined {
+  return oneLine((row.terminal?.status ?? row.lastSeenStatus)?.msg);
+}
+
+/** Keep read-only terminal actions for watch devices; hide actions while offline. */
+export function projectRowActions(
+  row: TaskRow,
+  role: Role | undefined,
+  connection: ConnectionState,
+): ProjectRowAction[] {
+  if (connection !== "connected") return [];
+
+  const actions: ProjectRowAction[] = [];
+  if (row.address !== undefined) {
+    if (row.terminal !== undefined) {
+      actions.push({ id: "open-terminal", label: "Open terminal" });
+    }
+    actions.push({ id: "copy-address", label: "Copy address" });
+  }
+  if (role === "control" && row.state !== "checked" && row.state !== "not-started") {
+    actions.push({ id: "check-off", label: "Check off" });
+  }
+  return actions;
+}

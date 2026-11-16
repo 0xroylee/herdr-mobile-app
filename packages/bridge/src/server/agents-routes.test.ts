@@ -4,6 +4,8 @@ import { handleAgentsRoutes } from "./agents-routes.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import { headerCaller } from "./caller.ts";
 import { DeviceStore, type StoreFs } from "./devices.ts";
+import type { ApiContext } from "./routes.ts";
+import { dispatchApi } from "./routes.ts";
 import { AgentStarter } from "./start-agent.ts";
 
 class MapFs implements StoreFs {
@@ -28,10 +30,9 @@ class MapFs implements StoreFs {
 
 class FakeChild implements OwnedProcess {
   readonly exited: Promise<number | null>;
-  killed = false;
   private readonly stdoutText: string;
 
-  constructor(stdoutText = "", exitCode = 1) {
+  constructor(stdoutText = "{}", exitCode = 1) {
     this.stdoutText = stdoutText;
     this.exited = Promise.resolve(exitCode);
   }
@@ -41,23 +42,23 @@ class FakeChild implements OwnedProcess {
     if (this.stdoutText) onData(new TextEncoder().encode(this.stdoutText));
     onEnd();
   }
-  kill(): void {
-    this.killed = true;
+  readStderr(_onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
+    onEnd();
   }
+  kill(): void {}
 }
 
 class FakeRunner implements ProcessRunner {
   readonly argv: string[][] = [];
   spawn(argv: string[]): OwnedProcess {
     this.argv.push(argv);
-    return new FakeChild("{}", argv[1] === "ls" ? 1 : 0);
+    return new FakeChild();
   }
 }
 
 async function setup(roots = ["/home/owner"]) {
   const devices = await DeviceStore.open(new MapFs(), "/state/devices.json");
   await devices.add({ token: "control-token", role: "control", name: "Control phone" });
-  await devices.add({ token: "watch-token", role: "watch", name: "Watch phone" });
   const runner = new FakeRunner();
   const context: AppCliContext = {
     runner,
@@ -85,7 +86,8 @@ async function setup(roots = ["/home/owner"]) {
     },
     coreCall: async (method, params) => {
       coreCalls.push({ method, params });
-      return { address: "t31", templates: [] };
+      if (method === "templates.list") return { templates: [] };
+      return {};
     },
   });
   return {
@@ -141,98 +143,17 @@ describe("agent routes", () => {
     expect(await response?.json()).toMatchObject({ roots: ["/home/owner"] });
   });
 
-  test("denies a watch device before reading the body or spawning a process", async () => {
-    const { starter, runner, coreCalls, resolveCaller } = await setup();
-    const response = await handleAgentsRoutes(
-      routeRequest("/api/agents/start", "watch-token", "POST", "not json"),
-      starter,
+  test("returns 404 for the retired start route", async () => {
+    const { context, runner, coreCalls, resolveCaller } = await setup();
+    const response = await dispatchApi(
+      routeRequest("/api/agents/start", "control-token", "POST", "{}"),
       resolveCaller,
+      { api: {} as ApiContext, appCli: context },
     );
 
-    expect(response?.status).toBe(403);
-    expect(await response?.json()).toEqual({ error: "forbidden" });
+    expect(response?.status).toBe(404);
+    expect(await response?.json()).toEqual({ error: "not_found" });
     expect(runner.argv).toEqual([]);
-    expect(coreCalls).toEqual([]);
-  });
-
-  test("rejects malformed and shell-line bodies with 400", async () => {
-    const { starter, runner, coreCalls, resolveCaller } = await setup();
-    const malformed = await handleAgentsRoutes(
-      routeRequest("/api/agents/start", "control-token", "POST", "{"),
-      starter,
-      resolveCaller,
-    );
-    const withLine = await handleAgentsRoutes(
-      routeRequest(
-        "/api/agents/start",
-        "control-token",
-        "POST",
-        JSON.stringify({
-          run: { kind: "program", id: "claude" },
-          folder: "/home/owner/project",
-          space: { kind: "existing", id: "sp1" },
-          line: "echo unsafe",
-        }),
-      ),
-      starter,
-      resolveCaller,
-    );
-
-    expect(malformed?.status).toBe(400);
-    expect(withLine?.status).toBe(400);
-    expect(runner.argv).toEqual([]);
-    expect(coreCalls).toEqual([]);
-  });
-
-  test("starts a valid request and returns the starter reply", async () => {
-    const { starter, runner, coreCalls, resolveCaller } = await setup();
-    const response = await handleAgentsRoutes(
-      routeRequest(
-        "/api/agents/start",
-        "control-token",
-        "POST",
-        JSON.stringify({
-          run: { kind: "program", id: "claude" },
-          folder: "/home/owner/project",
-          space: { kind: "new", name: "Review" },
-        }),
-      ),
-      starter,
-      resolveCaller,
-    );
-
-    expect(response?.status).toBe(200);
-    expect(await response?.json()).toMatchObject({ placement: "core", address: "t31" });
-    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
-    expect(coreCalls).toHaveLength(1);
-    expect(coreCalls[0]?.method).toBe("terminal.run");
-  });
-
-  test("returns the core placement's first-message restriction to the caller", async () => {
-    const { starter, runner, coreCalls, resolveCaller } = await setup();
-    const response = await handleAgentsRoutes(
-      routeRequest(
-        "/api/agents/start",
-        "control-token",
-        "POST",
-        JSON.stringify({
-          run: { kind: "program", id: "claude" },
-          folder: "/home/owner/project",
-          space: { kind: "new", name: "Review" },
-          task: "--dangerously-skip-permissions",
-        }),
-      ),
-      starter,
-      resolveCaller,
-    );
-
-    expect(response?.status).toBe(422);
-    expect(await response?.json()).toEqual({
-      error: "run_not_allowed",
-      message:
-        "First messages for claude need Herdr open on your Mac. Open Herdr, or leave the message empty.",
-    });
-    expect(runner.argv).toEqual([["/opt/herdr-app", "ls"]]);
     expect(coreCalls).toEqual([]);
   });
 });

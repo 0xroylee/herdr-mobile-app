@@ -31,7 +31,7 @@ export interface AgentSection {
   agents: AgentRow[];
 }
 
-interface LayoutLocation {
+export interface LayoutLocation {
   space: LayoutSpace;
   tab: LayoutTab;
 }
@@ -128,7 +128,7 @@ function makeAgentRow(
   };
 }
 
-function isPendingTerminal(terminal: Terminal): boolean {
+export function isPendingTerminal(terminal: Terminal): boolean {
   return (
     terminal.state === "live" &&
     terminal.reported !== true &&
@@ -214,7 +214,7 @@ function deriveSpaceSections(
   return sections;
 }
 
-function buildLocations(layout: Layout | undefined): Map<string, LayoutLocation> {
+export function buildLocations(layout: Layout | undefined): Map<string, LayoutLocation> {
   const locations = new Map<string, LayoutLocation>();
   for (const space of layout?.spaces ?? []) {
     for (const tab of space.tabs) {

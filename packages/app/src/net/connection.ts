@@ -15,6 +15,8 @@ import {
   type HcResult,
   type JsonValue,
   parseHerdrAppDoc,
+  parseTasksDoc,
+  TASKS_DOC_NAME,
 } from "@herdr-mobile/protocol";
 import type { ConnectionState, CoreStore } from "../store/core.ts";
 import type { Machine, MachineRoutes } from "../store/machines.ts";
@@ -51,7 +53,7 @@ export const systemClock: Clock = {
 
 export type ConnectionCore = Pick<
   CoreStore,
-  "setConnection" | "setSnapshot" | "applyEvent" | "setLayout"
+  "setConnection" | "setSnapshot" | "applyEvent" | "setLayout" | "setTasks"
 >;
 
 export interface ConnectionManagerOptions {
@@ -439,13 +441,15 @@ class Manager implements ConnectionManager {
         onSnapshot: (snapshot) => {
           this.core.setSnapshot(this.machine.id, snapshot.terminals, this.clock.now());
           if (!this.isSocketCurrent(run, attempt, socket)) return;
-          if (receivedSnapshot) void this.refetchLayout(client, run, attempt, socket);
+          if (receivedSnapshot) void this.refetchDocuments(client, run, attempt, socket);
           receivedSnapshot = true;
         },
         onEvent: (event) => {
           this.core.applyEvent(this.machine.id, event, this.clock.now());
           if (!this.isSocketCurrent(run, attempt, socket)) return;
           if (isHerdrAppDocEvent(event)) void this.refetchLayout(client, run, attempt, socket);
+          if (isTasksDocEvent(event)) void this.refetchTasks(client, run, attempt, socket);
+          if (event.type === "missed") void this.refetchDocuments(client, run, attempt, socket);
         },
       },
     );
@@ -456,7 +460,7 @@ class Manager implements ConnectionManager {
       }
     });
 
-    await this.refetchLayout(client, run, attempt, socket);
+    await this.refetchDocuments(client, run, attempt, socket);
     if (!this.isSocketCurrent(run, attempt, socket)) return;
     this.attemptCount = 0;
     this.connectedCalls = bindBridgeCalls(
@@ -483,6 +487,38 @@ class Manager implements ConnectionManager {
       if (this.isSocketCurrent(run, attempt, socket))
         this.core.setLayout(this.machine.id, undefined);
     }
+  }
+
+  private async refetchTasks(
+    client: HcClient,
+    run: number,
+    attempt: number,
+    socket: Socket,
+  ): Promise<void> {
+    try {
+      const result = await client.call("doc.get", { name: TASKS_DOC_NAME });
+      if (!this.isSocketCurrent(run, attempt, socket)) return;
+      this.core.setTasks(
+        this.machine.id,
+        parseTasksDoc(result.value as JsonValue) ?? emptyTasksDocument(),
+      );
+    } catch {
+      if (this.isSocketCurrent(run, attempt, socket)) {
+        this.core.setTasks(this.machine.id, emptyTasksDocument());
+      }
+    }
+  }
+
+  private async refetchDocuments(
+    client: HcClient,
+    run: number,
+    attempt: number,
+    socket: Socket,
+  ): Promise<void> {
+    await Promise.all([
+      this.refetchLayout(client, run, attempt, socket),
+      this.refetchTasks(client, run, attempt, socket),
+    ]);
   }
 
   private failCandidate(run: number, attempt: number, candidate: Candidate, code: number): void {
@@ -712,6 +748,15 @@ function parseAuthReply(value: string): AuthReply | undefined {
 function isHerdrAppDocEvent(event: HcEvent): boolean {
   if (event.type !== "doc" || typeof event.data !== "object" || event.data === null) return false;
   return (event.data as Record<string, JsonValue>).name === "herdr-app";
+}
+
+function isTasksDocEvent(event: HcEvent): boolean {
+  if (event.type !== "doc" || typeof event.data !== "object" || event.data === null) return false;
+  return (event.data as Record<string, JsonValue>).name === TASKS_DOC_NAME;
+}
+
+function emptyTasksDocument() {
+  return { v: 1 as const, tasks: {} };
 }
 
 async function toBytes(value: unknown): Promise<Uint8Array> {

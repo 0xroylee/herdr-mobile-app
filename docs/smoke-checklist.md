@@ -35,10 +35,10 @@ platform, OS version and screen where they occur.
 
   Pass `--herdr-app "$root/herdr-app-stub"` to every scratch bridge command. The stub prevents
   `herdr-app` from inspecting or changing the real Herdr window. Health, devices, pairing,
-  connection and terminal-record checks remain in scope. The stub makes Herdr appear closed: Start's
-  catalog still lists the configured programs, templates and roots with `windowOpen: false`. Only
-  actions that run `herdr-app` fail: starting in the Herdr window and creating a space or tab. Keep
-  the catalog assessment and those actions out of these checks.
+  connection and terminal-record checks remain in scope. The stub makes Herdr appear closed: the
+  agent catalog behind the task composer still lists configured programs, templates and roots with
+  `windowOpen: false`. Only actions that run `herdr-app` fail: starting in the Herdr window and
+  creating a space or tab. Keep checks of the catalog and those actions out of this run.
 
 - [ ] Build the web app with `bun run build:web`. Confirm that `packages/app/dist/index.html` exists.
 - [ ] Start the bridge with the wrapper as its `hc` executable. Set the bridge's state directory to the same scratch root so its `devices.json` and `admin.sock` are isolated too. The explicit `--session` is required because the bridge does not inherit the shell's `HC_SESSION`.
@@ -50,6 +50,7 @@ platform, OS version and screen where they occur.
     --web packages/app/dist \
     --hc "$root/hc-scratch" \
     --herdr-app "$root/herdr-app-stub" \
+    --run-root "$root/home" \
     --session "$session"
   ```
 
@@ -61,44 +62,105 @@ platform, OS version and screen where they occur.
   XDG_STATE_HOME="$root/state" bun run bridge pair --name "Smoke-test phone"
   ```
 
-- [ ] Open the app on the test device and connect to the bridge. Confirm the connection is Connected and the Agents screen is empty before anything runs in this scratch core. If agents already appear, stop the smoke run and do not interact with them. This first check uses the wrapper's fresh session and does not inspect the default core.
+- [ ] Open the app on the test device and connect to the bridge. Confirm the connection is Connected and Home has no task rows before anything runs in this scratch core. If a task appears, stop the smoke run and do not interact with it. This first check uses the wrapper's fresh session and does not inspect the default core.
 - [ ] Space and tab creation are pending until an isolated `herdr-app` target is verified. The current app actions use the bridge's full environment and have no isolated target. Do not create a space or tab against the user's Herdr window.
+
+## Tasks on an isolated scratch core
+
+Use this section only with the root and session from [Prepare an isolated run](#prepare-an-isolated-run).
+The fake programs must be on the scratch core's `PATH` before that core starts or restarts; the
+bridge's own `PATH` does not control programs spawned inside the core.
+
+- [ ] Create wrappers for Claude Code and Codex. The fake agent prints its argv, reports `working`,
+  then waits at a numbered menu, accepts input, reports `working` and `done`, and exits with the
+  configured code. OSC 7501 reports contain only the state; the question, menu and done message stay
+  visible as terminal text.
+
+  ```sh
+  repo=$PWD
+  mkdir -p "$root/bin"
+  cat > "$root/fake-agent.json" <<'EOF'
+  {"mode":"blocked","delayMs":400,"exitCode":0,"msg":"Scratch task finished","lastLine":"Fake agent finished the task."}
+  EOF
+  for agent in claude codex; do
+    cat > "$root/bin/$agent" <<EOF
+  #!/bin/sh
+  exec env HERDR_FAKE_AGENT_CONFIG="$root/fake-agent.json" bun "$repo/packages/bridge/scripts/fake-agent.ts" "\$@"
+  EOF
+  done
+  chmod 700 "$root/bin/claude" "$root/bin/codex"
+  PATH="$root/bin:$PATH"
+  ```
+
+- [ ] Start or restart only the scratch core with this `PATH`, using the same `HC_SESSION`,
+  `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR` wrapper values from the isolated setup.
+  Keep `--run-root "$root/home"` on the scratch bridge.
+- [ ] With a control token from the test pairing, send `POST /api/tasks` to the direct listener with
+  `text: "Review the scratch task"`, `run: {"kind":"program","id":"claude"}`, `folder:
+  "$root/home"` and a new space. Confirm the reply has both `record` and `start`, and that the
+  `Agent started` line contains `task: true` but no task text.
+- [ ] Through the same scratch session wrapper, call `terminal.list`. Confirm the new terminal has
+  `argv: ["claude", "--", "Review the scratch task"]`, `cwd: "$root/home"`, and the
+  `herdr.space`, `herdr.tab` and `herdr-mobile.origin` labels. Read `herdr-mobile.tasks` with
+  `doc.get`; confirm the record has the matching terminal address.
+- [ ] For Claude Code and Codex, try a one-word task and a task beginning with `-`. Each returns 422
+  `task_not_allowed` with `Write the task as a sentence.` and adds no record. Try one-word and
+  dash-leading text with a template on both Herdr window and core starts; each is passed as the
+  template's first message (`[name, task]` on core). NUL and text over 8 KiB are refused for every
+  task. Try each task route with a watch token; each returns 403. Unknown body keys return 400.
+- [ ] Check the running task with its current turn, then uncheck it. Check a terminal started outside
+  the phone by its address; confirm a `herdr` record appears. Clear a space and confirm only checked
+  tasks whose terminals ended or disappeared are removed, including a kept terminal with a
+  non-null reason, while a running terminal remains.
+- [ ] Stop and restart the scratch bridge and confirm the core document is unchanged. Restart the
+  scratch core only through the wrapper's `server.stop` procedure in [Cleanup](#cleanup), reconnect
+  with the same scratch session, and confirm the document survives. Never run a core stop command
+  outside that scratch wrapper.
+- [ ] Repeat the task calls through a paired secure channel when the secure scratch listener is in
+  use. The secure listener still returns 404 for direct `/api` HTTP requests; task calls travel
+  inside the channel.
 
 ## Your Mac: Herdr window and real agents
 
-Run these checks yourself on your Mac with your own Herdr window, installed agents and phone. They
-start real terminals and change your Herdr spaces. They are separate from the isolated run above.
-Use a control device, keep the bridge log open, and choose folders under home or a configured
-`--run-root`.
+Use a control device with your Herdr window and installed agents. These checks start real agents or
+create a space. Use a throwaway folder where the steps ask for one. Record the results beside each
+check.
 
-- [ ] With Herdr open, start Claude Code with a short first message in an existing space. Confirm
-  that Herdr adds a tab to that space with the selected folder, and that the message reaches Claude
-  through Herdr's own delivery. Confirm that the app opens the agent screen or Spaces according to
-  the reply.
-- [ ] With Herdr open, start a configured interactive program in a new space and choose a folder.
-  Confirm the new space and tab appear in Herdr with that folder. If you enter a first message,
-  confirm Herdr delivers it. Confirm that the app opens the agent screen or Spaces according to the
-  reply.
-- [ ] For both open-window starts, note whether the bridge calls `herdr-app do tab.new` or
-  `herdr-app do space.new`. If you can safely capture the child stdout, record what its JSON output
-  contains. Compare any returned space, tab and address ids with the matching `Agent started` line
-  and what Herdr shows. The bridge captures the command's output rather than echoing it, so the
-  normal bridge log does not show the raw JSON.
-- [ ] Close Herdr. Start Codex without a first message. Confirm that the phone opens its agent screen
-  and says `Started in herdr-core. Herdr shows it when it opens.`
-- [ ] With Herdr still closed, try a built-in program with a first message. Confirm that it is
-  refused with `First messages for <program> need Herdr open on your Mac. Open Herdr, or leave the
-  message empty.` and that the message remains in the form.
-- [ ] Open Herdr. Find the Codex terminal in the space and tab named by its `herdr.space` and
-  `herdr.tab` labels. Compare those ids with its `Agent started` line.
-- [ ] With Herdr closed, start one template from `~/.config/herdr-core/templates` without a first
-  message, then start a template with a first message. Confirm both start and that herdr-core
-  delivers the latter through the template's first-message path.
-- [ ] On a watch device, confirm there is no Start action in Agents or Spaces. Open `/start` directly
-  and confirm it shows `This device is read-only. Starting agents is available on control devices.`
-- [ ] Check the bridge log. Each successful start should have one `Agent started` line. Confirm the
-  lines contain no first-message text or device token. A refused start should not add an
-  `Agent started` line.
+1. **Check how the agent CLIs read `--`.** In a throwaway folder, run:
+
+   ```sh
+   claude -- --version
+   codex -- --version
+   ```
+
+   An interactive session should open with the text as its prompt, not print a version. Then run
+   `claude -- doctor`. Record whether Claude runs `doctor` or opens a session with `doctor` as the
+   prompt. Either result is harmless. This result confirms or relaxes the task guard in Q7.
+
+2. **Start tasks with Herdr open.** Add a Claude Code task and a Codex task from the Project
+   composer. Confirm Herdr adds a tab in the chosen space and each agent starts on the task text.
+   If you can capture the bridge child's output, record the JSON from `herdr-app do tab.new`. Note
+   whether it includes an address or tab id.
+
+   Optionally, with Herdr open, run this command with a throwaway folder:
+
+   ```sh
+   herdr-app do tab.new '{"folder":"<a scratch folder>","argv":["printf","--","$(echo x)"]}'
+   ```
+
+   Record whether the terminal shows `$(echo x)` literally. If it shows `x`, Herdr joins the argv
+   into a shell line; that result keeps Q8's answer as written.
+
+3. **Start a task with Herdr closed.** Add a Claude Code task from the composer. Confirm the agent
+   starts with the task text. Open Herdr and confirm that it adopts the terminal.
+
+4. **Add a project with Herdr open.** Use **Add project** and confirm `herdr-app do space.new`
+   accepts `--name` and `--folder`. Record whether the command succeeds and any error it returns.
+
+5. **Check real task endings.** Let a Claude Code task and a Codex task finish. Read their Done
+   summary lines and record the text. Let one task reach a permission prompt and answer it from
+   Needs you. Quit an agent mid-task and confirm it becomes Stopped. Quit another after it finishes
+   and confirm it remains Done. Record the prompt, answer and final state for each task.
 
 ## iOS and Android simulator
 
@@ -108,20 +170,20 @@ Repeat these checks on both simulators.
 - [ ] If font loading fails, confirm that the app shows its recovery state. Select Retry after restoring the font assets and confirm that the app opens.
 - [ ] Select `system`, `graphite` and `paper` themes. Confirm that the selected palette appears on each screen and `system` follows the simulator's appearance setting.
 - [ ] Increase Dynamic Type to its largest accessibility setting. Confirm that labels and controls remain readable and do not clip.
-- [ ] Check tab-bar spacing, borders and hit areas in both themes. Confirm that each tab remains easy to select.
-- [ ] Open Agents and Spaces with enough rows to scroll. Confirm that FlashList reaches the first and last rows and remains responsive.
+- [ ] Check Home and Project navigation spacing, borders and hit areas in both themes. Confirm that project tabs are easy to select.
+- [ ] Open a Project and the Done task list with enough rows to scroll. Confirm that each list reaches its first and last row and remains responsive.
 - [ ] Inspect agent program icons. Confirm that expo-image renders SVG icons and that missing icons leave the row usable.
 - [ ] Tap shared buttons, rows and icon buttons. Confirm that hit areas are reachable and pressed feedback is visible. Check spinner motion, state fades and reduced-motion behavior.
 - [ ] Open and dismiss takeover, interrupt, end-terminal and device-removal confirmations. Confirm that each native confirmation appears, dismisses and leaves data unchanged when canceled.
-- [ ] Check safe areas on Agents, Agent and Settings. Confirm that content and controls stay clear of the status bar, display cutout and home indicator.
+- [ ] Check safe areas on Home, Project, the terminal and Settings. Confirm that content and controls stay clear of the status bar, display cutout and home indicator.
 - [ ] Open the Agent composer and show the keyboard. Confirm that the composer and send controls remain visible above it and that the terminal content can still scroll.
 - [ ] On a narrow simulator, inspect long labels and controls. Confirm that they wrap without clipping or overlapping adjacent content.
 - [ ] Open a confirmation, then cancel it. Confirm that it dismisses and leaves the terminal, device or other target unchanged.
-- [ ] Long-press an agent row that offers actions. Confirm that its action menu appears; dismiss it without choosing an action and confirm the row remains unchanged.
+- [ ] Long-press a task row that offers actions. Confirm that its action menu appears; dismiss it without choosing an action and confirm the row remains unchanged.
 - [ ] Copy an agent address or pairing snippet. Confirm that the clipboard contains the displayed text and the app reports success only when the copy succeeds. If copying fails, confirm that the app shows failure feedback.
-- [ ] Visit Agents, Spaces, Settings and Pair, open an Agent from Agents, then navigate back. Confirm that each route shows its own screen and Back returns to the prior screen.
+- [ ] Visit Home, a Project, a smart list, Settings and Pair. Open a terminal from Project, then navigate back. Confirm that each route shows its own screen and Back returns to the prior screen.
 - [ ] Open the machine list with several paired devices. Scroll to the last device, then select Cancel. Confirm that the list scrolls and Cancel remains reachable.
-- [ ] Open a paired agent. Confirm that its screen attaches in watch mode, displays the current terminal and does not resize the Mac terminal.
+- [ ] Open a task, then select **Open terminal**. Confirm that the terminal screen attaches in watch mode, displays the current terminal and does not resize the Mac terminal.
 - [ ] Use the key bar and composer. Confirm that keys reach the terminal, sent text appears once, and the sent state clears on the next working status or after its timeout.
 - [ ] On a recognized Claude Code or Codex question, choose an answer and confirm that the corresponding keys reach the terminal. Confirm that a watch-role device can read the prompt but cannot answer it.
 - [ ] Show a long recognized Claude Code or Codex prompt, set text size to the largest accessibility setting and open the keyboard. Confirm that the question, choices and composer remain readable, do not overlap or clip, and the answer controls remain usable.
@@ -136,7 +198,7 @@ Repeat these checks on both simulators.
 Repeat on at least one iOS or Android device. Check device-specific items that the simulator cannot cover.
 
 - [ ] Connect the phone and Mac to the same tailnet. Open the bridge's HTTPS address. Confirm that the app reaches the paired bridge and shows the device name and connection state.
-- [ ] Scan the pairing QR code. Test both camera permission paths. Confirm that the scanner opens as a sheet on iOS that a downward swipe closes, the preview appears after permission, the code is accepted once, a successful pairing opens Agents, and a denied permission still allows manual URL and code entry.
+- [ ] Scan the pairing QR code. Test both camera permission paths. Confirm that the scanner opens as a sheet on iOS that a downward swipe closes, the preview appears after permission, the code is accepted once, a successful pairing opens Home, and a denied permission still allows manual URL and code entry.
 - [ ] Pair, close and reopen the app. Confirm that the device stays paired and the token remains available through SecureStore.
 - [ ] Change settings and restart the app. Confirm that SQLite-backed settings persist.
 - [ ] Check safe areas, touch targets, pressed feedback, haptics, fonts and maximum Dynamic Type on the device. Confirm that pinch, double-tap, scroll and takeover work with real touch input.
@@ -151,7 +213,7 @@ Repeat on at least one iOS or Android device. Check device-specific items that t
 - [ ] Copy the pairing snippet. Confirm that the browser clipboard result appears only when the copy succeeds and that failure has visible feedback.
 - [ ] Change theme and notification preferences, reload the page, and confirm that localStorage restores them. Confirm that About explains browser token storage.
 - [ ] Open and cancel confirmations. Confirm that the browser selects `Confirm.web.ts` behavior and preserves data on cancel.
-- [ ] Repeat agent listing, SVG icon rendering, space scrolling, terminal attachment, key input, text send, prompt answer, zoom and takeover. Confirm that keyboard and pointer input reach the selected agent only.
+- [ ] From Home, inspect the project list and smart tiles. Open a project and inspect its task rows and **Terminals** list, then open a terminal. Confirm SVG icons render, the terminal attaches, key input, text sends and prompt answers reach it, and zoom and takeover work. Confirm keyboard and pointer input reach only the selected terminal.
 - [ ] Reload while connected and after pairing. Confirm that the app restores the paired machine and reconnects, then shows an error when the scratch bridge is stopped.
 
 Space and tab creation remain pending until an isolated `herdr-app` target is verified. Do not run those actions against the user's Herdr window.
@@ -161,8 +223,8 @@ Space and tab creation remain pending until an isolated `herdr-app` target is ve
 Repeat the root, session and both wrapper setups in [Prepare an isolated run](#prepare-an-isolated-run)
 with new values. Skip that section's bridge startup, Tailscale Serve and pairing steps. Keep the real
 Herdr window, default core, Tailscale Serve and Cloudflare out of this run. Health, devices, pairing,
-connection and terminal-record checks remain in scope; Start's catalog and Herdr space or tab
-actions stay out. The stand-in edges bind to loopback.
+connection and terminal-record checks remain in scope; the agent catalog behind the task composer
+and Herdr space or tab actions stay out. The stand-in edges bind to loopback.
 
 - [ ] Build and serve the app in development mode. Expo's CLI and Metro use Node 24.
 
@@ -227,16 +289,24 @@ actions stay out. The stand-in edges bind to loopback.
   ```
 
   Confirm the browser pairs and shows `Connected via the secure route`. If the Pair screen dismisses
-  to Agents before you can read its route line, record that behavior and continue. The line is only
+  to Home before you can read its route line, record that behavior and continue. The line is only
   visible briefly.
-- [ ] From the browser control device, use Start only to create one fixture terminal: choose the
-  allowed `sh` program, run it in the scratch core with no first message, and choose a folder under
-  `$root/home`. The scratch-only `--run-program sh` and `--run-root "$root/home"` settings allow
-  this `terminal.run` request through `hc-scratch` with the recorded session. The stub makes Herdr
-  appear closed; Start's catalog still lists the configured programs, templates and roots with
-  `windowOpen: false`. Only actions that run `herdr-app` fail: starting in the Herdr window and
-  creating a space or tab. Keep the catalog assessment outside this fixture check. Do not choose any
-  Herdr space or tab action.
+- [ ] Create one plain-shell fixture through the isolated scratch wrapper. Use the recorded scratch
+  session and the wrapper's `HC_SESSION`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR`
+  values. The JSON-RPC line starts a detached shell in `$root/home` and returns its terminal address.
+
+  ```sh
+  root=/tmp/herdr-smoke-REPLACE_WITH_PRINTED_ROOT
+  session=herdr-smoke-REPLACE_WITH_RECORDED_SESSION
+  scratch() { HC_SESSION="$session" "$root/hc-scratch"; }
+  cat <<EOF | scratch
+  {"jsonrpc":"2.0","id":3,"method":"terminal.run","params":{"argv":["sh"],"cwd":"$root/home","name":"smoke-shell","keep":true,"no_parent":true,"wait":false}}
+  EOF
+  ```
+
+  Confirm the reply includes the terminal address. On the browser control device, open Home, choose
+  the `Other` project for the ungrouped scratch terminal, select **Terminals**, and open the returned
+  address. The fixture belongs only to this scratch core.
 
   Send `printf 'CONTROL_INPUT_OK\n'` from the control device's terminal input. Confirm that the
   scratch shell prints `CONTROL_INPUT_OK`. Then stage a 1 MiB output fixture in that same terminal:
@@ -262,7 +332,8 @@ actions stay out. The stand-in edges bind to loopback.
   current screen rather than the preceding 1 MiB of output. Confirm the watch device can read the
   terminal records but cannot send input. If input controls are visible, try sending
   `printf 'WATCH_INPUT_SHOULD_NOT_ARRIVE\n'`; the shell must not receive it. If controls are absent,
-  record that read-only refusal. Do not test Start's catalog or Herdr space/tab actions.
+  record that read-only refusal. Do not test the agent catalog behind the task composer or Herdr
+  space/tab actions.
 - [ ] **Needs your separate go-ahead:** stop the secure stand-in edge with Ctrl+C. Confirm both
   clients show `Reconnecting…`. Start it again with the same command. Confirm both clients reconnect
   through the secure route.

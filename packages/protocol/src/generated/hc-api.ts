@@ -42,6 +42,10 @@ export interface DocGetResult {
   version: number;
 }
 
+export interface DocSetResult {
+  version: number;
+}
+
 export interface FirstMessage {
   /** Why it was not sent. */
   reason?: string | null;
@@ -528,6 +532,16 @@ export interface DocGetParams {
   on?: string | null;
 }
 
+/** Write an opaque JSON document (at most 1 MiB) if its version still matches. Null deletes the value but retains its version. Persists atomically and emits a doc event. */
+export interface DocSetParams {
+  name: string;
+  on?: string | null;
+  /** Any JSON value, at most 1 MiB when serialized; null deletes it. */
+  value: JsonValue;
+  /** Current version from doc.get; zero for a name never written. */
+  version: number;
+}
+
 /** Stop the core and its programs. Kept terminals remain pending and get new shells when the core next starts. */
 export type ServerStopParams = Record<string, never>;
 
@@ -543,6 +557,7 @@ export interface HcMethodMap {
   "terminal.run": { params: TerminalRunParams; result: RunResult };
   "events.subscribe": { params: EventsSubscribeParams; result: SubscribeResult };
   "doc.get": { params: DocGetParams; result: DocGetResult };
+  "doc.set": { params: DocSetParams; result: DocSetResult };
   "server.stop": { params: ServerStopParams; result: StopResult };
 }
 

@@ -178,8 +178,7 @@ function createSecureConnectionHandler(
       trackedSession,
       device,
       async (request, resolveCaller) => {
-        const { api, appCli, agentStarter } = dependencies.dispatch;
-        return dispatchApi(request, resolveCaller, { api, appCli, agentStarter });
+        return dispatchApi(request, resolveCaller, dependencies.dispatch);
       },
       dependencies.onDeviceRevocation,
     );

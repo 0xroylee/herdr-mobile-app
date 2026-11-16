@@ -15,7 +15,12 @@ export interface CoreCallDependencies {
   clock?: Clock;
 }
 
-export type CoreMethod = "templates.list" | "terminal.run";
+export type CoreMethod =
+  | "templates.list"
+  | "terminal.run"
+  | "doc.get"
+  | "doc.set"
+  | "terminal.list";
 
 /** A one-shot `hc connect` failure that did not come from a JSON-RPC error reply. */
 export class HcConnectError extends Error {

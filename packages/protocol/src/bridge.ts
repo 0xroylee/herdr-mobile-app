@@ -1,3 +1,5 @@
+import type { TaskRecord } from "./tasks.ts";
+
 /** Protocol version spoken by the phone during bridge authentication. */
 export const BRIDGE_PROTOCOL_VERSION = 1 as const;
 
@@ -151,6 +153,49 @@ export interface StartAgentErrorBody extends HttpErrorBody {
   /** Error kind returned by herdr-core, such as `invalid_template`. */
   kind?: string;
 }
+
+/** Request to start an agent and persist its launch text as a task. */
+export interface StartTaskRequest {
+  text: string;
+  run: StartAgentRun;
+  folder: string;
+  space: StartAgentSpace;
+  tab?: { id: string };
+  placement?: StartAgentPlacement;
+}
+
+/** Successful response to a task start. */
+export interface StartTaskReply {
+  record: TaskRecord;
+  start: StartAgentReply;
+}
+
+/** Check off a task by record id or terminal address at its current turn. */
+export type CheckTaskRequest = { id: string; turn: number } | { terminal: string; turn: number };
+
+/** Remove the checked-off state from a task. */
+export interface UncheckTaskRequest {
+  id: string;
+}
+
+/** Link an unlinked task record to a terminal address. */
+export interface LinkTaskRequest {
+  id: string;
+  terminal: string;
+}
+
+/** Clear checked-off tasks, optionally limited to one space. */
+export interface ClearTasksRequest {
+  spaceId?: string;
+}
+
+/** Error codes returned by task routes, including start errors. */
+export type TaskErrorCode =
+  | StartAgentErrorCode
+  | "task_not_allowed"
+  | "tasks_full"
+  | "task_not_found"
+  | "task_linked";
 
 /** WebSocket close codes used by the bridge. */
 export const BRIDGE_WS_CLOSE_CODES = {

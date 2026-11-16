@@ -1,3 +1,4 @@
+import type { StartAgentRun } from "@herdr-mobile/protocol";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createPersistStorage } from "./persist.ts";
@@ -11,6 +12,7 @@ export interface SettingsValues {
   agents: { sort: AgentSort };
   notify: { blocked: boolean; done: boolean };
   recentFolders: Record<string, string[]>;
+  lastRun: Record<string, StartAgentRun>;
 }
 
 export interface SettingsStore extends SettingsValues {
@@ -20,6 +22,7 @@ export interface SettingsStore extends SettingsValues {
   setNotifyBlocked(enabled: boolean): void;
   setNotifyDone(enabled: boolean): void;
   pushRecentFolder(machineId: string, folder: string): void;
+  setLastRun(machineId: string, run: StartAgentRun): void;
 }
 
 const defaults: SettingsValues = {
@@ -27,6 +30,7 @@ const defaults: SettingsValues = {
   agents: { sort: "priority" },
   notify: { blocked: true, done: false },
   recentFolders: {},
+  lastRun: {},
 };
 
 export function createSettingsStore(storage: Storage) {
@@ -52,17 +56,22 @@ export function createSettingsStore(storage: Storage) {
             },
           }));
         },
+        setLastRun: (machineId, run) => {
+          if (machineId.trim().length === 0) return;
+          set((state) => ({ lastRun: { ...state.lastRun, [machineId]: { ...run } } }));
+        },
       }),
       {
         name: "settings",
         version: 1,
         storage: createPersistStorage<SettingsValues>(storage),
         skipHydration: true,
-        partialize: ({ ui, agents, notify, recentFolders }) => ({
+        partialize: ({ ui, agents, notify, recentFolders, lastRun }) => ({
           ui,
           agents,
           notify,
           recentFolders,
+          lastRun,
         }),
       },
     ),

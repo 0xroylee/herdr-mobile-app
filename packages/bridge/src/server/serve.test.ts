@@ -124,6 +124,14 @@ class FakeConnect implements OwnedProcess {
 
   closeInput(): void {
     this.inputClosed = true;
+    if (
+      this.core.calls.length === 1 &&
+      ["templates.list", "terminal.run", "terminal.list", "doc.get", "doc.set"].includes(
+        this.core.calls[0] ?? "",
+      )
+    ) {
+      this.exit(0);
+    }
   }
 
   read(onData: (bytes: Uint8Array) => void, onEnd: () => void): void {
@@ -177,22 +185,38 @@ class FakeCommand implements OwnedProcess {
 }
 
 class FakeBridgeRunner implements ProcessRunner {
-  readonly children: FakeConnect[] = [];
+  private readonly allChildren: FakeConnect[] = [];
   readonly argv: string[][] = [];
   oneShotCore = false;
+
+  get children(): FakeConnect[] {
+    return this.allChildren.filter(
+      (child) =>
+        child.core.calls.length !== 1 ||
+        !["templates.list", "terminal.run", "terminal.list", "doc.get", "doc.set"].includes(
+          child.core.calls[0] ?? "",
+        ),
+    );
+  }
 
   spawn(argv: string[]): OwnedProcess {
     this.argv.push(argv);
     if (argv[0] === "/fake/herdr-app") return new FakeCommand("", "", 1);
     const child = this.oneShotCore ? new FakeOneShotConnect() : new FakeConnect();
-    child.core.answer = (method) => {
+    child.core.answer = (method, params) => {
       if (method === "templates.list") {
         return { templates: [{ name: "review", description: "Review" }] };
       }
       if (method === "terminal.run") return { address: "t-started" };
+      if (method === "doc.get") return { value: null, version: 0 };
+      if (method === "doc.set") {
+        const input = params as { version: number };
+        return { version: input.version + 1 };
+      }
+      if (method === "terminal.list") return { terminals: [] };
       return undefined;
     };
-    this.children.push(child);
+    this.allChildren.push(child);
     return child;
   }
 }
@@ -496,10 +520,42 @@ describe("bridge HTTP dispatch", () => {
     expect(health?.status).toBe(401);
   });
 
-  test("writes successful start audits through the bridge stdout sink", async () => {
+  test("serves task routes through the direct listener's shared dispatcher", async () => {
     await withHarness(async (harness) => {
-      harness.runner.oneShotCore = true;
       const device = await harness.bridge.devices.add({
+        token: "tasks-direct-token",
+        role: "control",
+        name: "Control phone",
+      });
+      const fetch = harness.serve.web?.fetch;
+      if (!fetch) throw new Error("fake Bun server did not receive the web handler");
+      const response = await fetch(
+        new Request("http://bridge/api/tasks/check", {
+          method: "POST",
+          headers: {
+            ...ownerHeaders,
+            Authorization: "Bearer tasks-direct-token",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ terminal: "t-mac", turn: 3 }),
+        }),
+      );
+
+      expect(response?.status).toBe(200);
+      const record = (await response?.json()) as Record<string, unknown>;
+      expect(record.id).toMatch(/^tk[0-9a-f]{32}$/u);
+      expect(record).toMatchObject({
+        origin: "herdr",
+        terminal: "t-mac",
+        checkedTurn: 3,
+        checkedBy: { deviceId: device.id, deviceName: "Control phone" },
+      });
+    });
+  });
+
+  test("returns 404 for the retired agent start route", async () => {
+    await withHarness(async (harness) => {
+      await harness.bridge.devices.add({
         token: "start-output-token",
         role: "control",
         name: "Desk phone",
@@ -524,26 +580,7 @@ describe("bridge HTTP dispatch", () => {
         harness.upgradeServer,
       );
 
-      expect(response?.status).toBe(200);
-      expect(harness.output).toHaveLength(1);
-      expect(harness.output[0]).not.toContain("start-output-token");
-      expect(harness.output[0]).not.toContain("private first message");
-      const prefix = "Agent started ";
-      const audit = JSON.parse(harness.output[0]?.slice(prefix.length) ?? "{}") as Record<
-        string,
-        unknown
-      >;
-      expect(harness.output[0]?.startsWith(prefix)).toBe(true);
-      expect(audit).toMatchObject({
-        time: "1970-01-01T00:00:01.000Z",
-        device: { id: device.id, name: "Desk phone", role: "control" },
-        run: { kind: "template", name: "review" },
-        folder: harness.root,
-        placement: "core",
-        address: "t-started",
-        space: { id: expect.any(String), isNew: true },
-        tab: { id: expect.any(String), isNew: true },
-      });
+      expect(response?.status).toBe(404);
     });
   });
 
@@ -833,7 +870,10 @@ describe("bridge WebSocket lifecycle", () => {
 
       resolveLookup(device);
       await settle();
-      expect(harness.runner.argv).toEqual([["/fake/hc", "connect"]]);
+      expect(harness.runner.argv).toEqual([
+        ["/fake/hc", "connect"], // Initial task-document read.
+        ["/fake/hc", "connect"], // Authenticated terminal session.
+      ]);
       expect(await adminStatus(harness)).toEqual({ sessions: 1 });
     });
   });

@@ -1,8 +1,9 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import type { HcEvent, Terminal } from "@herdr-mobile/protocol";
+import type { HcEvent, TaskRecord, TasksDocument, Terminal } from "@herdr-mobile/protocol";
 import { seenKey } from "../model/seen.ts";
+import { deriveTasks } from "../model/tasks.ts";
 import { createCoreStore } from "./core.ts";
 import { createMachinesStore, type Machine } from "./machines.ts";
 import { createMemorySecrets, createMemoryStorage } from "./memory.ts";
@@ -159,6 +160,7 @@ describe("app stores", () => {
   test("keeps terminal snapshots and events behind U7's reducer in a memory-only core store", () => {
     const core = createCoreStore();
     core.getState().setSnapshot("machine-1", [terminal("t1")], 100);
+    expect(core.getState().machines["machine-1"]?.tasks).toEqual({ v: 1, tasks: {} });
     core.getState().applyEvent("machine-1", event("turn", { turn: 2 }), 200);
 
     expect(core.getState().machines["machine-1"]?.terminals.t1?.turn).toBe(2);
@@ -167,6 +169,89 @@ describe("app stores", () => {
     core.getState().applyEvent("machine-1", event("missed", { terminals: [terminal("t2")] }), 300);
     expect(Object.keys(core.getState().machines["machine-1"]?.terminals ?? {})).toEqual(["t2"]);
     expect(core.getState().machines["machine-1"]?.snapshotAt).toBe(300);
+
+    const tasks: TasksDocument = { v: 1, tasks: {} };
+    core.getState().setTasks("machine-1", tasks);
+    core.getState().setTasks("machine-2", { v: 1, tasks: {} });
+    expect(core.getState().machines["machine-1"]?.tasks).toBe(tasks);
+    expect(core.getState().machines["machine-2"]?.tasks).toEqual({ v: 1, tasks: {} });
+  });
+
+  test("keeps each machine's last non-null terminal status across removal and null snapshots", () => {
+    const core = createCoreStore();
+    const doneTerminal = { ...terminal("t1"), status: { state: "done" } } satisfies Terminal;
+    const record: TaskRecord = {
+      id: "task-1",
+      origin: "phone",
+      terminal: "t1",
+      text: "Finish the site",
+      createdAt: 1,
+    };
+
+    core.getState().setSnapshot("machine-1", [doneTerminal], 100);
+    expect(core.getState().machines["machine-1"]?.lastSeenStatuses).toEqual({
+      t1: { state: "done" },
+    });
+
+    core.getState().applyEvent("machine-1", event("removed", {}), 200);
+    const afterRemoval = core.getState().machines["machine-1"];
+    expect(
+      deriveTasks(
+        { [record.id]: record },
+        afterRemoval?.terminals ?? {},
+        undefined,
+        afterRemoval?.lastSeenStatuses ?? {},
+        200,
+      ).rows[0]?.state,
+    ).toBe("done");
+
+    core.getState().setSnapshot("machine-1", [terminal("t1")], 300);
+    core
+      .getState()
+      .applyEvent("machine-1", event("status", { status: null, records: {}, reported: true }), 400);
+    const replacement = core.getState().machines["machine-1"];
+    expect(replacement?.lastSeenStatuses).toEqual({ t1: { state: "done" } });
+    expect(
+      deriveTasks(
+        { [record.id]: record },
+        replacement?.terminals ?? {},
+        undefined,
+        replacement?.lastSeenStatuses ?? {},
+        400,
+      ).rows[0]?.state,
+    ).toBe("done");
+
+    core.getState().setSnapshot("machine-2", [terminal("t1")], 500);
+    core
+      .getState()
+      .applyEvent(
+        "machine-2",
+        event("status", { status: { state: "done" }, records: {}, reported: true }),
+        600,
+      );
+    core
+      .getState()
+      .applyEvent("machine-2", event("status", { status: null, records: {}, reported: true }), 700);
+    expect(core.getState().machines["machine-2"]?.lastSeenStatuses).toEqual({
+      t1: { state: "done" },
+    });
+  });
+
+  test("drops in-memory core status history with its machine", () => {
+    const core = createCoreStore();
+    core
+      .getState()
+      .setSnapshot("machine-1", [{ ...terminal("t1"), status: { state: "done" } }], 100);
+    core
+      .getState()
+      .setSnapshot("machine-2", [{ ...terminal("t1"), status: { state: "working" } }], 100);
+
+    core.getState().removeMachine("machine-1");
+
+    expect(core.getState().machines["machine-1"]).toBeUndefined();
+    expect(core.getState().machines["machine-2"]?.lastSeenStatuses).toEqual({
+      t1: { state: "working" },
+    });
   });
 
   test("keeps memory storage and secrets as separate adapters", async () => {

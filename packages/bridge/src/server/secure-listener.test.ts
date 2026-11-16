@@ -9,6 +9,9 @@ import {
 } from "@herdr-mobile/secure-channel";
 import type { Clock } from "../prototype/deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
+import type { TaskRoutesContext } from "../tasks/task-routes.ts";
+import type { TaskCoreCaller } from "../tasks/task-store.ts";
+import { TaskStore } from "../tasks/task-store.ts";
 import type { AppCliContext } from "./app-cli.ts";
 import type { StoreFs } from "./devices.ts";
 import { DeviceStore } from "./devices.ts";
@@ -171,6 +174,7 @@ interface Fixture {
   pairing: PairingCodes;
   runner: FakeRunner;
   logs: string[];
+  taskDocument(): unknown;
   dependencies: SecureListenerDependencies;
 }
 
@@ -189,6 +193,23 @@ async function fixture(): Promise<Fixture> {
     routes: () => ROUTES,
     bridgeKey: () => BRIDGE_KEY,
     authorizePairing: async () => false,
+  };
+  let taskDocument: unknown = { v: 1, tasks: {} };
+  let taskDocumentVersion = 0;
+  const taskCoreCall: TaskCoreCaller = async (method, params) => {
+    if (method === "templates.list") return { templates: [] };
+    if (method === "terminal.run") return { address: "t-secure-task" };
+    if (method === "terminal.list") return { terminals: [] };
+    if (method === "doc.get") {
+      return { value: structuredClone(taskDocument), version: taskDocumentVersion };
+    }
+    if (method === "doc.set") {
+      const input = params as { value: unknown };
+      taskDocument = structuredClone(input.value);
+      taskDocumentVersion += 1;
+      return { version: taskDocumentVersion };
+    }
+    return {};
   };
   const appCli: AppCliContext = {
     runner,
@@ -215,8 +236,13 @@ async function fixture(): Promise<Fixture> {
         return { isDirectory: () => true };
       },
     },
-    coreCall: async (method) => (method === "templates.list" ? { templates: [] } : {}),
+    coreCall: taskCoreCall,
   });
+  const taskRoutes: TaskRoutesContext = {
+    starter: agentStarter,
+    store: await TaskStore.open(taskCoreCall, clock),
+    coreCall: taskCoreCall,
+  };
   const dependencies: SecureListenerDependencies = {
     identity,
     devices,
@@ -224,14 +250,24 @@ async function fixture(): Promise<Fixture> {
     machine: MACHINE,
     routes: () => ROUTES,
     bridgeKey: () => BRIDGE_KEY,
-    dispatch: { api, appCli, agentStarter },
+    dispatch: { api, appCli, agentStarter, taskRoutes },
     runner,
     env: appCli.env,
     hc: "/fake/hc",
     clock,
     stdout: (line) => logs.push(line),
   };
-  return { fs, identity, clock, devices, pairing, runner, logs, dependencies };
+  return {
+    fs,
+    identity,
+    clock,
+    devices,
+    pairing,
+    runner,
+    logs,
+    taskDocument: () => structuredClone(taskDocument),
+    dependencies,
+  };
 }
 
 async function settle(): Promise<void> {
@@ -488,6 +524,88 @@ describe("secure bridge listener", () => {
       ]);
 
       expect(await setup.devices.findByToken("control-token")).toMatchObject({ id: control.id });
+      controlClient.session.close(1000, "test complete");
+      watchClient.session.close(1000, "test complete");
+    });
+  });
+
+  test("dispatches task starts through the secure listener for control devices only", async () => {
+    const setup = await fixture();
+    await setup.devices.add({ token: "control-token", role: "control" });
+    await setup.devices.add({ token: "watch-token", role: "watch" });
+
+    await withCapturedSecureListener(setup, async ({ connect }) => {
+      const controlClient = await connect({ v: 1, token: "control-token" });
+      await waitUntil(() => textRecords(controlClient).length === 1);
+      controlClient.session.send(
+        "text",
+        encoder.encode(
+          JSON.stringify({
+            t: "req",
+            id: 1,
+            method: "POST",
+            path: "/api/tasks",
+            body: JSON.stringify({
+              text: "Review the secure task",
+              run: { kind: "program", id: "claude" },
+              folder: "/home/owner/project",
+              space: { kind: "new", name: "Secure task" },
+            }),
+          }),
+        ),
+      );
+      await waitUntil(() => textRecords(controlClient).length === 2);
+
+      const controlResponse = textRecords(controlClient)[1] as {
+        status: number;
+        body: string;
+      };
+      expect(controlResponse.status).toBe(200);
+      expect(JSON.parse(controlResponse.body)).toMatchObject({
+        record: {
+          origin: "phone",
+          text: "Review the secure task",
+          terminal: "t-secure-task",
+        },
+        start: { placement: "core", address: "t-secure-task" },
+      });
+      expect(setup.runner.children).toHaveLength(1);
+      const storedTasks = (
+        setup.taskDocument() as {
+          tasks: Record<string, { text: string; terminal: string }>;
+        }
+      ).tasks;
+      expect(Object.values(storedTasks)).toHaveLength(1);
+      expect(Object.values(storedTasks)[0]).toMatchObject({
+        text: "Review the secure task",
+        terminal: "t-secure-task",
+      });
+
+      const watchClient = await connect({ v: 1, token: "watch-token" });
+      await waitUntil(() => textRecords(watchClient).length === 1);
+      watchClient.session.send(
+        "text",
+        encoder.encode(
+          JSON.stringify({
+            t: "req",
+            id: 2,
+            method: "POST",
+            path: "/api/tasks",
+            body: JSON.stringify({
+              text: "Review the denied task",
+              run: { kind: "program", id: "claude" },
+              folder: "/home/owner/project",
+              space: { kind: "new", name: "Denied task" },
+            }),
+          }),
+        ),
+      );
+      await waitUntil(() => textRecords(watchClient).length === 2);
+
+      expect(textRecords(watchClient)[1]).toMatchObject({ t: "res", id: 2, status: 403 });
+      expect(
+        Object.values((setup.taskDocument() as { tasks: Record<string, unknown> }).tasks),
+      ).toHaveLength(1);
       controlClient.session.close(1000, "test complete");
       watchClient.session.close(1000, "test complete");
     });

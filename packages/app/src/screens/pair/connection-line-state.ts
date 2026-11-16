@@ -6,6 +6,10 @@ export interface ConnectionLineState {
   indicator: "done" | "working" | "blocked";
 }
 
+export function pairedTasksMessage(machineName: string): string {
+  return `Paired with ${machineName}. Opening your tasks…`;
+}
+
 export function connectionLineState(
   state: ConnectionState | undefined,
   machineName: string,
