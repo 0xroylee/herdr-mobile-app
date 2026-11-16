@@ -26,6 +26,12 @@ flowchart LR
   splash -->|"a paired Mac"| home[Home]
   pair -->|"pairing succeeds"| home
   home -->|"open a project"| project[Project]
+  home -->|"Needs you tile"| needsList[Needs you list]
+  home -->|"Running tile"| runningList[Running list]
+  home -->|"Done tile"| doneList[Done list]
+  needsList --> task
+  runningList --> task
+  doneList --> task
   home -->|"⋯, Settings"| settings[Settings]
   home -->|"⋯, Pair again"| pair
   project -->|"tap a task"| task[Task, U22-6]
@@ -41,7 +47,7 @@ flowchart LR
   home -->|"no paired Mac when focused"| pair
 ```
 
-Smart tiles show Needs you, Running and Done counts. The list routes arrive in U22-7; the tiles have no navigation yet. Home's `New task` and `Add project` controls are drawn but inert until U22-5. Back on the agent terminal returns to the screen that opened it.
+Smart tiles show Needs you, Running and Done counts and open their matching lists. Home's `New task` and `Add project` controls are drawn but inert until U22-5. Back on the agent terminal returns to the screen that opened it.
 
 ## Roles
 
@@ -100,13 +106,13 @@ The app holds one bridge connection, to the active Mac. Home and Project show it
 
 Route `/`. Code in `screens/home/`.
 
-| ID     | User action       | What the app does                                                                                                                                                       | Code                                                                                                                             |
-| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| HOME-1 | Opens Home        | Shows the active Mac chip and the `⋯` menu. The chip selects a paired Mac; the menu opens Settings or Pair again.                                                       | `app/index.tsx`, `screens/home/HomeScreen.tsx`, `screens/home/MachineChip.tsx`, `screens/home/HomeMenu.tsx`, `store/machines.ts` |
-| HOME-2 | Searches tasks    | Filters open tasks by title, project or program. Checked tasks are excluded. Needs you, Running and Done tiles count matching tasks; Done includes stopped tasks.       | `screens/home/SearchField.tsx`, `screens/home/home-view.ts`, `screens/home/SmartTiles.tsx`, `model/tasks.ts`                     |
-| HOME-3 | Opens Projects    | Shows Herdr spaces in document order, then projects from task labels. Each row shows the most urgent unchecked task mark and unchecked count; tapping it opens Project. | `screens/home/ProjectRow.tsx`, `screens/home/home-view.ts`, `app/project/[id].tsx`, `model/spaces.ts`, `model/tasks.ts`          |
-| HOME-4 | Has no projects   | Shows `No projects yet. Spaces you make in Herdr show up here.`                                                                                                         | `screens/home/HomeScreen.tsx`                                                                                                    |
-| HOME-5 | Uses Home actions | Control devices see `New task` and `Add project`; both are inert until U22-5. Watch devices do not see them.                                                            | `screens/home/HomeScreen.tsx`                                                                                                    |
+| ID     | User action       | What the app does                                                                                                                                                                                         | Code                                                                                                                                |
+| ------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| HOME-1 | Opens Home        | Shows the active Mac chip and the `⋯` menu. The chip selects a paired Mac; the menu opens Settings or Pair again.                                                                                         | `app/index.tsx`, `screens/home/HomeScreen.tsx`, `screens/home/MachineChip.tsx`, `screens/home/HomeMenu.tsx`, `store/machines.ts`    |
+| HOME-2 | Searches tasks    | Filters open tasks by title, project or program. Checked tasks are excluded. Needs you, Running and Done tiles count matching tasks; Done includes stopped tasks. Tapping a tile opens its matching list. | `screens/home/SearchField.tsx`, `screens/home/home-view.ts`, `screens/home/SmartTiles.tsx`, `app/list/[kind].tsx`, `model/tasks.ts` |
+| HOME-3 | Opens Projects    | Shows Herdr spaces in document order, then projects from task labels. Each row shows the most urgent unchecked task mark and unchecked count; tapping it opens Project.                                   | `screens/home/ProjectRow.tsx`, `screens/home/home-view.ts`, `app/project/[id].tsx`, `model/spaces.ts`, `model/tasks.ts`             |
+| HOME-4 | Has no projects   | Shows `No projects yet. Spaces you make in Herdr show up here.`                                                                                                                                           | `screens/home/HomeScreen.tsx`                                                                                                       |
+| HOME-5 | Uses Home actions | Control devices see `New task` and `Add project`; both are inert until U22-5. Watch devices do not see them.                                                                                              | `screens/home/HomeScreen.tsx`                                                                                                       |
 
 ## Agent terminal
 
@@ -156,6 +162,16 @@ Route `/task/<id>`, where `id` is a task record id or `t:<address>` for an agent
 | TASK-4 | Follows up                     | Sends `terminal.send`, with `force` while the task needs you, and shows `Sent · waiting for <program>`. Stopped and checked tasks, watch devices and offline connections cannot send.                                           | `screens/task/TaskScreen.tsx`, `screens/task/task-screen-controller.ts`, `screens/agent/composer-controller.ts`, `screens/agent/useSent.ts`, `net/task-actions.ts`                         |
 | TASK-5 | Uses the task menu             | Offers Open terminal, Interrupt, Stop agent, Check off and Copy address when available. Watch devices get read actions only. Stop confirms; Check off uses the Project check-off flow and its current-state checks.             | `screens/task/TaskScreen.tsx`, `screens/task/task-screen-controller.ts`, `screens/project/check-off.ts`, `net/task-actions.ts`, `ui/components/Confirm.ts`, `ui/components/Confirm.web.ts` |
 | TASK-6 | Waits for an unlinked terminal | Shows `Starting in Herdr…`, links a matched terminal once on a connected control device, and after two minutes says `Couldn’t find this task’s terminal.` with Check off. The task route accepts the follow-up focus parameter. | `screens/task/TaskScreen.tsx`, `screens/task/task-screen-controller.ts`, `app/task/[id].tsx`, `routes.ts`, `net/task-actions.ts`                                                           |
+
+## Smart lists
+
+Routes `/list/needs-you`, `/list/running` and `/list/done`, opened from Home's matching tile. Code in `screens/lists/`.
+
+| ID      | User action     | What the app does                                                                                                                                                                                                                            | Code                                                                                                                                                                                                   |
+| ------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| LISTS-1 | Opens Needs you | Groups blocked tasks by project. Shows each question and recognized menu choices inline; a choice sends the prompt keys and shows `Sent` until status leaves blocked or 20 seconds pass.                                                     | `app/list/[kind].tsx`, `screens/lists/SmartListScreen.tsx`, `screens/lists/lists-view.ts`, `net/screen-text.ts`, `model/prompt.ts`, `screens/agent/prompt-answer.ts`, `screens/agent/key-queue.ts`     |
+| LISTS-2 | Opens Running   | Shows running tasks and `Waiting for status` when no status has arrived. Tapping a row opens Task. Check-off uses the shared confirmation for active work; there are no swipe actions.                                                       | `app/list/[kind].tsx`, `screens/lists/SmartListScreen.tsx`, `screens/lists/lists-view.ts`, `screens/project/check-off.ts`, `model/tasks.ts`                                                            |
+| LISTS-3 | Opens Done      | Shows Done and Stopped tasks newest first, with summaries and stopped text in `danger` tone. Control devices can swipe to Follow up or Check off, check off from the circle, or Check off all. A checked row dims for 600 ms before leaving. | `app/list/[kind].tsx`, `screens/lists/SmartListScreen.tsx`, `screens/lists/lists-view.ts`, `screens/project/check-off.ts`, `screens/project/project-view.ts`, `net/screen-text.ts`, `model/summary.ts` |
 
 ## Start agent
 
@@ -239,7 +255,6 @@ No user-visible features are in flight.
 | Push notifications for Needs you and Done                | #17, waiting for push credentials | SETTINGS-2       |
 | Pair another Mac from the app, such as a row in Settings | Needs a planning round            | PAIR-5           |
 | New task composer and details sheet                      | #84, #80                          | New IDs in U22-5 |
-| Needs you, Running and Done lists                        | #84, #82                          | New IDs in U22-7 |
 | Bridge task records and routes                           | #84, #77                          | New IDs in U22-2 |
 
 ## Known gaps
@@ -259,6 +274,7 @@ These are on `main` today.
 
 Newest first. One line per user-visible change, with the PR or commit and the rows it touched.
 
+- 2026-11-15, U22-7. Home's Needs you, Running and Done tiles open smart lists; Needs you shows inline prompt answers, Running lists active work, and Done groups completions and stopped tasks with check-off and follow-up actions. `HOME-2`, `LISTS-1` to `LISTS-3`.
 - 2026-11-15, #79. Replaces the tab bar, Agents and Spaces with Home and Project, routes terminals through each project's tabs, moves Settings into Home's menu, and retires the old navigation IDs. Smart list destinations and task detail arrive in U22-6 and U22-7; Home and Project task actions arrive in U22-5. `HOME-1` to `HOME-5`, `PROJ-1` to `PROJ-7`, `LAUNCH-3`, `CONN-3` to `CONN-5`, `CONN-7`, `PAIR-5`, Retired features.
 - 2026-11-15, U22-6 / #81. Adds task detail with state and age, prompt answers, latest output, terminal facts, follow-up, guarded menu actions, matched-terminal linking and unlinked-task recovery. `TASK-1` to `TASK-6`.
 - 2026-11-15, U22-2. Task starts pass guarded Claude Code or Codex prompts while Herdr is closed, store the verified launch folder in `herdr-mobile.tasks`, sync check-off and terminal links through task routes, map task errors to fixed UI copy and log only whether a task was present. `START-4`, `BRIDGE-7`, `BRIDGE-9`, `BRIDGE-14`.
