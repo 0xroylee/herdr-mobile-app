@@ -35,7 +35,7 @@ import {
   NewTaskController,
   newTaskControllerKey,
 } from "./new-task-controller.ts";
-import { bindNewTaskController, createNewTaskPort } from "./new-task-port.ts";
+import { bindNewTaskScreen, unavailableNewTaskPort } from "./new-task-port.ts";
 import {
   cacheTaskSummaryRead,
   deriveProjectView,
@@ -87,20 +87,6 @@ export function ProjectScreen() {
   const [summaries, setSummaries] = useState<Record<string, string>>({});
   const requestedSummaries = useRef(new Set<string>());
   const [now, setNow] = useState(() => Date.now());
-  const calls = useMemo(
-    () =>
-      connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac."),
-    [connectionManager],
-  );
-  const taskPort = useMemo(
-    () =>
-      createNewTaskPort(calls, {
-        rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
-        rememberFolder: (machineId, folder) =>
-          settingsStore.getState().pushRecentFolder(machineId, folder),
-      }),
-    [calls],
-  );
   const taskContext = useMemo<NewTaskContext>(
     () => ({
       machineId: activeId ?? undefined,
@@ -124,14 +110,14 @@ export function ProjectScreen() {
   const newTaskKey = newTaskControllerKey(activeId ?? "unpaired", projectId);
   const newTaskController = useMemo(
     () =>
-      getNewTaskController(
-        newTaskKey,
-        () =>
-          new NewTaskController(taskPort, taskContext, {
-            project: { kind: "existing", id: projectId },
-          }),
-      ),
-    [newTaskKey, projectId, taskContext, taskPort],
+      getNewTaskController(newTaskKey, () => {
+        const controller = new NewTaskController(unavailableNewTaskPort, taskContext, {
+          project: { kind: "existing", id: projectId },
+        });
+        bindNewTaskScreen(controller, connectionManager, taskContext, settingsStore.getState());
+        return controller;
+      }),
+    [connectionManager, newTaskKey, projectId, taskContext],
   );
   const newTaskState = useSyncExternalStore(
     newTaskController.subscribe,
@@ -145,11 +131,7 @@ export function ProjectScreen() {
   }, []);
 
   useEffect(() => {
-    bindNewTaskController(newTaskController, connectionManager, taskContext, {
-      rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
-      rememberFolder: (machineId, folder) =>
-        settingsStore.getState().pushRecentFolder(machineId, folder),
-    });
+    bindNewTaskScreen(newTaskController, connectionManager, taskContext, settingsStore.getState());
   }, [connectionManager, newTaskController, taskContext]);
 
   useEffect(() => {
