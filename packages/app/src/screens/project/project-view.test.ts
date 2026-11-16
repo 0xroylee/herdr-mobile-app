@@ -211,11 +211,23 @@ describe("deriveProjectView", () => {
         reason: "exited",
         status: { state: "done", msg: "Status message" },
       },
+      summary: "Bridge summary",
       lastSeenStatus: { state: "done", msg: "Older status" },
     });
 
     expect(taskSummary(ended, {})).toBe("Status message");
     expect(shouldReadTaskSummary(ended, {})).toBe(false);
+  });
+
+  test("prefers a row summary to the phone cache and skips the lazy screen read", () => {
+    const rowWithSummary = summaryRow("done", {
+      terminal: { state: "finished", turn: 3, status: null },
+      summary: "Bridge summary",
+    });
+    const cache = { [taskSummaryKey(rowWithSummary)]: "Phone summary" };
+
+    expect(taskSummary(rowWithSummary, cache)).toBe("Bridge summary");
+    expect(shouldReadTaskSummary(rowWithSummary, {})).toBe(false);
   });
 
   test("uses cached output when an ended kept terminal has no status message", () => {
@@ -321,6 +333,7 @@ function summaryRow(
   options: {
     terminal?: Partial<NonNullable<TaskSummaryRow["terminal"]>>;
     lastSeenStatus?: TaskSummaryRow["lastSeenStatus"];
+    summary?: TaskSummaryRow["summary"];
   },
 ): TaskSummaryRow {
   const task = row("summary", 1, state);
@@ -342,6 +355,7 @@ function summaryRow(
             ...options.terminal,
           } as TaskSummaryRow["terminal"]),
     lastSeenStatus: options.lastSeenStatus,
+    summary: options.summary,
   };
 }
 
@@ -364,5 +378,7 @@ function row(id: string, createdAt: number, state: TaskRow["state"] = "running")
     checked: state === "checked",
     question: undefined,
     stoppedText: undefined,
+    summary: undefined,
+    summarySource: "phone",
   };
 }

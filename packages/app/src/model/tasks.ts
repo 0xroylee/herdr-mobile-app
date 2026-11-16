@@ -5,6 +5,7 @@ import {
   matchTerminal,
   type Status,
   stoppedText,
+  type TaskOutcome,
   type TaskRecord,
   type TaskState,
   type Terminal,
@@ -47,6 +48,8 @@ export interface TaskRow {
   checked: boolean;
   question: string | undefined;
   stoppedText: string | undefined;
+  summary?: string;
+  summarySource?: "bridge" | "phone" | undefined;
 }
 
 export interface ProjectTaskCounts {
@@ -134,7 +137,8 @@ export function deriveTasks(
       location?.tab.name,
       layout === undefined ? terminal?.labels["herdr.tab"] : undefined,
     );
-    const state = taskState(record, terminal, lastSeen[address ?? ""]);
+    const outcome = taskRowOutcome(record, terminal, lastSeen[address ?? ""]);
+    const state = outcome.state;
     const question =
       state === "needs-you"
         ? (nonEmpty(terminal?.status?.msg) ?? nonEmpty(terminal?.status?.title))
@@ -157,7 +161,9 @@ export function deriveTasks(
       matched,
       checked: state === "checked",
       question,
-      stoppedText: state === "stopped" ? stoppedText(terminal) : undefined,
+      stoppedText: state === "stopped" ? (outcome.stoppedText ?? stoppedText(terminal)) : undefined,
+      summary: outcome.summary,
+      summarySource: outcome.summarySource,
     });
   }
 
@@ -204,6 +210,8 @@ export function deriveTasks(
           ? (nonEmpty(terminal.status?.msg) ?? nonEmpty(terminal.status?.title))
           : undefined,
       stoppedText: state === "stopped" ? stoppedText(terminal) : undefined,
+      summary: undefined,
+      summarySource: "phone",
     });
     claimed.add(terminal.address);
   }
@@ -257,6 +265,78 @@ export function deriveTasks(
     counts,
     taskFor: (id) => byId.get(id),
   };
+}
+
+interface TaskRowOutcome {
+  state: TaskState;
+  stoppedText: string | undefined;
+  summary: string | undefined;
+  summarySource: "bridge" | "phone" | undefined;
+}
+
+/** Apply persisted outcomes only to linked records, preserving the shared live-state rule. */
+function taskRowOutcome(
+  record: TaskRecord,
+  terminal: Terminal | undefined,
+  lastSeen: Status | null | undefined,
+): TaskRowOutcome {
+  const state = taskState(record, terminal, lastSeen);
+  if (state === "checked" || record.terminal === undefined) {
+    return { state, stoppedText: undefined, summary: undefined, summarySource: "phone" };
+  }
+
+  const outcome = record.outcome;
+  if (outcome === undefined) {
+    return { state, stoppedText: undefined, summary: undefined, summarySource: "phone" };
+  }
+
+  if (terminal === undefined) {
+    return taskRowOutcomeFromRecord(outcome, outcome.state, undefined);
+  }
+
+  if (isEnded(terminal)) {
+    if (outcome.ended || outcome.turn === terminal.turn) {
+      return taskRowOutcomeFromRecord(outcome, outcome.state, terminal);
+    }
+    return { state, stoppedText: undefined, summary: undefined, summarySource: "phone" };
+  }
+
+  if (state === "done" && outcome.state === "done" && outcome.turn === terminal.turn) {
+    return {
+      state,
+      stoppedText: undefined,
+      summary: outcome.summary,
+      summarySource: outcome.summary === undefined ? undefined : "bridge",
+    };
+  }
+
+  return { state, stoppedText: undefined, summary: undefined, summarySource: "phone" };
+}
+
+function taskRowOutcomeFromRecord(
+  outcome: TaskOutcome,
+  state: TaskState,
+  terminal: Terminal | undefined,
+): TaskRowOutcome {
+  const isDone = outcome.state === "done";
+  return {
+    state,
+    stoppedText:
+      outcome.state === "stopped" ? stoppedTextFromOutcome(outcome, terminal) : undefined,
+    summary: isDone ? outcome.summary : undefined,
+    summarySource: isDone ? (outcome.summary === undefined ? undefined : "bridge") : undefined,
+  };
+}
+
+function stoppedTextFromOutcome(outcome: TaskOutcome, terminal: Terminal | undefined): string {
+  if (outcome.exit === undefined) return stoppedText(terminal);
+  if (outcome.exit.code !== null) {
+    return `Exited with code ${outcome.exit.code} before it finished.`;
+  }
+  if (outcome.exit.signal !== null) {
+    return `Stopped by ${outcome.exit.signal} before it finished.`;
+  }
+  return "Ended before it finished.";
 }
 
 function makeProject(space: LayoutSpace | undefined, fallbackId: string | undefined): TaskProject {

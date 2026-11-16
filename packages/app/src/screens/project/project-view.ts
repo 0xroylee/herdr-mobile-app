@@ -120,6 +120,7 @@ export function shouldReadTaskSummary(
     row.state === "done" &&
     row.address !== undefined &&
     isReadableTaskSummaryTerminal(row.terminal) &&
+    oneLine(row.summary) === undefined &&
     statusMessage(row) === undefined &&
     !Object.hasOwn(cache, taskSummaryKey(row))
   );
@@ -171,6 +172,9 @@ export function taskSummary(
 
   const message = statusMessage(row);
   if (message !== undefined) return message;
+
+  const summary = oneLine(row.summary);
+  if (summary !== undefined) return summary;
 
   const key = taskSummaryKey(row);
   if (Object.hasOwn(cache, key)) return cache[key];

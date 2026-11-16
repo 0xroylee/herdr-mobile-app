@@ -52,6 +52,7 @@ import {
   type TaskScreenOutput,
   TaskScreenReadGeneration,
   type TaskScreenRuntime,
+  taskLinkErrorMessage,
   taskMenuItems,
   taskRowForRoute,
   taskStartedFact,
@@ -232,7 +233,8 @@ export function TaskScreen({ taskId, focusFollowUp = false }: TaskScreenProps) {
 
     let current = true;
     void actions.link(request).catch((error: unknown) => {
-      if (current) setMessage(errorText(error, "Couldn't link this task to its terminal."));
+      const errorMessage = taskLinkErrorMessage(error);
+      if (current && errorMessage !== undefined) setMessage(errorMessage);
     });
     return () => {
       current = false;

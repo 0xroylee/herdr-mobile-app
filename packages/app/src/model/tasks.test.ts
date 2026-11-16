@@ -5,6 +5,234 @@ import { taskLayout, taskRecord, taskTerminal } from "./tasks.fixtures.ts";
 import { deriveTasks } from "./tasks.ts";
 
 describe("deriveTasks", () => {
+  test("uses a matching live Done outcome summary without changing the live state", () => {
+    const record = taskRecord("live-done", {
+      terminal: "t-live-done",
+      outcome: { state: "done", turn: 1, ended: false, at: 1, summary: "Bridge summary" },
+    });
+    const result = deriveTasks(
+      { [record.id]: record },
+      [taskTerminal("t-live-done", { status: { state: "done" }, turn: 1 })],
+      undefined,
+      {},
+      50_000,
+    );
+
+    expect(result.rows[0]).toMatchObject({
+      state: "done",
+      summary: "Bridge summary",
+      summarySource: "bridge",
+    });
+  });
+
+  test("ignores a stale live outcome and keeps the phone summary path", () => {
+    const record = taskRecord("live-stale", {
+      terminal: "t-live-stale",
+      outcome: { state: "done", turn: 1, ended: false, at: 1, summary: "Stale summary" },
+    });
+    const result = deriveTasks(
+      { [record.id]: record },
+      [taskTerminal("t-live-stale", { status: { state: "done" }, turn: 2 })],
+      undefined,
+      {},
+      50_000,
+    );
+
+    expect(result.rows[0]).toMatchObject({
+      state: "done",
+      summary: undefined,
+      summarySource: "phone",
+    });
+  });
+
+  test.each([
+    [
+      "ended flag with persisted exit details",
+      { ended: true, turn: 2 },
+      0,
+      undefined,
+      { code: 8, signal: null, reason: "exited" },
+      "Exited with code 8 before it finished.",
+    ],
+    [
+      "matching turn with terminal exit details",
+      { ended: false, turn: 1 },
+      7,
+      { state: "done" },
+      undefined,
+      "Exited with code 7 before it finished.",
+    ],
+  ] as const)(
+    "trusts a Stopped outcome over local Done evidence (%s)",
+    (_label, trust, exitCode, lastSeen, exit, stoppedText) => {
+      const address = "t-stopped-outcome";
+      const record = taskRecord("stopped-outcome", {
+        terminal: address,
+        outcome: {
+          state: "stopped",
+          at: 1,
+          ...(exit === undefined ? {} : { exit }),
+          ...trust,
+        },
+      });
+      const result = deriveTasks(
+        { [record.id]: record },
+        [
+          taskTerminal(address, {
+            state: "finished",
+            reason: "exited",
+            exit_code: exitCode,
+            status: null,
+            turn: 1,
+          }),
+        ],
+        undefined,
+        lastSeen === undefined ? {} : { [address]: lastSeen },
+        50_000,
+      );
+
+      expect(result.rows[0]).toMatchObject({
+        state: "stopped",
+        stoppedText,
+        summary: undefined,
+        summarySource: undefined,
+      });
+    },
+  );
+
+  test.each([
+    ["ended flag", { ended: true, turn: 2 }],
+    ["matching turn", { ended: false, turn: 1 }],
+  ] as const)("trusts a Done outcome over local Stopped evidence (%s)", (_label, trust) => {
+    const record = taskRecord("done-over-stopped", {
+      terminal: "t-done-over-stopped",
+      outcome: {
+        state: "done",
+        at: 1,
+        summary: "Persisted summary",
+        ...trust,
+      },
+    });
+    const result = deriveTasks(
+      { [record.id]: record },
+      [
+        taskTerminal("t-done-over-stopped", {
+          state: "finished",
+          reason: "exited",
+          exit_code: 3,
+          status: null,
+          turn: 1,
+        }),
+      ],
+      undefined,
+      {},
+      50_000,
+    );
+
+    expect(result.rows[0]).toMatchObject({
+      state: "done",
+      stoppedText: undefined,
+      summary: "Persisted summary",
+      summarySource: "bridge",
+    });
+  });
+
+  test("uses the current phone derivation when an ended outcome is stale", () => {
+    const record = taskRecord("ended-stale", {
+      terminal: "t-ended-stale",
+      outcome: { state: "done", turn: 1, ended: false, at: 1, summary: "Stale summary" },
+    });
+    const result = deriveTasks(
+      { [record.id]: record },
+      [
+        taskTerminal("t-ended-stale", {
+          state: "finished",
+          reason: "exited",
+          exit_code: 3,
+          status: null,
+          turn: 2,
+        }),
+      ],
+      undefined,
+      {},
+      50_000,
+    );
+
+    expect(result.rows[0]).toMatchObject({
+      state: "stopped",
+      stoppedText: "Exited with code 3 before it finished.",
+      summary: undefined,
+      summarySource: "phone",
+    });
+  });
+
+  test("keeps a missing linked terminal Done from its outcome", () => {
+    const record = taskRecord("missing-done", {
+      terminal: "t-missing-done",
+      outcome: { state: "done", turn: 4, ended: true, at: 1, summary: "Persisted summary" },
+    });
+    const result = deriveTasks({ [record.id]: record }, [], undefined, {}, 50_000);
+
+    expect(result.rows[0]).toMatchObject({
+      state: "done",
+      summary: "Persisted summary",
+      summarySource: "bridge",
+      stoppedText: undefined,
+    });
+  });
+
+  test("keeps a missing linked terminal Stopped with persisted exit text", () => {
+    const record = taskRecord("missing-stopped", {
+      terminal: "t-missing-stopped",
+      outcome: {
+        state: "stopped",
+        turn: 4,
+        ended: true,
+        at: 1,
+        exit: { code: 8, signal: null, reason: "exited" },
+      },
+    });
+    const result = deriveTasks({ [record.id]: record }, [], undefined, {}, 50_000);
+
+    expect(result.rows[0]).toMatchObject({
+      state: "stopped",
+      stoppedText: "Exited with code 8 before it finished.",
+      summary: undefined,
+      summarySource: undefined,
+    });
+  });
+
+  test("does not apply outcomes to an unlinked record and keeps checked state authoritative", () => {
+    const unlinked = taskRecord("unlinked-outcome", {
+      terminal: undefined,
+      outcome: { state: "done", turn: 1, ended: true, at: 1, summary: "Ignored summary" },
+    });
+    const checked = taskRecord("checked-outcome", {
+      terminal: "t-checked-outcome",
+      checkedTurn: 2,
+      outcome: { state: "done", turn: 2, ended: true, at: 1, summary: "Ignored summary" },
+    });
+    const result = deriveTasks(
+      { [unlinked.id]: unlinked, [checked.id]: checked },
+      [taskTerminal("t-checked-outcome", { state: "finished", turn: 2 })],
+      undefined,
+      {},
+      50_000,
+    );
+
+    expect(result.taskFor(unlinked.id)).toMatchObject({
+      state: "running",
+      unlinked: true,
+      summary: undefined,
+      summarySource: "phone",
+    });
+    expect(result.taskFor(checked.id)).toMatchObject({
+      state: "checked",
+      summary: undefined,
+      summarySource: "phone",
+    });
+  });
+
   test("formats stopped text from the terminal exit details", () => {
     const rows = deriveTasks(
       {
