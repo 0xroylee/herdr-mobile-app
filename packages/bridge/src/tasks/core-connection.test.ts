@@ -4,6 +4,7 @@ import { FrameKind, type Terminal } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import type { OwnedProcess, ProcessRunner } from "../prototype/process.ts";
 import {
+  CORE_CONNECTION_CLOSE_MS,
   CORE_CONNECTION_EXIT_GRACE_MS,
   CORE_CONNECTION_RECONNECT_MS,
   CORE_CONNECTION_STAGE_MS,
@@ -720,6 +721,97 @@ describe("CoreConnection", () => {
     oldChild.closeOutput();
     expect(connection.status().state).toBe("live");
     expect(clock.nextDelay).toBe(CORE_CONNECTION_STALE_MS);
+    await stopWithFakeClock(connection, clock);
+  });
+
+  test("does not park when a zero exit settles during stop's cancelled stdout grace", async () => {
+    const { runner, clock, connection, states } = makeConnection();
+    const oldChild = await connectLive(connection, runner);
+    oldChild.ignoreClose = true;
+    oldChild.closeOutput();
+    await waitFor(() => clock.nextDelay === CORE_CONNECTION_EXIT_GRACE_MS);
+
+    const stopping = connection.stop();
+    oldChild.exit(0, false);
+    await clock.advance(CORE_CONNECTION_CLOSE_MS);
+    await stopping;
+    await settle();
+
+    expect(connection.status().state).toBe("stopped");
+    expect(states.map(({ state }) => state)).not.toContain("parked");
+
+    connection.start();
+    await waitFor(() => connection.status().state === "live");
+    expect(runner.children).toHaveLength(2);
+    await settle();
+    expect(connection.status().state).toBe("live");
+    await stopWithFakeClock(connection, clock);
+  });
+
+  test("ignores old output and events after stop and restart", async () => {
+    const forwarded: number[] = [];
+    const { runner, clock, connection } = makeConnection({
+      random: () => 0.5,
+      onEvent: (event) => forwarded.push(event.seq),
+    });
+    const oldChild = await connectLive(connection, runner);
+    const oldChannel = oldChild.core.opened.subscribe[0];
+    if (oldChannel === undefined) throw new Error("old subscription channel missing");
+
+    oldChild.exit(1, false);
+    await waitFor(() => clock.nextDelay === CORE_CONNECTION_EXIT_GRACE_MS);
+    const stopping = connection.stop();
+    notify(oldChild, oldChannel, "event", {
+      seq: 98,
+      type: "status",
+      terminal: "late-during-stop",
+      data: { state: "done" },
+    });
+    await settle();
+    await clock.advance(CORE_CONNECTION_CLOSE_MS);
+    await stopping;
+    expect(connection.status().state).toBe("stopped");
+    expect(oldChild.outputClosed).toBe(false);
+
+    connection.start();
+    await waitFor(() => connection.status().state === "live");
+    const currentChild = runner.children.at(-1);
+    if (!currentChild || currentChild === oldChild) throw new Error("replacement child missing");
+    const currentChannel = currentChild.core.opened.subscribe[0];
+    if (currentChannel === undefined) throw new Error("replacement subscription channel missing");
+    notify(currentChild, currentChannel, "heartbeat", { seq: 11 });
+    await settle();
+
+    const lastEventAt = connection.status().lastEventAt;
+    const nextDelay = clock.nextDelay;
+    expect(nextDelay).toBe(CORE_CONNECTION_STALE_MS);
+    notify(oldChild, oldChannel, "event", {
+      seq: 99,
+      type: "status",
+      terminal: "late-terminal",
+      data: { state: "done" },
+    });
+    oldChild.closeOutput();
+    await settle();
+
+    expect(oldChild.outputClosed).toBe(true);
+    expect(forwarded).toEqual([]);
+    expect(connection.status()).toMatchObject({ state: "live", seq: 11, lastEventAt });
+    expect(clock.nextDelay).toBe(nextDelay);
+
+    await clock.advance(CORE_CONNECTION_STALE_MS - 1);
+    expect(connection.status().state).toBe("live");
+    await clock.advance(1);
+    expect(connection.status().state).toBe("stale");
+    await clock.advance(CORE_CONNECTION_RECONNECT_MS - CORE_CONNECTION_STALE_MS);
+    expect(connection.status().state).toBe("stale");
+    await clock.advance(CORE_CONNECTION_EXIT_GRACE_MS);
+    await waitFor(() => connection.status().state === "backoff");
+    expect(currentChild.killed).toBe(true);
+
+    await clock.advance(1_000);
+    await waitFor(() => connection.status().state === "live");
+    expect(runner.children).toHaveLength(3);
     await stopWithFakeClock(connection, clock);
   });
 
