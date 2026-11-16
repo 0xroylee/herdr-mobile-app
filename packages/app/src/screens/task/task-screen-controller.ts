@@ -1,6 +1,7 @@
 import type { LinkTaskRequest, Role } from "@herdr-mobile/protocol";
 import { type Prompt, promptKey } from "../../model/prompt.ts";
 import type { DerivedTasks, TaskRow, TaskState } from "../../model/tasks.ts";
+import { BridgeApiError } from "../../net/bridge-api.ts";
 import type { TaskActions } from "../../net/task-actions.ts";
 import type { ConnectionState } from "../../store/core.ts";
 import { type AgentActionPort, interruptAgent } from "../agent/actions.ts";
@@ -246,6 +247,14 @@ export class MatchedTaskLinkController {
     this.claimed.add(row.record.id);
     return { id: row.record.id, terminal: row.address };
   }
+}
+
+/** Return no message when the bridge says another client already linked this task. */
+export function taskLinkErrorMessage(error: unknown): string | undefined {
+  if (error instanceof BridgeApiError && error.status === 409 && error.code === "task_linked") {
+    return undefined;
+  }
+  return error instanceof Error ? error.message : "Couldn't link this task to its terminal.";
 }
 
 /** The done-list swipe passes this route value to focus the task's follow-up field. */

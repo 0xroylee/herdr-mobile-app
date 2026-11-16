@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { type Prompt, promptKey } from "../../model/prompt.ts";
 import { taskRecord, taskTerminal } from "../../model/tasks.fixtures.ts";
 import type { TaskRow } from "../../model/tasks.ts";
+import { BridgeApiError, createBridgeApi } from "../../net/bridge-api.ts";
 import type { TaskActions } from "../../net/task-actions.ts";
 import type { TaskIdentity } from "../project/check-off.ts";
 import {
@@ -20,6 +21,7 @@ import {
   TaskScreenReadGeneration,
   type TaskScreenRuntime,
   type TaskScreenSnapshot,
+  taskLinkErrorMessage,
   taskMenuItems,
   taskRowForRoute,
   taskStartedFact,
@@ -198,6 +200,29 @@ describe("task screen controller", () => {
       terminal: "t-matched",
     });
     expect(controller.claim(row, "control", "connected")).toBeUndefined();
+  });
+
+  test("treats a 409 from /api/tasks/link as a successful matched-task link", async () => {
+    const api = createBridgeApi(async (input) => {
+      expect(input).toBe("https://mac.test/api/tasks/link");
+      return Response.json(
+        { error: "task_linked", message: "Task is already linked" },
+        { status: 409 },
+      );
+    });
+    const request = { id: taskRecord("already-linked").id, terminal: "t-task" };
+    const messages: string[] = [];
+
+    await api.linkTask("https://mac.test", "token", request).catch((error: unknown) => {
+      const message = taskLinkErrorMessage(error);
+      if (message !== undefined) messages.push(message);
+    });
+
+    expect(messages).toEqual([]);
+    expect(taskLinkErrorMessage(new BridgeApiError(409, "task_missing", "Task is missing"))).toBe(
+      "Task is missing",
+    );
+    expect(taskLinkErrorMessage(new Error("Offline"))).toBe("Offline");
   });
 
   test("recognizes only the follow-up focus route parameter", () => {
@@ -457,6 +482,7 @@ function makeRow(
     stoppedText: undefined,
     ...overrides,
     terminal,
+    summarySource: overrides.summarySource ?? "phone",
   };
 }
 
