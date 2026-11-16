@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { HcRpcError } from "@herdr-mobile/hc-client";
-import type { DeviceRecordView, TaskRecord, TasksDocument } from "@herdr-mobile/protocol";
+import type {
+  DeviceRecordView,
+  TaskOutcome,
+  TaskRecord,
+  TasksDocument,
+} from "@herdr-mobile/protocol";
 import { TASKS_DOC_NAME, TASKS_MAX_AGE_MS, TASKS_TARGET_BYTES } from "@herdr-mobile/protocol";
 import type { Clock } from "../prototype/deadline.ts";
 import type { TaskCoreCaller } from "./task-store.ts";
@@ -23,12 +28,15 @@ class FakeCore {
   live: Array<string | { address: string; state: string; reason?: unknown }> = [];
   docValue: unknown = undefined;
   externalDocument: TasksDocument | undefined;
+  readonly calls: string[] = [];
   gets = 0;
+  lists = 0;
   sets: Array<{ version: number; value: TasksDocument }> = [];
   conflicts = 0;
   setFailure: Error | undefined;
 
   readonly call: TaskCoreCaller = async (method, params) => {
+    this.calls.push(method);
     if (method === "doc.get") {
       this.gets += 1;
       expect(params).toEqual({ name: TASKS_DOC_NAME });
@@ -38,6 +46,7 @@ class FakeCore {
       };
     }
     if (method === "terminal.list") {
+      this.lists += 1;
       return {
         terminals: this.live.map((terminal) =>
           typeof terminal === "string" ? { address: terminal, state: "live" } : terminal,
@@ -97,6 +106,125 @@ async function opened(core = new FakeCore(), clock = new FakeClock()) {
 }
 
 describe("TaskStore", () => {
+  test("creates without contacting an unavailable core", async () => {
+    let calls = 0;
+    const store = TaskStore.create(async () => {
+      calls += 1;
+      throw new Error("core is down");
+    });
+
+    expect(calls).toBe(0);
+    expect(store.snapshot()).toEqual({ v: 1, tasks: {} });
+    await expect(
+      store.create({
+        text: "Review this change",
+        run: { kind: "program", id: "claude" },
+        folder: "/repo",
+      }),
+    ).rejects.toMatchObject({ code: "core_unavailable" });
+    expect(calls).toBe(1);
+  });
+
+  test("loads the document on its first write before setting it", async () => {
+    const core = new FakeCore();
+    const store = TaskStore.create(core.call, new FakeClock());
+
+    expect(core.calls).toEqual([]);
+    const created = await store.create({
+      text: "Review this change",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+
+    expect(core.calls[0]).toBe("doc.get");
+    expect(core.calls.at(-1)).toBe("doc.set");
+    expect(core.gets).toBe(1);
+    expect(core.document.tasks[created.id]).toEqual(created);
+  });
+
+  test("records several outcomes in one write and leaves other fields intact", async () => {
+    const { core, store } = await opened();
+    const first = await store.create({
+      text: "First task",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    const second = await store.create({
+      text: "Second task",
+      run: { kind: "program", id: "codex" },
+      folder: "/repo",
+    });
+    const firstOutcome: TaskOutcome = { state: "done", turn: 2, ended: true, at: 3 };
+    const secondOutcome: TaskOutcome = { state: "stopped", turn: 1, ended: true, at: 4 };
+    core.sets.length = 0;
+
+    await store.recordOutcomes({
+      [first.id]: firstOutcome,
+      [second.id]: secondOutcome,
+      [`tk${"f".repeat(32)}`]: firstOutcome,
+    });
+
+    expect(core.sets).toHaveLength(1);
+    expect(store.snapshot().tasks[first.id]).toMatchObject({
+      text: "First task",
+      folder: "/repo",
+      outcome: firstOutcome,
+    });
+    expect(store.snapshot().tasks[second.id]?.outcome).toEqual(secondOutcome);
+    await store.recordOutcomes({ [first.id]: undefined });
+    expect(store.snapshot().tasks[first.id]).not.toHaveProperty("outcome");
+    expect(store.snapshot().tasks[second.id]?.outcome).toEqual(secondOutcome);
+  });
+
+  test("uses provided live terminals and falls back when the provider returns undefined", async () => {
+    const supplied = new FakeCore();
+    const suppliedStore = TaskStore.create(supplied.call, new FakeClock(), {
+      liveTerminals: () => new Set(),
+    });
+    await suppliedStore.create({
+      text: "Task",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(supplied.lists).toBe(0);
+
+    const fallback = new FakeCore();
+    const fallbackStore = TaskStore.create(fallback.call, new FakeClock(), {
+      liveTerminals: () => undefined,
+    });
+    await fallbackStore.create({
+      text: "Task",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(fallback.lists).toBe(1);
+  });
+
+  test("notifies after confirmed writes and after a conflict reread", async () => {
+    const core = new FakeCore();
+    const store = await TaskStore.open(core.call, new FakeClock());
+    const snapshots: TasksDocument[] = [];
+    store.onChange(() => snapshots.push(store.snapshot()));
+    const externalId = `tk${"b".repeat(32)}`;
+    core.conflicts = 1;
+    core.externalDocument = {
+      v: 1,
+      tasks: { [externalId]: record(externalId, { text: "External task" }) },
+    };
+
+    const created = await store.create({
+      text: "Local task",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]?.tasks[externalId]?.text).toBe("External task");
+    expect(snapshots[0]?.tasks[created.id]).toBeUndefined();
+    expect(snapshots[1]?.tasks[externalId]?.text).toBe("External task");
+    expect(snapshots[1]?.tasks[created.id]).toEqual(created);
+  });
+
   test("opens the core document and returns isolated snapshots", async () => {
     const core = new FakeCore();
     const id = `tk${"a".repeat(32)}`;

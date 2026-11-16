@@ -3,6 +3,7 @@ import type {
   DeviceRecordView,
   StartAgentPlacement,
   StartAgentRun,
+  TaskOutcome,
   TaskRecord,
   TasksDocument,
 } from "@herdr-mobile/protocol";
@@ -19,6 +20,11 @@ import { systemClock } from "../prototype/deadline.ts";
 import type { CoreMethod } from "../server/core-call.ts";
 
 export type TaskCoreCaller = (method: CoreMethod, params: unknown) => Promise<unknown>;
+
+export interface TaskStoreOptions {
+  /** Replaces terminal.list for pruning while the caller can provide a current terminal table. */
+  liveTerminals?: () => ReadonlySet<string> | undefined;
+}
 
 export type TaskStoreErrorCode =
   | "core_unavailable"
@@ -159,33 +165,68 @@ function liveTerminalSet(value: unknown): ReadonlySet<string> {
 export class TaskStore {
   private readonly caller: TaskCoreCaller;
   private readonly clock: Clock;
-  private document: TasksDocument;
-  private version: number;
+  private readonly options: TaskStoreOptions;
+  private document: TasksDocument | undefined;
+  private version: number | undefined;
   private writeTail: Promise<void> = Promise.resolve();
+  private readonly listeners = new Set<() => void>();
 
   private constructor(
     caller: TaskCoreCaller,
     clock: Clock,
-    document: TasksDocument,
-    version: number,
+    document: TasksDocument | undefined,
+    version: number | undefined,
+    options: TaskStoreOptions,
   ) {
     this.caller = caller;
     this.clock = clock;
     this.document = document;
     this.version = version;
+    this.options = options;
   }
 
-  static async open(caller: TaskCoreCaller, clock: Clock = systemClock): Promise<TaskStore> {
+  static async open(
+    caller: TaskCoreCaller,
+    clock: Clock = systemClock,
+    options: TaskStoreOptions = {},
+  ): Promise<TaskStore> {
     try {
       const current = await TaskStore.read(caller);
-      return new TaskStore(caller, clock, current.document, current.version);
+      return new TaskStore(caller, clock, current.document, current.version, options);
     } catch {
       throw new TaskStoreError("core_unavailable");
     }
   }
 
+  /** Creates a store without contacting the core; its first write loads the current document. */
+  static create(
+    caller: TaskCoreCaller,
+    clock: Clock = systemClock,
+    options: TaskStoreOptions = {},
+  ): TaskStore {
+    return new TaskStore(caller, clock, undefined, undefined, options);
+  }
+
   snapshot(): TasksDocument {
-    return cloneDocument(this.document);
+    return cloneDocument(this.document ?? emptyDocument());
+  }
+
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  recordOutcomes(changes: Readonly<Record<string, TaskOutcome | undefined>>): Promise<void> {
+    return this.enqueue(async () => {
+      await this.write((document) => {
+        for (const [id, outcome] of Object.entries(changes)) {
+          const record = ownTask(document.tasks, id);
+          if (!record) continue;
+          if (outcome === undefined) delete record.outcome;
+          else record.outcome = structuredClone(outcome);
+        }
+      });
+    });
   }
 
   create(fields: CreateTaskFields): Promise<TaskRecord> {
@@ -352,8 +393,14 @@ export class TaskStore {
     mutate: (document: TasksDocument) => T,
     knownLiveTerminals?: ReadonlySet<string>,
   ): Promise<{ tasks: Record<string, TaskRecord>; result: T }> {
-    const live = knownLiveTerminals ?? (await this.readLiveTerminals());
-    let base: ReadDocument = { document: this.document, version: this.version };
+    await this.ensureLoaded();
+    const providedLiveTerminals =
+      knownLiveTerminals === undefined ? this.options.liveTerminals?.() : undefined;
+    const live = knownLiveTerminals ?? providedLiveTerminals ?? (await this.readLiveTerminals());
+    let base: ReadDocument = {
+      document: this.document ?? emptyDocument(),
+      version: this.version ?? 0,
+    };
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const candidate = cloneDocument(base.document);
       const result = mutate(candidate);
@@ -377,6 +424,7 @@ export class TaskStore {
         const nextVersion = response.version as number;
         this.document = candidate;
         this.version = nextVersion;
+        this.notifyChange();
         return { tasks: candidate.tasks, result };
       } catch (error) {
         if (error instanceof TaskStoreError) throw error;
@@ -386,6 +434,7 @@ export class TaskStore {
           base = await TaskStore.read(this.caller);
           this.document = base.document;
           this.version = base.version;
+          this.notifyChange();
         } catch (readError) {
           throw normalizeCoreError(readError);
         }
@@ -433,6 +482,27 @@ export class TaskStore {
       return liveTerminalSet(await this.caller("terminal.list", {}));
     } catch (error) {
       throw normalizeCoreError(error);
+    }
+  }
+
+  private async ensureLoaded(): Promise<void> {
+    if (this.document !== undefined && this.version !== undefined) return;
+    try {
+      const current = await TaskStore.read(this.caller);
+      this.document = current.document;
+      this.version = current.version;
+    } catch (error) {
+      throw normalizeCoreError(error);
+    }
+  }
+
+  private notifyChange(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // A subscriber cannot roll back a confirmed document write.
+      }
     }
   }
 
