@@ -264,7 +264,7 @@ export async function serveBridge(
     coreCall: coreCaller,
     output: dependencies.stdout ?? ((text) => console.log(text)),
   });
-  const taskStore = await TaskStore.open(coreCaller, clock);
+  const taskStore = TaskStore.create(coreCaller, clock);
   const taskRoutes: TaskRoutesContext = {
     starter: agentStarter,
     store: taskStore,

@@ -188,6 +188,7 @@ class FakeBridgeRunner implements ProcessRunner {
   private readonly allChildren: FakeConnect[] = [];
   readonly argv: string[][] = [];
   oneShotCore = false;
+  failConnect = false;
 
   get children(): FakeConnect[] {
     return this.allChildren.filter(
@@ -202,6 +203,7 @@ class FakeBridgeRunner implements ProcessRunner {
   spawn(argv: string[]): OwnedProcess {
     this.argv.push(argv);
     if (argv[0] === "/fake/herdr-app") return new FakeCommand("", "", 1);
+    if (this.failConnect) throw new Error("core is unavailable");
     const child = this.oneShotCore ? new FakeOneShotConnect() : new FakeConnect();
     child.core.answer = (method, params) => {
       if (method === "templates.list") {
@@ -269,13 +271,17 @@ interface BridgeHarness {
   dispose(): Promise<void>;
 }
 
-async function startHarness(secure?: { port: number; url?: string }): Promise<BridgeHarness> {
+async function startHarness(
+  secure?: { port: number; url?: string },
+  coreUnavailable = false,
+): Promise<BridgeHarness> {
   const scratch = join(process.cwd(), ".unshit");
   await mkdir(scratch, { recursive: true });
   const root = await mkdtemp(join(scratch, "serve-u4-"));
   const serve = fakeServe();
   const clock = new FakeClock();
   const runner = new FakeBridgeRunner();
+  runner.failConnect = coreUnavailable;
   const output: string[] = [];
   const config: BridgeConfig = {
     ownerLogin: "owner@example.com",
@@ -364,8 +370,9 @@ async function adminStatus(harness: BridgeHarness): Promise<{ sessions: number }
 async function withHarness<T>(
   work: (harness: BridgeHarness) => Promise<T>,
   secure?: { port: number; url?: string },
+  coreUnavailable = false,
 ): Promise<T> {
-  const harness = await startHarness(secure);
+  const harness = await startHarness(secure, coreUnavailable);
   try {
     return await work(harness);
   } finally {
@@ -551,6 +558,40 @@ describe("bridge HTTP dispatch", () => {
         checkedBy: { deviceId: device.id, deviceName: "Control phone" },
       });
     });
+  });
+
+  test("starts while the core is unavailable and returns core_unavailable from task routes", async () => {
+    await withHarness(
+      async (harness) => {
+        expect(harness.serve.web).toBeDefined();
+        expect(harness.runner.argv).toEqual([]);
+        await harness.bridge.devices.add({
+          token: "tasks-offline-token",
+          role: "control",
+          name: "Control phone",
+        });
+        const fetch = harness.serve.web?.fetch;
+        if (!fetch) throw new Error("fake Bun server did not receive the web handler");
+
+        const response = await fetch(
+          new Request("http://bridge/api/tasks/check", {
+            method: "POST",
+            headers: {
+              ...ownerHeaders,
+              Authorization: "Bearer tasks-offline-token",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ terminal: "t-mac", turn: 3 }),
+          }),
+        );
+
+        expect(response?.status).toBe(503);
+        expect(await response?.json()).toMatchObject({ error: "core_unavailable" });
+        expect(harness.runner.argv).toEqual([["/fake/hc", "connect"]]);
+      },
+      undefined,
+      true,
+    );
   });
 
   test("returns 404 for the retired agent start route", async () => {
@@ -871,7 +912,6 @@ describe("bridge WebSocket lifecycle", () => {
       resolveLookup(device);
       await settle();
       expect(harness.runner.argv).toEqual([
-        ["/fake/hc", "connect"], // Initial task-document read.
         ["/fake/hc", "connect"], // Authenticated terminal session.
       ]);
       expect(await adminStatus(harness)).toEqual({ sessions: 1 });

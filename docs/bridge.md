@@ -30,6 +30,8 @@ starts the separate secure listener. It trusts no request headers and returns `4
 than `/ws`. `--whois` additionally checks the forwarded peer address with `tailscale whois`.
 
 On startup, the CLI prints `Bridge listening on 127.0.0.1:8787` and `Admin socket: <path>`.
+The bridge starts even if herdr-core is not running. Task routes return `503 core_unavailable`
+until the core is reachable.
 
 The `build:web` script writes `packages/app/dist/index.html` and its assets. The `--web` value selects
 that build directory. The bridge checks identity before it serves any file. It returns the built
