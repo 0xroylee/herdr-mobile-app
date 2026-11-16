@@ -1,4 +1,5 @@
-import type { HcEvent, Status, SubscribeResult, Terminal } from "@herdr-mobile/protocol";
+import type { Status, SubscribeResult, Terminal } from "./generated/hc-api.ts";
+import type { HcEvent } from "./wire.ts";
 
 export type TerminalTable = Readonly<Record<string, Terminal>>;
 export type MutableTerminalTable = Record<string, Terminal>;

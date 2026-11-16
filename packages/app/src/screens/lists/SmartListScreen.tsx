@@ -1,4 +1,5 @@
 import type { Status } from "@herdr-mobile/protocol";
+import { summarize } from "@herdr-mobile/protocol";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import {
   type ReactNode,
@@ -19,7 +20,6 @@ import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import { promptKey, recognizePrompt } from "../../model/prompt.ts";
 import { SENT_TIMEOUT_MS } from "../../model/sent.ts";
-import { summarize } from "../../model/summary.ts";
 import { deriveTasks, type TaskRow as TaskRowModel } from "../../model/tasks.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import type { ScreenText } from "../../net/screen-text.ts";

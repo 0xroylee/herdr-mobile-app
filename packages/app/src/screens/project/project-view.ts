@@ -1,6 +1,6 @@
 import type { Role, Status } from "@herdr-mobile/protocol";
+import { oneLine } from "@herdr-mobile/protocol";
 import type { Href } from "expo-router";
-import { oneLine } from "../../model/summary.ts";
 import type { TaskProject, TaskRow } from "../../model/tasks.ts";
 import { routes } from "../../routes.ts";
 import type { ConnectionState } from "../../store/core.ts";

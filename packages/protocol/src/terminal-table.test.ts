@@ -1,8 +1,9 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import type { HcEvent, Terminal } from "@herdr-mobile/protocol";
-import { applyEvent, applySnapshot } from "./terminals.ts";
+import type { Terminal } from "./generated/hc-api.ts";
+import { applyEvent, applySnapshot } from "./terminal-table.ts";
+import type { HcEvent } from "./wire.ts";
 
 const baseTerminal = (address = "t1"): Terminal => ({
   address,

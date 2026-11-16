@@ -11,6 +11,20 @@ export const TASKS_TARGET_BYTES = 768 * 1024;
 
 export type TaskOrigin = "phone" | "herdr";
 
+export interface TaskOutcome {
+  state: "done" | "stopped";
+  /** Terminal turn when observed; the phone trusts this outcome only at this turn or when ended. */
+  turn: number;
+  /** True once the program ended (finished, lost, or removed). */
+  ended: boolean;
+  /** Bridge clock, for display and debugging only; never compared with a phone clock. */
+  at: number;
+  /** Done summary from the agent status or terminal screen, capped at 160 characters. */
+  summary?: string;
+  /** Stopped details reported by the core, so the phone's text survives removal. */
+  exit?: { code: number | null; signal: number | null; reason: string | null };
+}
+
 export interface TaskRecord {
   id: string;
   origin: TaskOrigin;
@@ -26,6 +40,7 @@ export interface TaskRecord {
   checkedTurn?: number;
   checkedAt?: number;
   checkedBy?: { deviceId: string; deviceName: string };
+  outcome?: TaskOutcome;
 }
 
 export interface TasksDocument {
@@ -94,7 +109,59 @@ function parseTaskRecord(value: JsonValue): TaskRecord | undefined {
   if (isDevice(value.checkedBy)) {
     task.checkedBy = { deviceId: value.checkedBy.deviceId, deviceName: value.checkedBy.deviceName };
   }
+  const outcome = parseTaskOutcome(value.outcome);
+  if (outcome !== undefined) task.outcome = outcome;
   return task;
+}
+
+function parseTaskOutcome(value: JsonValue | undefined): TaskOutcome | undefined {
+  if (
+    !isJsonObject(value) ||
+    (value.state !== "done" && value.state !== "stopped") ||
+    typeof value.turn !== "number" ||
+    !Number.isInteger(value.turn) ||
+    value.turn < 0 ||
+    typeof value.ended !== "boolean" ||
+    !isFiniteNumber(value.at)
+  ) {
+    return undefined;
+  }
+
+  const summary = value.summary;
+  if (summary !== undefined && (typeof summary !== "string" || Array.from(summary).length > 160)) {
+    return undefined;
+  }
+
+  let exit: TaskOutcome["exit"];
+  if ("exit" in value) {
+    exit = parseTaskExit(value.exit);
+    if (exit === undefined) return undefined;
+  }
+
+  return {
+    state: value.state,
+    turn: value.turn,
+    ended: value.ended,
+    at: value.at,
+    ...(summary === undefined ? {} : { summary }),
+    ...(exit === undefined ? {} : { exit }),
+  };
+}
+
+function parseTaskExit(value: JsonValue | undefined): TaskOutcome["exit"] {
+  if (
+    !isJsonObject(value) ||
+    !isNullableFiniteNumber(value.code) ||
+    !isNullableFiniteNumber(value.signal) ||
+    (typeof value.reason !== "string" && value.reason !== null)
+  ) {
+    return undefined;
+  }
+  return { code: value.code, signal: value.signal, reason: value.reason };
+}
+
+function isNullableFiniteNumber(value: JsonValue | undefined): value is number | null {
+  return value === null || isFiniteNumber(value);
 }
 
 function isTaskRun(value: JsonValue | undefined): value is StartAgentRun {

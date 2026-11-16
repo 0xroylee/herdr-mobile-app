@@ -1,10 +1,10 @@
 import type { Layout, TaskRecord } from "@herdr-mobile/protocol";
+import { summarize } from "@herdr-mobile/protocol";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
-import { summarize } from "../../model/summary.ts";
 import { deriveTasks, type TaskProject, type TaskRow as TaskRowModel } from "../../model/tasks.ts";
 import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import { createScreenText } from "../../net/screen-text.ts";
