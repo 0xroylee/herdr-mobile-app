@@ -553,10 +553,9 @@ describe("bridge HTTP dispatch", () => {
     });
   });
 
-  test("writes successful start audits through the bridge stdout sink", async () => {
+  test("returns 404 for the retired agent start route", async () => {
     await withHarness(async (harness) => {
-      harness.runner.oneShotCore = true;
-      const device = await harness.bridge.devices.add({
+      await harness.bridge.devices.add({
         token: "start-output-token",
         role: "control",
         name: "Desk phone",
@@ -581,27 +580,7 @@ describe("bridge HTTP dispatch", () => {
         harness.upgradeServer,
       );
 
-      expect(response?.status).toBe(200);
-      expect(harness.output).toHaveLength(1);
-      expect(harness.output[0]).not.toContain("start-output-token");
-      expect(harness.output[0]).not.toContain("private first message");
-      const prefix = "Agent started ";
-      const audit = JSON.parse(harness.output[0]?.slice(prefix.length) ?? "{}") as Record<
-        string,
-        unknown
-      >;
-      expect(harness.output[0]?.startsWith(prefix)).toBe(true);
-      expect(audit).toMatchObject({
-        time: "1970-01-01T00:00:01.000Z",
-        device: { id: device.id, name: "Desk phone", role: "control" },
-        run: { kind: "template", name: "review" },
-        folder: harness.root,
-        task: true,
-        placement: "core",
-        address: "t-started",
-        space: { id: expect.any(String), isNew: true },
-        tab: { id: expect.any(String), isNew: true },
-      });
+      expect(response?.status).toBe(404);
     });
   });
 

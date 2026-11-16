@@ -22,6 +22,8 @@ flowchart LR
       channel["Noise channel and device token"]
       api["HTTP API"]
       channelApi["API inside the channel"]
+      taskRoutes["Task routes"]
+      taskStore["TaskStore"]
       starter["AgentStarter"]
       roots["AllowedRoots"]
       corecall["callCore"]
@@ -35,6 +37,7 @@ flowchart LR
     cli["herdr-bridge CLI"]
     hc["hc connect"]
     core["herdr-core 0.1.17"]
+    tasksDoc["herdr-mobile.tasks"]
     herdr["herdr-app CLI and window"]
   end
 
@@ -42,6 +45,13 @@ flowchart LR
   app -- "TLS WebSocket with Noise" --> edge --> cloudflared --> secure --> channel
   identity --> api
   api --> starter
+  api --> taskRoutes
+  channelApi --> starter
+  channelApi --> taskRoutes
+  taskRoutes --> starter
+  taskRoutes --> taskStore
+  taskStore -- "doc.get and doc.set" --> corecall
+  core --> tasksDoc
   starter --> roots
   starter --> herdr
   starter --> corecall --> hc --> core
@@ -49,7 +59,8 @@ flowchart LR
   identity --> static
   identity --> ws --> session --> gate --> hc --> core
   channel --> session
-  channel --> channelApi --> starter
+  app -- "JSON-RPC: doc.get and doc events" --> session
+  channel --> channelApi
   channelApi --> pairing
   static --> web
   api --> herdr
@@ -63,7 +74,9 @@ WebSocket requests. Pairing uses the identity header and a one-time code. Other 
 WebSocket sessions also need a paired device token.
 
 `cloudflared` forwards the secure route to the second loopback listener. That listener trusts no
-headers and accepts only `GET /ws`; all API requests travel inside the Noise channel. The app pins
+headers and accepts only `GET /ws`; all API requests travel inside the Noise channel. The secure
+channel and direct listener both dispatch task routes. The secure listener passes the full dispatch
+context to `dispatchApi`, including `taskRoutes`. The app pins
 the bridge's public key before it sends a token or pairing code. The secure listener returns `404`
 for every other path, including `/api`. The two listeners share pairing, the role policy and the
 herdr-core session code. The secure listener never changes the direct route.
@@ -84,7 +97,7 @@ commands.
 
 The bridge's `hc connect` child communicates with herdr-core over stdio. The child receives only the configured environment, including an optional `HC_SESSION`. `Gate` checks channel-zero JSON-RPC calls against the paired device's role and forwards allowed core bytes unchanged. Nonzero attachment channels pass through. See [bridge details](bridge.md) for the full policy and API.
 
-`AgentStarter` handles the control-only agent catalog and start routes. It validates the selected program or template and folder, then places a start in the open Herdr window or in herdr-core. `AllowedRoots` resolves the home and configured roots by real path on first use, with a five-second deadline per root. `callCore` makes short-lived `hc connect` calls for `templates.list` and, when the window is closed, `terminal.run`.
+`AgentStarter` handles the control-only agent catalog and starts requested by `TaskRoutes`. It checks the selected program or template and folder, then starts the agent in the open Herdr window or in herdr-core. `AllowedRoots` resolves the home and configured roots by real path on first use, with a five-second deadline per root. `callCore` makes short-lived `hc connect` calls for `templates.list`, `terminal.run`, and task-document reads and writes.
 
 ## App layers
 
@@ -94,21 +107,21 @@ The bridge's `hc connect` child communicates with herdr-core over stdio. The chi
 | Stores   | `packages/app/src/store/`                               | Persisted settings, paired machine records and seen turns, plus the in-memory core snapshot. Native settings use SQLite key-value storage and SecureStore secrets. Web settings and secrets use `localStorage`.                 |
 | Models   | `packages/app/src/model/`                               | Pure terminal, status, prompt, agent, space, address and seen-state derivation. Screens render these results.                                                                                                                   |
 | Terminal | `packages/app/src/terminal/`                            | `@xterm/headless` model, styled screen snapshots, ANSI theme palettes and the native text-grid renderer. Attach credit returns after the renderer writes output.                                                                |
-| Screens  | `packages/app/src/screens/` and `packages/app/src/app/` | Home, Project, project terminals, agent terminal, the transitional Start screen, Settings and pairing routes. View functions derive presentation; route components connect stores, actions and UI.                              |
+| Screens  | `packages/app/src/screens/` and `packages/app/src/app/` | Home, Project, project terminals, agent terminal, Settings and pairing routes. View functions derive presentation; route components connect stores, actions and UI.                                                             |
 | UI       | `packages/app/src/ui/`                                  | Uniwind themes, fonts, safe-area handling, Image and FlashList wrappers, shared text variants and controls.                                                                                                                     |
 
 The settings store selects `system`, `graphite` or `paper` before the first route renders. The root layout holds the splash screen until boot hydration and font loading finish. A failed font load offers a retry state.
 
 ## Data flow by screen
 
-1. **Home.** `ConnectionManager` feeds core snapshots and events into the core store. `deriveTasks` combines task records, local terminals, the `herdr-app` layout and status to produce task rows and counts. `deriveHomeView` filters title, project and program, builds Needs you, Running and Done counts, and keeps local projects in Herdr order. Home also selects paired Macs, routes to projects, and shows the connection banner.
+1. **Home.** `ConnectionManager` feeds core snapshots and events into the core store. The phone reads `herdr-mobile.tasks` with `doc.get` and applies its `doc` events. `deriveTasks` combines task records, local terminals, the `herdr-app` layout and status to produce task rows and counts. `deriveHomeView` filters title, project and program, builds Needs you, Running and Done counts, and keeps local projects in Herdr order. Home also selects paired Macs, routes to projects, and shows the connection banner.
 2. **Project.** The screen selects task rows for a Herdr space and orders them by creation time. `deriveProjectView` chooses whether checked rows appear and which controls are available for the current role and connection. `check-off.ts` builds the active-task sheet actions and sends `terminal.kill` before checking when Stop is chosen. Done and stopped tasks check immediately. Done summaries lazily read terminal screen text through `ScreenText` and `summarize`.
 3. **Project terminals.** `deriveSpaces` uses the layout document and terminal labels to build the project's tabs. `TabPill` opens the first terminal in each tab. Plain terminals and shells are reached from this project route.
 4. **Agent terminal.** The screen attaches with `observe: true` at the Mac terminal's size. `TerminalModel` parses output and creates styled rows for `TerminalPane`. A size event updates the model. Keys and composer text call `terminal.keys` and `terminal.send`. Take over confirms before it reattaches without observe at the pane size. Interrupt and end-terminal actions also require confirmation.
 5. **Needs-you prompt.** The Claude Code and Codex recognizers read the terminal status and screen snapshot. A recognized prompt adds answer choices. A watch-role device sees the prompt without answer controls. An unrecognized prompt leaves the composer available for direct input.
 6. **Pairing.** The app reads a v1 or v2 `#pair=` fragment, pasted link or typed URL and code. A v2 offer with a secure URL and key pairs over the Noise channel first. The app sends the one-time code only after it verifies the pinned bridge key, saves the returned token through `Secrets`, adds the routes and makes the Mac active. `ConnectionManager` then races the stored routes. A matching known key in a fresh link updates only the secure route; it does not change the direct route or redeem the code. Pairing returns to Home.
 7. **Settings.** Settings is pushed from Home's `⋯` menu. Theme and notification preferences persist in the settings store. Notification switches do not send push notifications. The Machines section revokes a device through `/api/devices/self`, then removes local machine data even if the bridge cannot be reached. About shows app and protocol versions and explains web storage.
-8. **Start agent.** The transitional Start screen still loads `/api/agents/catalog` and submits `/api/agents/start`. `AgentStarter` checks the request and chooses `herdr-app do` when the window is open or `callCore` and `terminal.run` when it is closed. `AllowedRoots` checks the folder against real paths for home and configured roots. On success, the app opens the agent when the reply has an address, or returns to Home otherwise; U22-5 replaces this flow with task starts.
+8. **Task writes.** The Project composer sends `POST /api/tasks` through the direct listener or the secure channel. Both dispatch paths call `TaskRoutes`, which starts the agent through `AgentStarter` and writes the accepted task record with `doc.set`. Check-off, linking, unchecking and clearing use the same routes and document. The phone receives document updates through `doc` events.
 
 ## Build and verification boundaries
 

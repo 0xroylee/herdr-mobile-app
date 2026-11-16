@@ -4,8 +4,6 @@ import type {
   ClearTasksRequest,
   DeviceRecordView,
   LinkTaskRequest,
-  StartAgentReply,
-  StartAgentRequest,
   StartTaskReply,
   StartTaskRequest,
   UncheckTaskRequest,
@@ -22,7 +20,6 @@ export interface BridgeCalls {
   appLs(): Promise<unknown>;
   appDo(action: "space.new" | "tab.new", args?: Record<string, unknown>): Promise<unknown>;
   agentCatalog(): Promise<AgentCatalog>;
-  startAgent(request: StartAgentRequest): Promise<StartAgentReply>;
   startTask(request: StartTaskRequest): Promise<StartTaskReply>;
   checkTask(request: CheckTaskRequest): Promise<unknown>;
   uncheckTask(request: UncheckTaskRequest): Promise<unknown>;
@@ -38,7 +35,6 @@ export function bindBridgeCalls(api: BridgeApi, baseUrl: string, token: string):
     appLs: () => api.appLs(baseUrl, token),
     appDo: (action, args) => api.appDo(baseUrl, token, action, args),
     agentCatalog: () => api.agentCatalog(baseUrl, token),
-    startAgent: (request) => api.startAgent(baseUrl, token, request),
     startTask: (request) => api.startTask(baseUrl, token, request),
     checkTask: (request) => api.checkTask(baseUrl, token, request),
     uncheckTask: (request) => api.uncheckTask(baseUrl, token, request),
@@ -56,7 +52,6 @@ export function unavailableBridgeCalls(message: string): BridgeCalls {
     appLs: fail,
     appDo: fail,
     agentCatalog: fail,
-    startAgent: fail,
     startTask: fail,
     checkTask: fail,
     uncheckTask: fail,
@@ -105,7 +100,6 @@ export function lazyCalls(resolve: () => Promise<BridgeCalls>): BridgeCalls {
     appLs: () => resolve().then((calls) => calls.appLs()),
     appDo: (action, args) => resolve().then((calls) => calls.appDo(action, args)),
     agentCatalog: () => resolve().then((calls) => calls.agentCatalog()),
-    startAgent: (request) => resolve().then((calls) => calls.startAgent(request)),
     startTask: (request) => resolve().then((calls) => calls.startTask(request)),
     checkTask: (request) => resolve().then((calls) => calls.checkTask(request)),
     uncheckTask: (request) => resolve().then((calls) => calls.uncheckTask(request)),

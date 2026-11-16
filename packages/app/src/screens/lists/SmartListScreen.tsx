@@ -49,6 +49,7 @@ import {
   type TaskIdentity,
 } from "../project/check-off.ts";
 import {
+  cacheTaskSummaryReadByMachine,
   shouldReadTaskSummary,
   type TaskSummaryRow,
   taskSummary,
@@ -207,16 +208,16 @@ export function SmartListScreen() {
         .read(address, { turn: row.terminal?.turn, state: row.terminal?.status?.state })
         .then((screenRows) => {
           if (machinesStore.getState().activeId !== activeId) return;
-          if (coreStore.getState().machines[activeId ?? ""]?.terminals[address]?.reason != null) {
-            return;
-          }
-          setSummariesByMachine((previous) => ({
-            ...previous,
-            [summaryScope]: {
-              ...previous[summaryScope],
-              [key]: summarize(row.program.iconKey, undefined, screenRows) ?? "No summary yet.",
-            },
-          }));
+          const terminal = coreStore.getState().machines[activeId ?? ""]?.terminals[address];
+          setSummariesByMachine((previous) =>
+            cacheTaskSummaryReadByMachine(
+              previous,
+              summaryScope,
+              row,
+              terminal,
+              summarize(row.program.iconKey, undefined, screenRows),
+            ),
+          );
         })
         .catch(() => {
           if (machinesStore.getState().activeId !== activeId) return;

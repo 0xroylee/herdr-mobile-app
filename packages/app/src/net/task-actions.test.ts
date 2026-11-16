@@ -25,11 +25,6 @@ describe("TaskActions", () => {
         home: "/",
         windowOpen: true,
       }),
-      startAgent: async () => ({
-        placement: "core",
-        space: { id: "space", isNew: false },
-        tab: { id: "tab", isNew: false },
-      }),
       startTask: async (request) => {
         bridgeCalls.push({ method: "startTask", value: request });
         return {

@@ -28,6 +28,7 @@ export interface ProjectRowAction {
 }
 
 export type TaskSummaryRow = TaskRow & { lastSeenStatus?: Status | null };
+export type TaskSummaryTerminal = NonNullable<TaskSummaryRow["terminal"]>;
 
 export interface AccessoryBarView {
   agentLabel: string;
@@ -118,12 +119,42 @@ export function shouldReadTaskSummary(
   return (
     row.state === "done" &&
     row.address !== undefined &&
-    row.terminal !== undefined &&
-    row.terminal.state !== "finished" &&
-    row.terminal.reason == null &&
+    isReadableTaskSummaryTerminal(row.terminal) &&
     statusMessage(row) === undefined &&
     !Object.hasOwn(cache, taskSummaryKey(row))
   );
+}
+
+/** A finished terminal keeps its final screen; only a live shell has lost the program's screen. */
+export function isReadableTaskSummaryTerminal(
+  terminal: TaskSummaryRow["terminal"],
+): terminal is TaskSummaryTerminal {
+  return terminal !== undefined && !(terminal.state === "live" && terminal.reason != null);
+}
+
+/** Cache a successful screen read, or its empty-result fallback, for a still-readable terminal. */
+export function cacheTaskSummaryRead(
+  cache: Record<string, string>,
+  row: TaskSummaryRow,
+  terminal: TaskSummaryRow["terminal"],
+  summary: string | undefined,
+): Record<string, string> {
+  if (!isReadableTaskSummaryTerminal(terminal)) return cache;
+  return { ...cache, [taskSummaryKey(row)]: summary ?? "No summary yet." };
+}
+
+/** Keep smart-list summary caches isolated by the selected Mac. */
+export function cacheTaskSummaryReadByMachine(
+  cache: Record<string, Record<string, string>>,
+  machineId: string,
+  row: TaskSummaryRow,
+  terminal: TaskSummaryRow["terminal"],
+  summary: string | undefined,
+): Record<string, Record<string, string>> {
+  const machineCache = cache[machineId] ?? {};
+  const nextMachineCache = cacheTaskSummaryRead(machineCache, row, terminal, summary);
+  if (nextMachineCache === machineCache) return cache;
+  return { ...cache, [machineId]: nextMachineCache };
 }
 
 /** Key cached output by task address and turn so clearing status does not discard it. */
@@ -145,10 +176,9 @@ export function taskSummary(
   if (Object.hasOwn(cache, key)) return cache[key];
 
   if (
+    row.state !== "done" ||
     row.address === undefined ||
-    row.terminal === undefined ||
-    row.terminal.state === "finished" ||
-    row.terminal.reason != null
+    !isReadableTaskSummaryTerminal(row.terminal)
   ) {
     return "No summary yet.";
   }

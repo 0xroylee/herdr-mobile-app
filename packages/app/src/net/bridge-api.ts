@@ -8,7 +8,6 @@ import type {
   PairReply,
   PairRequest,
   StartAgentReply,
-  StartAgentRequest,
   StartTaskReply,
   StartTaskRequest,
   UncheckTaskRequest,
@@ -41,7 +40,6 @@ export interface BridgeApi {
     args?: Record<string, unknown>,
   ): Promise<unknown>;
   agentCatalog(baseUrl: string, token: string): Promise<AgentCatalog>;
-  startAgent(baseUrl: string, token: string, request: StartAgentRequest): Promise<StartAgentReply>;
   startTask(baseUrl: string, token: string, request: StartTaskRequest): Promise<StartTaskReply>;
   checkTask(baseUrl: string, token: string, request: CheckTaskRequest): Promise<unknown>;
   uncheckTask(baseUrl: string, token: string, request: UncheckTaskRequest): Promise<unknown>;
@@ -97,20 +95,6 @@ export function createBridgeApi(fetcher: BridgeFetch): BridgeApi {
     async agentCatalog(baseUrl, token) {
       const value = await sendJson(fetcher, baseUrl, "/api/agents/catalog", authorized(token));
       if (!isAgentCatalog(value)) throw new Error("The bridge returned an invalid agent catalog");
-      return value;
-    },
-    async startAgent(baseUrl, token, request) {
-      const value = await sendJson(
-        fetcher,
-        baseUrl,
-        "/api/agents/start",
-        authorized(token, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
-        }),
-      );
-      if (!isStartAgentReply(value)) throw new Error("The bridge returned an invalid start reply");
       return value;
     },
     async startTask(baseUrl, token, request) {

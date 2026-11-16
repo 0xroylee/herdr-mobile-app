@@ -37,6 +37,7 @@ import {
 } from "./new-task-controller.ts";
 import { bindNewTaskController, createNewTaskPort } from "./new-task-port.ts";
 import {
+  cacheTaskSummaryRead,
   deriveProjectView,
   openProjectTaskDetails,
   type ProjectRowAction,
@@ -238,13 +239,15 @@ export function ProjectScreen() {
       void screenText
         .read(address, { turn: row.terminal?.turn, state: row.terminal?.status?.state })
         .then((screenRows) => {
-          if (coreStore.getState().machines[activeId ?? ""]?.terminals[address]?.reason != null) {
-            return;
-          }
-          setSummaries((previous) => ({
-            ...previous,
-            [key]: summarize(row.program.iconKey, undefined, screenRows) ?? "No summary yet.",
-          }));
+          const terminal = coreStore.getState().machines[activeId ?? ""]?.terminals[address];
+          setSummaries((previous) =>
+            cacheTaskSummaryRead(
+              previous,
+              row,
+              terminal,
+              summarize(row.program.iconKey, undefined, screenRows),
+            ),
+          );
         })
         .catch(() => {
           setSummaries((previous) => ({ ...previous, [key]: "No summary yet." }));

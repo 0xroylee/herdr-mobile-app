@@ -5,6 +5,7 @@ import type { TaskProject, TaskRow } from "../../model/tasks.ts";
 import { routes } from "../../routes.ts";
 import {
   accessoryBarView,
+  cacheTaskSummaryRead,
   deriveProjectView,
   leaveNewTaskSheet,
   openProjectTaskDetails,
@@ -227,13 +228,61 @@ describe("deriveProjectView", () => {
     expect(shouldReadTaskSummary(ended, cache)).toBe(false);
   });
 
-  test("shows the fallback when no status or cached output remains readable", () => {
+  test("reads finished terminals with exit metadata whether or not they were kept", () => {
+    for (const keep of [false, true]) {
+      const finished = summaryRow("done", {
+        terminal: {
+          state: "finished",
+          turn: 3,
+          reason: "exited",
+          keep,
+          exit_code: 0,
+          status: null,
+        },
+      });
+      const cache = { [taskSummaryKey(finished)]: "Finished the task" };
+
+      expect(taskSummary(finished, {})).toBeUndefined();
+      expect(shouldReadTaskSummary(finished, {})).toBe(true);
+      expect(taskSummary(finished, cache)).toBe("Finished the task");
+      expect(shouldReadTaskSummary(finished, cache)).toBe(false);
+    }
+  });
+
+  test("excludes a live kept shell from lazy reads and cache writes", () => {
     const ended = summaryRow("done", {
-      terminal: { state: "live", turn: 3, reason: "exited", status: null },
+      terminal: {
+        state: "live",
+        turn: 3,
+        reason: "exited",
+        keep: true,
+        status: null,
+      },
     });
 
     expect(taskSummary(ended, {})).toBe("No summary yet.");
     expect(shouldReadTaskSummary(ended, {})).toBe(false);
+    expect(cacheTaskSummaryRead({}, ended, ended.terminal, "Shell prompt")).toEqual({});
+  });
+
+  test("Project caches a successful read from a finished terminal with reason exited", () => {
+    const finished = summaryRow("done", {
+      terminal: {
+        state: "finished",
+        turn: 3,
+        reason: "exited",
+        keep: false,
+        exit_code: 0,
+        status: null,
+      },
+    });
+    const cache = cacheTaskSummaryRead({}, finished, finished.terminal, "Finished the task");
+
+    expect(cache).toEqual({ [taskSummaryKey(finished)]: "Finished the task" });
+    expect(taskSummary(finished, cache)).toBe("Finished the task");
+    expect(cacheTaskSummaryRead({}, finished, finished.terminal, undefined)).toEqual({
+      [taskSummaryKey(finished)]: "No summary yet.",
+    });
   });
 
   test("leaves a live Done row pending until its lazy screen read is cached", () => {
@@ -257,6 +306,13 @@ describe("deriveProjectView", () => {
 
     expect(taskSummary(stopped, {})).toBe("Last update");
     expect(taskSummary(withoutMessage, {})).toBe("No summary yet.");
+  });
+
+  test("shows the fallback when the Done terminal is missing", () => {
+    const missing = summaryRow("done", { terminal: undefined });
+
+    expect(taskSummary(missing, {})).toBe("No summary yet.");
+    expect(shouldReadTaskSummary(missing, {})).toBe(false);
   });
 });
 

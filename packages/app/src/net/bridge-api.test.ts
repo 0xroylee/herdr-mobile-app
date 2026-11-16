@@ -1,7 +1,7 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import type { StartAgentRequest, StartTaskRequest } from "@herdr-mobile/protocol";
+import type { StartTaskRequest } from "@herdr-mobile/protocol";
 import { type BridgeApiError, type BridgeFetch, createBridgeApi } from "./bridge-api.ts";
 
 describe("bridge API", () => {
@@ -69,7 +69,7 @@ describe("bridge API", () => {
     } satisfies Partial<BridgeApiError>);
   });
 
-  test("loads the agent catalog and starts an agent with the bearer token", async () => {
+  test("loads the agent catalog with the bearer token", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fetcher: BridgeFetch = async (input, init = {}) => {
       calls.push({ url: String(input), init });
@@ -82,65 +82,21 @@ describe("bridge API", () => {
           windowOpen: true,
         });
       }
-      return Response.json({
-        placement: "window",
-        address: "t1",
-        space: { id: "sp1", isNew: false },
-        tab: { id: "tb1", isNew: true },
-      });
+      return Response.json({ ok: true });
     };
     const api = createBridgeApi(fetcher);
-    const request: StartAgentRequest = {
-      run: { kind: "template", name: "review" },
-      folder: "/Users/roy/project",
-      space: { kind: "existing", id: "sp1" },
-      task: "Review this change",
-    };
-
     const catalog = await api.agentCatalog("https://mac.tailnet.ts.net/", "token");
-    const reply = await api.startAgent("https://mac.tailnet.ts.net", "token", request);
 
     expect(catalog.templates[0]?.name).toBe("review");
-    expect(reply.address).toBe("t1");
-    expect(calls.map(({ url }) => url)).toEqual([
-      "https://mac.tailnet.ts.net/api/agents/catalog",
-      "https://mac.tailnet.ts.net/api/agents/start",
-    ]);
+    expect(calls.map(({ url }) => url)).toEqual(["https://mac.tailnet.ts.net/api/agents/catalog"]);
     expect(new Headers(calls[0]?.init.headers).get("Authorization")).toBe("Bearer token");
-    expect(new Headers(calls[1]?.init.headers).get("Authorization")).toBe("Bearer token");
-    expect(JSON.parse(String(calls[1]?.init.body))).toEqual(request);
   });
 
-  test("rejects invalid agent catalog and start replies", async () => {
+  test("rejects an invalid agent catalog", async () => {
     const invalidCatalog = createBridgeApi(async () => Response.json({ programs: ["claude"] }));
     await expect(invalidCatalog.agentCatalog("https://mac", "token")).rejects.toThrow(
       "invalid agent catalog",
     );
-
-    const invalidReply = createBridgeApi(async () =>
-      Response.json({ placement: "elsewhere", space: { id: "sp1", isNew: false } }),
-    );
-    await expect(
-      invalidReply.startAgent("https://mac", "token", {
-        run: { kind: "program", id: "claude" },
-        folder: "/repo",
-        space: { kind: "new" },
-      }),
-    ).rejects.toThrow("invalid start reply");
-  });
-
-  test("surfaces structured start errors from the bridge", async () => {
-    const api = createBridgeApi(async () =>
-      Response.json({ error: "folder_missing", message: "Folder does not exist" }, { status: 422 }),
-    );
-
-    await expect(
-      api.startAgent("https://mac", "token", {
-        run: { kind: "program", id: "claude" },
-        folder: "/repo",
-        space: { kind: "new" },
-      }),
-    ).rejects.toMatchObject({ code: "folder_missing", message: "Folder does not exist" });
   });
 
   test("uses task routes, bearer auth and the protocol request bodies", async () => {

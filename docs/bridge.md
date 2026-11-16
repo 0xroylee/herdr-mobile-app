@@ -124,10 +124,9 @@ codes or identity keys.
 calls the configured `herdr-app` executable directly, with a ten-second deadline. A watch-role
 device cannot invoke those actions.
 
-## Start agents from a phone
+## Start and manage tasks from a phone
 
-Only control devices can use `GET /api/agents/catalog`, `POST /api/agents/start` and `POST
-/api/tasks`. The catalog lists Claude Code (`claude`), Codex (`codex`), programs added with
+Only control devices can use `GET /api/agents/catalog` and the `POST /api/tasks` routes. The catalog lists Claude Code (`claude`), Codex (`codex`), programs added with
 `--run-program <name>`, and templates returned by herdr-core. A request names one program or
 template. It cannot contain shell lines or extra program arguments.
 
@@ -162,11 +161,11 @@ with a one-second pause, and matches the newest recent live terminal by program,
 space id. The task record stays unlinked if no terminal matches.
 
 `POST /api/tasks` starts the agent and writes the record only after the start succeeds. It stores the
-folder that was verified and used for launch, including the resolved real path; a window start with
-no terminal match stays unlinked. `POST
+verified real folder used for launch, so the record's folder matches the terminal's `cwd` for `~/` and
+symlinked folders. A window start with no terminal match stays unlinked. `POST
 /api/tasks/check`, `/api/tasks/uncheck`, `/api/tasks/link` and `/api/tasks/clear` update records; all
 five routes require a control device. Watch devices receive 403. The direct listener and secure
-channel use the same route dispatcher.
+channel dispatch the same task routes through `dispatchApi`.
 
 The bridge is the only writer of the herdr-core document `herdr-mobile.tasks`. It reads the document
 and version with `doc.get`, then writes with `doc.set`. Writes are serialized, retry a version
@@ -176,8 +175,9 @@ records as needed to target 768 KiB, then enforces the core's 1 MiB document lim
 with a non-null reason counts as ended. If the document
 still cannot fit, the route returns `tasks_full` and `Check off and clear old tasks first.` The
 document holds task identity, launch text, placement, space/tab ids, terminal address and shared
-check-off fields. The phone derives task state from that record and its terminal snapshot; the bridge
-adds no event watcher.
+check-off fields. Phones read the document with `doc.get` and receive updates through `doc` events.
+The phone derives task state from that record and its terminal snapshot; the bridge adds no event
+watcher.
 
 In the 2026-11-04 scratch verification, `hc templates --help` named
 `~/.config/herdr-core/templates`. The checked format was a `.md` file with front matter fields
