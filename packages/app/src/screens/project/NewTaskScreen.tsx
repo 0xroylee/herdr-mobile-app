@@ -14,7 +14,6 @@ import { useCSSVariable } from "uniwind";
 import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import type { StartRunSelection } from "../../model/startAgent.ts";
-import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import { coreStore, machinesStore, settingsStore } from "../../store/platform.ts";
 import { HAIRLINE } from "../../ui/components/classes.ts";
 import { Icon } from "../../ui/icon.tsx";
@@ -32,7 +31,7 @@ import {
   sameRunSelection,
   submitNewTaskSheet,
 } from "./new-task-controller.ts";
-import { bindNewTaskController, createNewTaskPort } from "./new-task-port.ts";
+import { bindNewTaskScreen, unavailableNewTaskPort } from "./new-task-port.ts";
 import { leaveNewTaskSheet } from "./project-view.ts";
 import { WherePicker } from "./WherePicker.tsx";
 
@@ -81,21 +80,24 @@ export function NewTaskScreen() {
     ],
   );
   const [initialBinding] = useState(() => ({
-    port: createNewTaskPort(
-      connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac."),
-      {
-        rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
-        rememberFolder: (machineId, folder) =>
-          settingsStore.getState().pushRecentFolder(machineId, folder),
-      },
-    ),
+    manager: connectionManager,
     context,
   }));
-  const controller = useMemo(
-    () =>
-      createNewTaskDetailsController(initialBinding.port, initialBinding.context, projectId, seed),
-    [initialBinding, projectId, seed],
-  );
+  const controller = useMemo(() => {
+    const next = createNewTaskDetailsController(
+      unavailableNewTaskPort,
+      initialBinding.context,
+      projectId,
+      seed,
+    );
+    bindNewTaskScreen(
+      next,
+      initialBinding.manager,
+      initialBinding.context,
+      settingsStore.getState(),
+    );
+    return next;
+  }, [initialBinding, projectId, seed]);
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
@@ -119,11 +121,7 @@ export function NewTaskScreen() {
   const placeholderColor = typeof dim === "string" ? dim : undefined;
 
   useEffect(() => {
-    bindNewTaskController(controller, connectionManager, context, {
-      rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
-      rememberFolder: (machineId, folder) =>
-        settingsStore.getState().pushRecentFolder(machineId, folder),
-    });
+    bindNewTaskScreen(controller, connectionManager, context, settingsStore.getState());
   }, [connectionManager, context, controller]);
   useEffect(() => {
     if (
