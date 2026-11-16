@@ -11,7 +11,26 @@ import {
   tabPillHitSlop,
   terminalsListContentClassName,
   terminalsListScrollClassName,
+  transitionPickerVisibility,
 } from "./viewState.ts";
+
+describe("picker availability", () => {
+  test("closes an open picker when disabled and rejects opens until enabled again", () => {
+    let visible = transitionPickerVisibility(false, { type: "open", disabled: false });
+    expect(visible).toBe(true);
+
+    visible = transitionPickerVisibility(visible, {
+      type: "availability-changed",
+      disabled: true,
+    });
+    expect(visible).toBe(false);
+    expect(transitionPickerVisibility(visible, { type: "open", disabled: true })).toBe(false);
+    expect(
+      transitionPickerVisibility(visible, { type: "availability-changed", disabled: false }),
+    ).toBe(false);
+    expect(transitionPickerVisibility(visible, { type: "open", disabled: false })).toBe(true);
+  });
+});
 
 describe("project terminal pill view state", () => {
   test("shows a dot only for blocked and done tabs", () => {

@@ -26,38 +26,40 @@ flowchart LR
   splash -->|"a paired Mac"| home[Home]
   pair -->|"pairing succeeds"| home
   home -->|"open a project"| project[Project]
+  home -->|"New task"| projectPicker[Choose project]
+  projectPicker -->|"choose a project"| project
+  home -->|"Add project"| addProject[Add project sheet]
   home -->|"⋯, Settings"| settings[Settings]
   home -->|"⋯, Pair again"| pair
+  project -->|"New task"| composer[Task composer]
+  composer -->|"ⓘ"| details[New task details]
+  details -->|"Add"| project
+  details -->|"Cancel"| project
   project -->|"tap a task"| task[Task, U22-6]
   project -->|"long-press, Open terminal"| term[Agent terminal]
   project -->|"⋯, Terminals"| terminals[Project terminals]
   terminals -->|"tap a tab pill"| term
-  direct["Open /start directly"] --> start
-  start -->|"Start, with an address"| term
-  start -->|"Start, without an address"| home
-  start -->|"Create empty tab"| home
-  start -->|"Cancel or Back"| previous[Previous screen]
   settings -->|"Back after removing the last Mac"| home
   home -->|"no paired Mac when focused"| pair
 ```
 
-Smart tiles show Needs you, Running and Done counts. The list routes arrive in U22-7; the tiles have no navigation yet. Home's `New task` and `Add project` controls are drawn but inert until U22-5. Back on the agent terminal returns to the screen that opened it.
+Smart tiles show Needs you, Running and Done counts. The list routes arrive in U22-7; the tiles have no navigation yet. Home's `New task` opens a project picker and focuses that project's composer. `Add project` opens its sheet. Back on the agent terminal returns to the screen that opened it.
 
 ## Roles
 
 Pairing gives each device a role. `herdr-bridge pair` makes a control device and `herdr-bridge pair --watch` makes a watch device. The app hides what a watch device can't do. The bridge's gate rejects those calls anyway, using the method lists in `packages/protocol/src/policy.ts`.
 
-| Feature                                       | Control                         | Watch                                      |
-| --------------------------------------------- | ------------------------------- | ------------------------------------------ |
-| Home, projects, task rows and terminal output | Yes                             | Yes                                        |
-| Choose a paired Mac                           | Yes                             | Yes                                        |
-| Check off or clear tasks                      | Yes, while connected            | No                                         |
-| Add a task or project                         | Control devices show the entry  | No                                         |
-| Open a terminal or copy its address           | Yes                             | Yes                                        |
-| Follow up or answer a recognized prompt       | Yes                             | No. The question shows without its choices |
-| Take over, Interrupt, End terminal            | Yes                             | No. The More button is gone                |
-| Settings                                      | Yes                             | Yes                                        |
-| Start an agent or create an empty tab         | Yes, on the legacy direct route | No. A direct Start route is read-only      |
+| Feature                                       | Control                        | Watch                                      |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------ |
+| Home, projects, task rows and terminal output | Yes                            | Yes                                        |
+| Choose a paired Mac                           | Yes                            | Yes                                        |
+| Check off or clear tasks                      | Yes, while connected           | No                                         |
+| Add a task or project                         | Control devices show the entry | No                                         |
+| Open a terminal or copy its address           | Yes                            | Yes                                        |
+| Follow up or answer a recognized prompt       | Yes                            | No. The question shows without its choices |
+| Take over, Interrupt, End terminal            | Yes                            | No. The More button is gone                |
+| Settings                                      | Yes                            | Yes                                        |
+| Start an agent or create an empty tab         | Control devices use `New task` | No. Watch devices cannot start an agent    |
 
 ## App launch
 
@@ -100,17 +102,17 @@ The app holds one bridge connection, to the active Mac. Home and Project show it
 
 Route `/`. Code in `screens/home/`.
 
-| ID     | User action       | What the app does                                                                                                                                                       | Code                                                                                                                             |
-| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| HOME-1 | Opens Home        | Shows the active Mac chip and the `⋯` menu. The chip selects a paired Mac; the menu opens Settings or Pair again.                                                       | `app/index.tsx`, `screens/home/HomeScreen.tsx`, `screens/home/MachineChip.tsx`, `screens/home/HomeMenu.tsx`, `store/machines.ts` |
-| HOME-2 | Searches tasks    | Filters open tasks by title, project or program. Checked tasks are excluded. Needs you, Running and Done tiles count matching tasks; Done includes stopped tasks.       | `screens/home/SearchField.tsx`, `screens/home/home-view.ts`, `screens/home/SmartTiles.tsx`, `model/tasks.ts`                     |
-| HOME-3 | Opens Projects    | Shows Herdr spaces in document order, then projects from task labels. Each row shows the most urgent unchecked task mark and unchecked count; tapping it opens Project. | `screens/home/ProjectRow.tsx`, `screens/home/home-view.ts`, `app/project/[id].tsx`, `model/spaces.ts`, `model/tasks.ts`          |
-| HOME-4 | Has no projects   | Shows `No projects yet. Spaces you make in Herdr show up here.`                                                                                                         | `screens/home/HomeScreen.tsx`                                                                                                    |
-| HOME-5 | Uses Home actions | Control devices see `New task` and `Add project`; both are inert until U22-5. Watch devices do not see them.                                                            | `screens/home/HomeScreen.tsx`                                                                                                    |
+| ID     | User action       | What the app does                                                                                                                                                                                           | Code                                                                                                                                                             |
+| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HOME-1 | Opens Home        | Shows the active Mac chip and the `⋯` menu. The chip selects a paired Mac; the menu opens Settings or Pair again.                                                                                           | `app/index.tsx`, `screens/home/HomeScreen.tsx`, `screens/home/MachineChip.tsx`, `screens/home/HomeMenu.tsx`, `store/machines.ts`                                 |
+| HOME-2 | Searches tasks    | Filters open tasks by title, project or program. Checked tasks are excluded. Needs you, Running and Done tiles count matching tasks; Done includes stopped tasks.                                           | `screens/home/SearchField.tsx`, `screens/home/home-view.ts`, `screens/home/SmartTiles.tsx`, `model/tasks.ts`                                                     |
+| HOME-3 | Opens Projects    | Shows Herdr spaces in document order, then projects from task labels. Each row shows the most urgent unchecked task mark and unchecked count; tapping it opens Project.                                     | `screens/home/ProjectRow.tsx`, `screens/home/home-view.ts`, `app/project/[id].tsx`, `model/spaces.ts`, `model/tasks.ts`                                          |
+| HOME-4 | Has no projects   | Shows `No projects yet. Spaces you make in Herdr show up here.`                                                                                                                                             | `screens/home/HomeScreen.tsx`                                                                                                                                    |
+| HOME-5 | Uses Home actions | Control devices can open `New task` to choose a project and focus its composer, or open `Add project`. The Add project sheet passes Name and Folder to `space.new`. Watch devices do not see either action. | `screens/home/HomeScreen.tsx`, `screens/home/ProjectPickerSheet.tsx`, `screens/home/AddProjectSheet.tsx`, `screens/project/new-task-port.ts`, `net/new-items.ts` |
 
 ## Agent terminal
 
-Route `/agent/<address>`, opened by `Open terminal` in a Project task menu, a project tab pill, or the transitional Start route when a start returns an address. Code in `screens/agent/` and `terminal/`. Confirmations use native alerts, or `window.confirm` on the web, through `ui/components/Confirm.ts` and `ui/components/Confirm.web.ts`.
+Route `/agent/<address>`, opened by `Open terminal` in a Project task menu or a project tab pill. Code in `screens/agent/` and `terminal/`. Confirmations use native alerts, or `window.confirm` on the web, through `ui/components/Confirm.ts` and `ui/components/Confirm.web.ts`.
 
 | ID      | User action                                             | What the app does                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Code                                                                                                                                                                                                   |
 | ------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -142,21 +144,18 @@ Route `/project/<id>`. Code in `screens/project/`.
 | PROJ-4 | Long-presses a task row          | Offers `Open terminal`, `Copy address` and `Check off` when available. Watch devices keep terminal and copy actions but hide Check off.                                                                              | `screens/project/ProjectScreen.tsx`, `screens/project/project-view.ts`, `net/task-actions.ts`                                                                               |
 | PROJ-5 | Opens Terminals                  | The project's `⋯` menu opens its tabs as pills. Tapping a pill opens the first terminal in the agent terminal screen.                                                                                                | `app/project/[id]/terminals.tsx`, `screens/project/TerminalsScreen.tsx`, `screens/project/TerminalsList.tsx`, `screens/project/TabPill.tsx`, `screens/project/viewState.ts` |
 | PROJ-6 | Uses Project on watch or offline | Watch devices can read rows and open the project; their task circles and destructive actions are disabled. Offline content stays visible at 60% opacity, with task circles, composer and bridge actions disabled.    | `screens/project/ProjectScreen.tsx`, `screens/project/project-view.ts`, `screens/home/connectionPresentation.ts`                                                            |
-| PROJ-7 | Uses the Project toolbar         | Control devices see `New task`; it stays inert until U22-5 wires the composer. Watch and offline screens do not show the composer.                                                                                   | `screens/project/ProjectScreen.tsx`, `screens/project/project-view.ts`                                                                                                      |
+| PROJ-7 | Uses the Project toolbar         | Control devices see `New task`, which focuses the inline composer. The composer has Task and Notes fields, agent and folder chips, and ⓘ for the details sheet. Watch and offline screens do not show the composer.  | `screens/project/ProjectScreen.tsx`, `screens/project/TaskComposer.tsx`, `screens/project/AccessoryBar.tsx`, `screens/project/new-task-controller.ts`                       |
 
-## Start agent
+## New task
 
-Route `/start`. Code in `screens/start/`.
+The details sheet is route `/task/new`. Code in `screens/project/`.
 
-| ID      | User action                                     | What the app does                                                                                                                                                                                                                                                                    | Code                                                                                                                                              |
-| ------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| START-1 | Opens Start                                     | The legacy route remains available directly until U22-5 removes it. A space launch carries the Herdr space id, so preselection survives either order of layout and catalog arrival.                                                                                                  | `app/start.tsx`, `screens/start/StartScreen.tsx`                                                                                                  |
-| START-2 | Picks a run or taps `Refresh`                   | Lists the programs and templates from the bridge catalog. If the catalog can't load, offers Claude Code and Codex. Refresh reloads the catalog after a load error or a `run_not_allowed` refusal.                                                                                    | `screens/start/StartScreen.tsx`, `screens/start/RunList.tsx`, `screens/start/start-controller.ts`, `net/bridge-api.ts`                            |
-| START-3 | Chooses a space and folder                      | Offers existing spaces and `New space`. Suggests the space folder, its terminal folders and the last five folders used on this phone. `Other…` accepts an absolute path or a `~/` path; the bridge checks that it is allowed and exists.                                             | `screens/start/WherePicker.tsx`, `screens/start/FolderPicker.tsx`, `model/startAgent.ts`, `store/settings.ts`, `net/bridge-api.ts`                |
-| START-4 | Enters a first message                          | Claude Code and Codex accept guarded task arguments after `--` while Herdr is closed. Added `--run-program` programs need Herdr open on the bridge. Until U22-5 replaces Start, the legacy app still warns for every program while Herdr is closed, including Claude Code and Codex. | `screens/start/StartScreen.tsx`, `screens/start/start-controller.ts`, `net/bridge-api.ts`, `server/start-agent.ts`, `tasks/launch-argv.ts`        |
-| START-5 | Reviews the summary and taps `Start <program>`  | Shows the selected run, folder, space and tab before starting. An address opens the agent terminal; a reply without an address returns Home without a start-placement notice.                                                                                                        | `screens/start/StartScreen.tsx`, `screens/start/start-controller.ts`, `app/agent/[address].tsx`, `screens/agent/AgentScreen.tsx`, `app/index.tsx` |
-| START-6 | Selects `Empty tab` and taps `Create empty tab` | When the preselected target is visible, creates a blank tab in the selected existing space through `tab.new`, without starting an agent. Then opens Home.                                                                                                                            | `screens/start/StartScreen.tsx`, `screens/start/start-controller.ts`, `model/spaceTarget.ts`, `net/new-items.ts`                                  |
-| START-7 | Opens Start on a watch device or while offline  | Watch devices see `This device is read-only. Starting agents is available on control devices.` A control device without a bridge connection sees an offline banner and a disabled Start action. Neither can start an agent or create an empty tab.                                   | `screens/start/StartScreen.tsx`, `screens/start/start-access.ts`, `screens/start/start-controller.ts`                                             |
+| ID    | User action              | What the app does                                                                                                                                                                                                                                                                                             | Code                                                                                                                                                                                                                                            |
+| ----- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NEW-1 | Starts a task from Home  | Control devices see `New task`, choose an existing project, then open that Project with its composer focused. The picker offers only spaces the bridge can start in. Watch devices do not see the action.                                                                                                     | `screens/home/HomeScreen.tsx`, `screens/home/ProjectPickerSheet.tsx`, `screens/project/ProjectScreen.tsx`, `routes.ts`                                                                                                                          |
+| NEW-2 | Adds a project from Home | Opens a Name and Folder sheet and calls `createNewSpace` with the entered Name and Folder. A closed Herdr window shows `Herdr isn’t running on your Mac`. Watch devices do not see the action.                                                                                                                | `screens/home/HomeScreen.tsx`, `screens/home/AddProjectSheet.tsx`, `screens/project/new-task-port.ts`, `net/new-items.ts`                                                                                                                       |
+| NEW-3 | Adds a task in a Project | Control devices can enter a title and notes; `go` sends the title, a blank line and notes to `POST /api/tasks`. The agent and folder chips use the catalog and project folder defaults. Extra programs show `needs Herdr open` when Herdr is closed. Failed starts keep the draft and offer Retry or Refresh. | `screens/project/ProjectScreen.tsx`, `screens/project/TaskComposer.tsx`, `screens/project/AccessoryBar.tsx`, `screens/project/new-task-controller.ts`, `screens/project/new-task-port.ts`, `model/startAgent.ts`, `store/settings.ts`           |
+| NEW-4 | Opens task details       | `/task/new` edits Task, Notes, Project, Agent and Folder in a modal sheet. `New project` asks for a name and folder. Add uses the same controller as the inline composer. The sheet has no date, time, repeat, worktree or notify rows.                                                                       | `app/task/new.tsx`, `screens/project/NewTaskScreen.tsx`, `screens/project/WherePicker.tsx`, `screens/project/AgentPicker.tsx`, `screens/project/FolderPicker.tsx`, `screens/project/new-task-controller.ts`, `screens/project/new-task-port.ts` |
 
 ## Settings
 
@@ -174,25 +173,32 @@ Pushed route `/settings`, opened from Home's `⋯` menu. Code in `screens/settin
 
 These IDs remain reserved and are never reused. Their user-facing behavior moved to the task-first screens as follows.
 
-| ID        | Retired feature                 | Replaced by                                               |
-| --------- | ------------------------------- | --------------------------------------------------------- |
-| AGENTS-1  | Agents list and status sections | HOME-2, HOME-3, PROJ-1, and U22-7 smart lists             |
-| AGENTS-2  | Agent sort modes                | HOME-3 project order from Herdr                           |
-| AGENTS-3  | Agent search                    | HOME-2 task search                                        |
-| AGENTS-4  | Agents machine chip             | HOME-1 machine chip                                       |
-| AGENTS-5  | Open terminal from an agent row | PROJ-1 task route and PROJ-4 terminal action              |
-| AGENTS-6  | Agent long-press and Take over  | PROJ-4 task actions; terminal take over remains in TERM-9 |
-| AGENTS-7  | Empty Agents state              | HOME-4 empty projects state                               |
-| AGENTS-8  | Agent age refresh               | HOME-2 and PROJ-1 task ages                               |
-| AGENTS-9  | Pending agent waiting state     | PROJ-1 task rows and U22-7 Running list                   |
-| AGENTS-10 | Start agent header action       | HOME-5 New task action in U22-5                           |
-| SPACES-1  | Spaces tab and grouped spaces   | HOME-3 Projects                                           |
-| SPACES-2  | Expand and collapse space rows  | PROJ-1 project screen                                     |
-| SPACES-3  | Tab pills in Spaces             | PROJ-5 project Terminals                                  |
-| SPACES-4  | New space header action         | HOME-5 Add project in U22-5                               |
-| SPACES-5  | Start agent from a tab pill     | HOME-5 New task action in U22-5                           |
-| SPACES-6  | Empty Spaces state              | HOME-4 empty projects state                               |
-| TABS-1    | Tab bar navigation              | HOME-1 and Home's pushed Settings route                   |
+| ID        | Retired feature                   | Replaced by                                                              |
+| --------- | --------------------------------- | ------------------------------------------------------------------------ |
+| AGENTS-1  | Agents list and status sections   | HOME-2, HOME-3, PROJ-1, and U22-7 smart lists                            |
+| AGENTS-2  | Agent sort modes                  | HOME-3 project order from Herdr                                          |
+| AGENTS-3  | Agent search                      | HOME-2 task search                                                       |
+| AGENTS-4  | Agents machine chip               | HOME-1 machine chip                                                      |
+| AGENTS-5  | Open terminal from an agent row   | PROJ-1 task route and PROJ-4 terminal action                             |
+| AGENTS-6  | Agent long-press and Take over    | PROJ-4 task actions; terminal take over remains in TERM-9                |
+| AGENTS-7  | Empty Agents state                | HOME-4 empty projects state                                              |
+| AGENTS-8  | Agent age refresh                 | HOME-2 and PROJ-1 task ages                                              |
+| AGENTS-9  | Pending agent waiting state       | PROJ-1 task rows and U22-7 Running list                                  |
+| AGENTS-10 | Start agent header action         | HOME-5 New task action in U22-5                                          |
+| SPACES-1  | Spaces tab and grouped spaces     | HOME-3 Projects                                                          |
+| SPACES-2  | Expand and collapse space rows    | PROJ-1 project screen                                                    |
+| SPACES-3  | Tab pills in Spaces               | PROJ-5 project Terminals                                                 |
+| SPACES-4  | New space header action           | HOME-5 Add project in U22-5                                              |
+| SPACES-5  | Start agent from a tab pill       | HOME-5 New task action in U22-5                                          |
+| SPACES-6  | Empty Spaces state                | HOME-4 empty projects state                                              |
+| TABS-1    | Tab bar navigation                | HOME-1 and Home's pushed Settings route                                  |
+| START-1   | Opens the Start route             | NEW-1 Home project picker, NEW-3 inline composer and NEW-4 details sheet |
+| START-2   | Picks a run or refreshes choices  | NEW-3 and NEW-4 agent picker and Refresh action                          |
+| START-3   | Chooses a space and folder        | NEW-3 and NEW-4 project and folder pickers                               |
+| START-4   | Enters a first message            | NEW-3 and NEW-4 Task and Notes fields                                    |
+| START-5   | Reviews and starts an agent       | NEW-3 inline `go` and NEW-4 `Add`                                        |
+| START-6   | Creates an empty tab              | Removed; create an empty tab in Herdr                                    |
+| START-7   | Uses Start while watching/offline | NEW-3 and NEW-4 control-device and connection limits                     |
 
 ## Bridge on the Mac
 
@@ -225,7 +231,6 @@ No user-visible features are in flight.
 | -------------------------------------------------------- | --------------------------------- | ---------------- |
 | Push notifications for Needs you and Done                | #17, waiting for push credentials | SETTINGS-2       |
 | Pair another Mac from the app, such as a row in Settings | Needs a planning round            | PAIR-5           |
-| New task composer and details sheet                      | #84, #80                          | New IDs in U22-5 |
 | Task detail screen                                       | #84, #81                          | New IDs in U22-6 |
 | Needs you, Running and Done lists                        | #84, #82                          | New IDs in U22-7 |
 | Bridge task records and routes                           | #84, #77                          | New IDs in U22-2 |
@@ -237,7 +242,6 @@ These are on `main` today.
 - On the web, scrolling to the very top of a tall terminal that is still printing gets pulled back down. #36 merged with this review finding open. `TERM-4`.
 - An agent that never sends a status report stays under Running with `Waiting for status` and never shows Needs you. A recognized Claude Code or Codex menu still gets an options card. `AGENTS-9`, `TERM-8`.
 - The app has no way to pair a second Mac. #47 removed `Pair another Mac`, so Pair opens only on first launch, from `Pair again`, or from a `#pair=` link. `PAIR-5`.
-- Home's `New task` and `Add project` controls remain inert until U22-5 wires them. `HOME-5`.
 - Prompt recognition knows Claude Code and Codex only. Other agents get the composer. `TERM-8`.
 - The Pair snippet copies `herdr-bridge pair`, which works only if the bridge's bin is on `PATH`. From a checkout the command is `bun run bridge pair`. `PAIR-1`.
 - After a fresh link updates a known Mac's secure route, the Pair screen returns to Home immediately. The route line and `Updated the address for <Mac>.` message are visible only briefly. `PAIR-8`.
@@ -247,6 +251,7 @@ These are on `main` today.
 
 Newest first. One line per user-visible change, with the PR or commit and the rows it touched.
 
+- 2026-11-15, U22-5. Home can choose a project for a new task or add a named project at a chosen folder; Project has an inline composer and a shared details sheet; starts keep failed drafts, reconcile accepted records and remember the last agent per Mac. Removes Start and retires its feature IDs. `HOME-5`, `PROJ-7`, `NEW-1` to `NEW-4`, Retired features.
 - 2026-11-15, #79. Replaces the tab bar, Agents and Spaces with Home and Project, routes terminals through each project's tabs, moves Settings into Home's menu, and retires the old navigation IDs. Smart list destinations and task detail arrive in U22-6 and U22-7; Home and Project task actions arrive in U22-5. `HOME-1` to `HOME-5`, `PROJ-1` to `PROJ-7`, `LAUNCH-3`, `CONN-3` to `CONN-5`, `CONN-7`, `PAIR-5`, Retired features.
 - 2026-11-15, U22-2. Task starts pass guarded Claude Code or Codex prompts while Herdr is closed, store the verified launch folder in `herdr-mobile.tasks`, sync check-off and terminal links through task routes, map task errors to fixed UI copy and log only whether a task was present. `START-4`, `BRIDGE-7`, `BRIDGE-9`, `BRIDGE-14`.
 - 2026-11-13, #62. Pairing links use the secure channel first, known keys refresh only the secure address, connection status names its route and uses route-aware recovery copy, and Settings lists each route. `PAIR-1`, `PAIR-3` to `PAIR-8`, `CONN-4`, `CONN-6`, `CONN-7`, `SETTINGS-5`.

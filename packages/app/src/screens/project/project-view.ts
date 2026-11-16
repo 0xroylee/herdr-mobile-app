@@ -1,7 +1,11 @@
 import type { Role, Status } from "@herdr-mobile/protocol";
+import type { Href } from "expo-router";
 import { oneLine } from "../../model/summary.ts";
 import type { TaskProject, TaskRow } from "../../model/tasks.ts";
+import { routes } from "../../routes.ts";
 import type { ConnectionState } from "../../store/core.ts";
+import { shortenHomeFolder } from "../../terminal/folder.ts";
+import type { NewTaskSheetDestination } from "./new-task-controller.ts";
 
 export interface ProjectView {
   project: TaskProject;
@@ -24,6 +28,49 @@ export interface ProjectRowAction {
 }
 
 export type TaskSummaryRow = TaskRow & { lastSeenStatus?: Status | null };
+
+export interface AccessoryBarView {
+  agentLabel: string;
+  folderLabel: string;
+  labelLines: 1;
+  detailsDisabled: boolean;
+}
+
+/** Derive the labels and availability shown by the inline task accessory bar. */
+export function accessoryBarView(input: {
+  agentName: string | undefined;
+  folder: string;
+  home: string | undefined;
+  disabled: boolean;
+}): AccessoryBarView {
+  return {
+    agentLabel: input.agentName ?? "Choose agent",
+    folderLabel: input.folder ? shortenHomeFolder(input.folder, input.home) : "Choose folder",
+    labelLines: 1,
+    detailsDisabled: input.disabled,
+  };
+}
+
+/** Route the project's details button with the draft visible in its composer. */
+export function openProjectTaskDetails(
+  router: { push(href: Href): void },
+  projectId: string,
+  draft: unknown,
+): void {
+  router.push(routes.taskNew(projectId, JSON.stringify(draft)) as Href);
+}
+
+/** Return from the sheet or replace it with the project chosen by a successful start. */
+export function leaveNewTaskSheet(
+  router: { back(): void; replace(href: Href): void },
+  destination: NewTaskSheetDestination,
+): void {
+  if (destination.kind === "back") {
+    router.back();
+    return;
+  }
+  router.replace(routes.project(destination.projectId, "composer") as Href);
+}
 
 /** Order project tasks by creation time and derive controls from the current role and connection. */
 export function deriveProjectView(input: {

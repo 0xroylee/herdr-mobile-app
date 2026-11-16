@@ -1,7 +1,9 @@
 import type { Layout, Role, Terminal } from "@herdr-mobile/protocol";
+import type { Href } from "expo-router";
 import { deriveSpaces } from "../../model/spaces.ts";
 import { type EffectiveState, mostUrgent } from "../../model/status.ts";
 import type { ProjectMark, TaskProject, TaskRow } from "../../model/tasks.ts";
+import { routes } from "../../routes.ts";
 import type { ConnectionState } from "../../store/core.ts";
 
 export interface HomeProject extends TaskProject {
@@ -17,6 +19,14 @@ export interface HomeTile {
 
 export const newTaskLabelTone = "fg" as const;
 
+/** Route a Home picker selection to the project's focused task composer. */
+export function openHomeNewTaskProject(
+  router: { push(href: Href): void },
+  projectId: string,
+): void {
+  router.push(routes.project(projectId, "composer") as Href);
+}
+
 export function homeTileGlyph(kind: HomeTile["kind"]): "!" | "activity" | "check" {
   if (kind === "needs-you") return "!";
   return kind === "running" ? "activity" : "check";
@@ -30,6 +40,7 @@ export function homeTileIconBackground(kind: HomeTile["kind"]): string {
 export interface HomeView {
   rows: TaskRow[];
   projects: HomeProject[];
+  projectInventory: HomeProject[];
   tiles: HomeTile[];
   dimmed: boolean;
   showActions: boolean;
@@ -53,21 +64,19 @@ export function deriveHomeView(input: HomeViewInput): HomeView {
   const rows =
     query.length === 0 ? openRows : openRows.filter((row) => matchesHomeSearch(row, query));
   const projectIdsWithRows = new Set(rows.map((row) => row.project.id));
+  const projectInventory = candidates.map((project) => summarizeProject(project, openRows));
   const projects = candidates
     .filter((project) => {
       const hasRows = projectIdsWithRows.has(project.id);
       if (query.length > 0) return hasRows;
       return hasRows || project.id !== "other";
     })
-    .map((project) => {
-      const projectRows = rows.filter((row) => row.project.id === project.id);
-      const unchecked = projectRows.length;
-      return { ...project, unchecked, mark: projectMark(projectRows) };
-    });
+    .map((project) => summarizeProject(project, rows));
 
   return {
     rows,
     projects,
+    projectInventory,
     tiles: [
       {
         kind: "needs-you",
@@ -88,6 +97,15 @@ export function deriveHomeView(input: HomeViewInput): HomeView {
     dimmed: input.connection !== "connected",
     showActions: input.role === "control",
     actionsEnabled: input.role === "control" && input.connection === "connected",
+  };
+}
+
+function summarizeProject(project: TaskProject, rows: readonly TaskRow[]): HomeProject {
+  const projectRows = rows.filter((row) => row.project.id === project.id);
+  return {
+    ...project,
+    unchecked: projectRows.length,
+    mark: projectMark(projectRows),
   };
 }
 

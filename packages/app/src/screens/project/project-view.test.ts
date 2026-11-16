@@ -2,8 +2,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type { TaskProject, TaskRow } from "../../model/tasks.ts";
+import { routes } from "../../routes.ts";
 import {
+  accessoryBarView,
   deriveProjectView,
+  leaveNewTaskSheet,
+  openProjectTaskDetails,
   projectRowActions,
   projectTaskRows,
   shouldReadTaskSummary,
@@ -13,6 +17,57 @@ import {
 } from "./project-view.ts";
 
 const project: TaskProject = { id: "website", name: "Website", folder: "/code/website" };
+
+describe("project task entry routes", () => {
+  test("opens details with the draft shown in the project's composer", () => {
+    const pushed: unknown[] = [];
+    const draft = { text: "Review this", notes: "Keep the checks focused" };
+
+    openProjectTaskDetails({ push: (href) => pushed.push(href) }, "website", draft);
+
+    expect(pushed).toEqual([routes.taskNew("website", JSON.stringify(draft))]);
+  });
+
+  test("returns to the opened project or replaces the sheet with the selected project", () => {
+    const calls: unknown[] = [];
+    const router = {
+      back: () => calls.push("back"),
+      replace: (href: unknown) => calls.push(href),
+    };
+
+    leaveNewTaskSheet(router, { kind: "back" });
+    leaveNewTaskSheet(router, { kind: "project", projectId: "core" });
+
+    expect(calls).toEqual(["back", routes.project("core", "composer")]);
+  });
+});
+
+describe("project task accessory bar", () => {
+  test("keeps long agent labels to one line and shortens the home folder", () => {
+    const agentName = "A very long agent name that should stay on one line";
+
+    expect(
+      accessoryBarView({
+        agentName,
+        folder: "/Users/roy/work/project",
+        home: "/Users/roy",
+        disabled: false,
+      }),
+    ).toEqual({
+      agentLabel: agentName,
+      folderLabel: "~/work/project",
+      labelLines: 1,
+      detailsDisabled: false,
+    });
+    expect(
+      accessoryBarView({ agentName: undefined, folder: "", home: undefined, disabled: true }),
+    ).toMatchObject({
+      agentLabel: "Choose agent",
+      folderLabel: "Choose folder",
+      detailsDisabled: true,
+    });
+  });
+});
 
 describe("deriveProjectView", () => {
   test("keeps task creation order and hides checked rows until Show is selected", () => {
