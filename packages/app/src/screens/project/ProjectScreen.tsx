@@ -1,7 +1,7 @@
-import type { Layout } from "@herdr-mobile/protocol";
+import type { Layout, TaskRecord } from "@herdr-mobile/protocol";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { useStore } from "zustand";
 import { useConnectionManager } from "../../boot.tsx";
 import { summarize } from "../../model/summary.ts";
@@ -10,7 +10,7 @@ import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import { createScreenText } from "../../net/screen-text.ts";
 import { createTaskActions } from "../../net/task-actions.ts";
 import { routes } from "../../routes.ts";
-import { coreStore, machinesStore } from "../../store/platform.ts";
+import { coreStore, machinesStore, settingsStore } from "../../store/platform.ts";
 import { shortenHomeFolder } from "../../terminal/folder.ts";
 import { HAIRLINE } from "../../ui/components/classes.ts";
 import { IconButton } from "../../ui/components/IconButton.tsx";
@@ -19,6 +19,7 @@ import { Text } from "../../ui/text.tsx";
 import { ConnectionBanner } from "../home/ConnectionBanner.tsx";
 import { connectionPresentation } from "../home/connectionPresentation.ts";
 import { newTaskLabelTone } from "../home/home-view.ts";
+import { AccessoryBar } from "./AccessoryBar.tsx";
 import { CheckedBar } from "./CheckedBar.tsx";
 import {
   type CheckOffChoice,
@@ -29,7 +30,15 @@ import {
   type TaskIdentity,
 } from "./check-off.ts";
 import {
+  getNewTaskController,
+  type NewTaskContext,
+  NewTaskController,
+  newTaskControllerKey,
+} from "./new-task-controller.ts";
+import { bindNewTaskController, createNewTaskPort } from "./new-task-port.ts";
+import {
   deriveProjectView,
+  openProjectTaskDetails,
   type ProjectRowAction,
   projectRowActions,
   projectTaskRows,
@@ -38,14 +47,16 @@ import {
   taskSummary,
   taskSummaryKey,
 } from "./project-view.ts";
+import { TaskComposer } from "./TaskComposer.tsx";
 import { TaskRow } from "./TaskRow.tsx";
 import { projectTaskId } from "./viewState.ts";
 
 const emptyTasks: Record<string, never> = {};
 const emptyLastSeen = {};
+const emptyRecentFolders: string[] = [];
 
 export function ProjectScreen() {
-  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; focus?: string | string[] }>();
   const router = useRouter();
   const connectionManager = useConnectionManager();
   const activeId = useStore(machinesStore, (state) => state.activeId);
@@ -55,8 +66,17 @@ export function ProjectScreen() {
   const core = useStore(coreStore, (state) =>
     activeId === null ? undefined : state.machines[activeId],
   );
+  const recentFolders = useStore(settingsStore, (state) =>
+    activeId === null ? emptyRecentFolders : (state.recentFolders[activeId] ?? emptyRecentFolders),
+  );
+  const lastRun = useStore(settingsStore, (state) =>
+    activeId === null ? undefined : state.lastRun[activeId],
+  );
   const projectId = firstParam(params.id) ?? "other";
   const taskProjectId = projectTaskId(projectId, core?.layout);
+  const [focusRequest, setFocusRequest] = useState(() =>
+    firstParam(params.focus) === "composer" ? 1 : 0,
+  );
   const [showChecked, setShowChecked] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskIdentity>();
   const [checkTask, setCheckTask] = useState<TaskIdentity>();
@@ -66,22 +86,107 @@ export function ProjectScreen() {
   const [summaries, setSummaries] = useState<Record<string, string>>({});
   const requestedSummaries = useRef(new Set<string>());
   const [now, setNow] = useState(() => Date.now());
+  const calls = useMemo(
+    () =>
+      connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac."),
+    [connectionManager],
+  );
+  const taskPort = useMemo(
+    () =>
+      createNewTaskPort(calls, {
+        rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
+        rememberFolder: (machineId, folder) =>
+          settingsStore.getState().pushRecentFolder(machineId, folder),
+      }),
+    [calls],
+  );
+  const taskContext = useMemo<NewTaskContext>(
+    () => ({
+      machineId: activeId ?? undefined,
+      role: machine?.role,
+      connected: core?.connection === "connected",
+      layout: core?.layout,
+      terminals: core?.terminals ?? {},
+      recentFolders,
+      lastRun,
+    }),
+    [
+      activeId,
+      core?.connection,
+      core?.layout,
+      core?.terminals,
+      lastRun,
+      machine?.role,
+      recentFolders,
+    ],
+  );
+  const newTaskKey = newTaskControllerKey(activeId ?? "unpaired", projectId);
+  const newTaskController = useMemo(
+    () =>
+      getNewTaskController(
+        newTaskKey,
+        () =>
+          new NewTaskController(taskPort, taskContext, {
+            project: { kind: "existing", id: projectId },
+          }),
+      ),
+    [newTaskKey, projectId, taskContext, taskPort],
+  );
+  const newTaskState = useSyncExternalStore(
+    newTaskController.subscribe,
+    newTaskController.getSnapshot,
+    newTaskController.getSnapshot,
+  );
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    bindNewTaskController(newTaskController, connectionManager, taskContext, {
+      rememberRun: (machineId, run) => settingsStore.getState().setLastRun(machineId, run),
+      rememberFolder: (machineId, folder) =>
+        settingsStore.getState().pushRecentFolder(machineId, folder),
+    });
+  }, [connectionManager, newTaskController, taskContext]);
+
+  useEffect(() => {
+    if (
+      machine?.role === "control" &&
+      core?.connection === "connected" &&
+      !newTaskController.state.catalog &&
+      !newTaskController.state.catalogError
+    ) {
+      void newTaskController.load();
+    }
+  }, [core?.connection, machine?.role, newTaskController]);
+
+  useEffect(() => {
+    newTaskController.reconcileTasks(
+      core?.tasks?.tasks ?? emptyTasks,
+      newTaskState.optimisticRecords,
+    );
+  }, [core?.tasks, newTaskController, newTaskState.optimisticRecords]);
+
+  const taskRecords = useMemo(() => {
+    const records: Record<string, TaskRecord> = { ...(core?.tasks?.tasks ?? {}) };
+    for (const optimistic of newTaskState.optimisticRecords) {
+      if (!records[optimistic.id]) records[optimistic.id] = optimistic;
+    }
+    return records;
+  }, [core?.tasks, newTaskState.optimisticRecords]);
+
   const taskRows = useMemo(
     () =>
       deriveTasks(
-        core?.tasks?.tasks ?? emptyTasks,
+        taskRecords,
         core?.terminals ?? {},
         core?.layout,
         core?.lastSeenStatuses ?? emptyLastSeen,
         now,
       ),
-    [core?.lastSeenStatuses, core?.layout, core?.tasks, core?.terminals, now],
+    [core?.lastSeenStatuses, core?.layout, core?.terminals, now, taskRecords],
   );
   const project = useMemo(
     () => findProject(taskProjectId, core?.layout, taskRows.rows),
@@ -295,7 +400,12 @@ export function ProjectScreen() {
 
       <ConnectionBanner presentation={connectionState} />
 
-      <ScrollView className="min-h-0 flex-1" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        className="min-h-0 flex-1"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View className="pb-3 pt-2">
           <Text variant="pairTitle">{project.name}</Text>
           {project.folder ? (
@@ -345,6 +455,37 @@ export function ProjectScreen() {
             </Text>
           </View>
         ) : null}
+        {view.showComposer ? (
+          <>
+            <TaskComposer
+              controller={newTaskController}
+              disabled={!view.actionsEnabled}
+              focusRequest={focusRequest}
+              onGo={() => void newTaskController.go()}
+              onRefresh={() => void newTaskController.load()}
+              onRetry={() => void newTaskController.go()}
+              state={newTaskState}
+            />
+            <AccessoryBar
+              catalog={newTaskState.catalog}
+              disabled={
+                !view.actionsEnabled ||
+                newTaskState.status === "starting" ||
+                newTaskState.loadingCatalog
+              }
+              folder={newTaskState.draft.folder}
+              folderError={newTaskState.fieldErrors?.folder}
+              folderPickerRequest={newTaskState.folderPickerRequest}
+              home={newTaskState.catalog?.home}
+              onDetails={() => openProjectTaskDetails(router, projectId, newTaskState.draft)}
+              onFolder={(folder) => newTaskController.setFolder(folder)}
+              onRun={(run) => newTaskController.setRun(run)}
+              options={newTaskState.options}
+              project={newTaskState.draft.project}
+              run={newTaskState.draft.run}
+            />
+          </>
+        ) : null}
       </ScrollView>
 
       {view.showComposer ? (
@@ -354,8 +495,8 @@ export function ProjectScreen() {
         >
           <Pressable
             accessibilityRole="button"
-            disabled
             className="min-h-11 flex-row items-center gap-2"
+            onPress={() => setFocusRequest((request) => request + 1)}
           >
             <View className="h-8 w-8 items-center justify-center rounded-full bg-solid">
               <Icon color="solid-fg" name="plus" size={18} />

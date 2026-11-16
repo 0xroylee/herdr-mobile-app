@@ -6,6 +6,21 @@ export const tabPillHitSlop = { top: 7, bottom: 7, left: 6, right: 6 } as const;
 export const terminalsListScrollClassName = "min-h-0 flex-1";
 export const terminalsListContentClassName = "flex-row flex-wrap content-start gap-1.5 pb-3";
 
+export type PickerVisibilityAction =
+  | { type: "open"; disabled: boolean }
+  | { type: "close" }
+  | { type: "availability-changed"; disabled: boolean };
+
+/** Keep modal pickers closed while unavailable and prevent disabled triggers from opening them. */
+export function transitionPickerVisibility(
+  visible: boolean,
+  action: PickerVisibilityAction,
+): boolean {
+  if (action.type === "close") return false;
+  if (action.type === "open") return !action.disabled;
+  return action.disabled ? false : visible;
+}
+
 /** Convert a label-backed display route into the terminal's actual space label. */
 export function projectTaskId(projectId: string, layout: Layout | undefined): string {
   if (layout?.spaces.some((space) => space.id === projectId)) return projectId;

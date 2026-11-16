@@ -2,17 +2,24 @@ import { type Href, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useStore } from "zustand";
-import { deriveTasks } from "../../model/tasks.ts";
+import { useConnectionManager } from "../../boot.tsx";
+import { deriveStartOptions } from "../../model/startAgent.ts";
+import { deriveTasks, type TaskProject } from "../../model/tasks.ts";
+import { unavailableBridgeCalls } from "../../net/bridge-calls.ts";
 import { routes } from "../../routes.ts";
 import { coreStore, machinesStore } from "../../store/platform.ts";
 import { ListGroup } from "../../ui/components/ListGroup.tsx";
 import { Icon } from "../../ui/icon.tsx";
 import { Text } from "../../ui/text.tsx";
+import { startableHomeProjects } from "../project/new-task-controller.ts";
+import { createHomeProject } from "../project/new-task-port.ts";
+import { AddProjectSheet } from "./AddProjectSheet.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { connectionPresentation } from "./connectionPresentation.ts";
 import { HomeMenu } from "./HomeMenu.tsx";
-import { deriveHomeView, newTaskLabelTone } from "./home-view.ts";
+import { deriveHomeView, newTaskLabelTone, openHomeNewTaskProject } from "./home-view.ts";
 import { MachineChip } from "./MachineChip.tsx";
+import { ProjectPickerSheet } from "./ProjectPickerSheet.tsx";
 import { ProjectRow } from "./ProjectRow.tsx";
 import { SearchField } from "./SearchField.tsx";
 import { SmartTiles } from "./SmartTiles.tsx";
@@ -22,6 +29,7 @@ const emptyLastSeen = {};
 
 export function HomeScreen() {
   const router = useRouter();
+  const connectionManager = useConnectionManager();
   const activeId = useStore(machinesStore, (state) => state.activeId);
   const machineRecords = useStore(machinesStore, (state) => state.machines);
   const setActiveId = useStore(machinesStore, (state) => state.setActiveId);
@@ -37,6 +45,8 @@ export function HomeScreen() {
     [coreByMachine],
   );
   const [query, setQuery] = useState("");
+  const [projectPickerVisible, setProjectPickerVisible] = useState(false);
+  const [addProjectVisible, setAddProjectVisible] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -69,6 +79,25 @@ export function HomeScreen() {
     [connection, core?.layout, core?.terminals, machine?.role, query, tasks.rows],
   );
   const presentation = connectionPresentation(connection, machine?.name);
+  const newTaskProjects: TaskProject[] = useMemo(() => {
+    const choices = deriveStartOptions(
+      undefined,
+      core?.layout,
+      core?.terminals ?? {},
+      [],
+      undefined,
+    ).spaceChoices;
+    return startableHomeProjects(view.projectInventory, choices, core?.layout);
+  }, [core?.layout, core?.terminals, view.projectInventory]);
+
+  async function addProject(name: string, folder: string) {
+    return createHomeProject(
+      connectionManager?.calls() ?? unavailableBridgeCalls("Not connected to the selected Mac."),
+      machine,
+      name,
+      folder,
+    );
+  }
 
   return (
     <View className="flex-1 bg-canvas px-3.5 pt-safe">
@@ -126,7 +155,8 @@ export function HomeScreen() {
         >
           <Pressable
             accessibilityRole="button"
-            disabled
+            disabled={!view.actionsEnabled}
+            onPress={() => setProjectPickerVisible(true)}
             style={{ opacity: view.actionsEnabled ? 1 : 0.4 }}
           >
             <View className="min-h-11 flex-row items-center gap-2">
@@ -140,7 +170,8 @@ export function HomeScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            disabled
+            disabled={!view.actionsEnabled}
+            onPress={() => setAddProjectVisible(true)}
             style={{ opacity: view.actionsEnabled ? 1 : 0.4 }}
           >
             <View className="min-h-11 items-center justify-center px-2">
@@ -151,6 +182,21 @@ export function HomeScreen() {
           </Pressable>
         </View>
       ) : null}
+      <ProjectPickerSheet
+        onClose={() => setProjectPickerVisible(false)}
+        onSelect={(projectId) => {
+          setProjectPickerVisible(false);
+          openHomeNewTaskProject(router, projectId);
+        }}
+        projects={newTaskProjects}
+        visible={projectPickerVisible}
+      />
+      <AddProjectSheet
+        disabled={!view.actionsEnabled}
+        onAdd={addProject}
+        onClose={() => setAddProjectVisible(false)}
+        visible={addProjectVisible}
+      />
     </View>
   );
 }

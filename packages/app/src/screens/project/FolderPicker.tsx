@@ -1,4 +1,5 @@
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useCSSVariable } from "uniwind";
 import type { FolderSuggestion } from "../../model/startAgent.ts";
@@ -11,6 +12,7 @@ import { Tag } from "../../ui/components/Tag.tsx";
 import { Icon } from "../../ui/icon.tsx";
 import { modalFrameTopInsetClass } from "../../ui/modal-frame.ts";
 import { Text } from "../../ui/text.tsx";
+import { transitionPickerVisibility } from "./viewState.ts";
 
 const rowClasses = {
   rest: "min-h-[58px] flex-row items-center gap-3 px-3.5 py-2.5",
@@ -23,6 +25,8 @@ export interface FolderPickerProps {
   home: string | undefined;
   disabled: boolean;
   error?: string;
+  openRequest?: number;
+  trigger?: ReactNode;
   onSelect(folder: string): void;
 }
 
@@ -32,23 +36,47 @@ export function FolderPicker({
   home,
   disabled,
   error,
+  openRequest = 0,
+  trigger,
   onSelect,
 }: FolderPickerProps) {
   const [visible, setVisible] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
   const [typedFolder, setTypedFolder] = useState(folder);
   const [typedError, setTypedError] = useState<string>();
+  const lastOpenRequest = useRef(0);
   const dim = useCSSVariable("--color-dim");
   const placeholderColor = typeof dim === "string" ? dim : undefined;
+
+  useEffect(() => {
+    if (openRequest !== lastOpenRequest.current) {
+      lastOpenRequest.current = openRequest;
+      setTypedFolder(folder);
+      setTypedError(undefined);
+      setOtherOpen(false);
+      setVisible((current) => transitionPickerVisibility(current, { type: "open", disabled }));
+    }
+  }, [disabled, folder, openRequest]);
+
+  useEffect(() => {
+    if (disabled) {
+      setVisible((current) =>
+        transitionPickerVisibility(current, { type: "availability-changed", disabled }),
+      );
+      setOtherOpen(false);
+      setTypedError(undefined);
+    }
+  }, [disabled]);
 
   function openPicker() {
     setTypedFolder(folder);
     setTypedError(undefined);
     setOtherOpen(false);
-    setVisible(true);
+    setVisible((current) => transitionPickerVisibility(current, { type: "open", disabled }));
   }
 
   function handleUseTypedFolder() {
+    if (disabled) return;
     const nextFolder = typedFolder.trim();
     if (!isFolderSyntaxAllowed(nextFolder)) {
       setTypedError(
@@ -64,24 +92,37 @@ export function FolderPicker({
 
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled }}
-        disabled={disabled}
-        onPress={openPicker}
-      >
-        {({ pressed }) => (
-          <View className={pressed ? rowClasses.pressed : rowClasses.rest}>
-            <View className="min-w-0 flex-1">
-              <Text variant="headline">Folder</Text>
-              <Text numberOfLines={1} variant="mono" tone="dim">
-                {folder ? shortenHomeFolder(folder, home) : "Choose a folder"}
-              </Text>
+      {trigger ? (
+        <Pressable
+          accessibilityLabel="Choose folder"
+          accessibilityRole="button"
+          accessibilityState={{ disabled }}
+          disabled={disabled}
+          onPress={openPicker}
+          style={{ opacity: disabled ? 0.4 : 1 }}
+        >
+          {trigger}
+        </Pressable>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled }}
+          disabled={disabled}
+          onPress={openPicker}
+        >
+          {({ pressed }) => (
+            <View className={pressed ? rowClasses.pressed : rowClasses.rest}>
+              <View className="min-w-0 flex-1">
+                <Text variant="headline">Folder</Text>
+                <Text numberOfLines={1} variant="mono" tone="dim">
+                  {folder ? shortenHomeFolder(folder, home) : "Choose a folder"}
+                </Text>
+              </View>
+              <Icon color="dim" name="chevron-right" size={17} />
             </View>
-            <Icon color="dim" name="chevron-right" size={17} />
-          </View>
-        )}
-      </Pressable>
+          )}
+        </Pressable>
+      )}
       {error ? (
         <View className="px-3.5 pb-2.5">
           <Text accessibilityRole="alert" variant="caption" tone="blocked">
@@ -91,9 +132,11 @@ export function FolderPicker({
       ) : null}
       <Modal
         animationType="slide"
-        onRequestClose={() => setVisible(false)}
+        onRequestClose={() =>
+          setVisible((current) => transitionPickerVisibility(current, { type: "close" }))
+        }
         presentationStyle="pageSheet"
-        visible={visible}
+        visible={visible && !disabled}
       >
         <View className={`flex-1 bg-canvas px-3.5 ${modalFrameTopInsetClass(Platform.OS)}`}>
           <View className="flex-row items-center pb-2.5">
@@ -117,7 +160,8 @@ export function FolderPicker({
                   return (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ disabled, selected }}
+                      disabled={disabled}
                       key={`${suggestion.source}:${suggestion.path}`}
                       onPress={() => {
                         onSelect(suggestion.path);
@@ -143,6 +187,8 @@ export function FolderPicker({
             <ListGroup>
               <Pressable
                 accessibilityRole="button"
+                accessibilityState={{ disabled }}
+                disabled={disabled}
                 onPress={() => {
                   setOtherOpen(true);
                   setTypedError(undefined);
@@ -171,6 +217,7 @@ export function FolderPicker({
                   autoCapitalize="none"
                   autoCorrect={false}
                   className="min-h-11 rounded-btn border-border bg-canvas px-3 font-mono text-[13px] leading-[20px] text-fg"
+                  editable={!disabled}
                   onChangeText={(value) => {
                     setTypedFolder(value);
                     setTypedError(undefined);
@@ -186,7 +233,7 @@ export function FolderPicker({
                   </Text>
                 ) : null}
                 <View className="flex-row justify-end">
-                  <Button onPress={handleUseTypedFolder}>
+                  <Button disabled={disabled} onPress={handleUseTypedFolder}>
                     <Text variant="button">Use folder</Text>
                   </Button>
                 </View>

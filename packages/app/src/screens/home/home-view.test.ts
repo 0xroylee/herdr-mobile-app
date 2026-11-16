@@ -2,12 +2,16 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Layout } from "@herdr-mobile/protocol";
+import { deriveStartOptions } from "../../model/startAgent.ts";
 import type { TaskRow } from "../../model/tasks.ts";
+import { routes } from "../../routes.ts";
+import { startableHomeProjects } from "../project/new-task-controller.ts";
 import {
   deriveHomeView,
   homeTileGlyph,
   homeTileIconBackground,
   newTaskLabelTone,
+  openHomeNewTaskProject,
 } from "./home-view.ts";
 
 const layout: Layout = {
@@ -104,6 +108,35 @@ describe("deriveHomeView", () => {
         query: "website",
       }).projects.map(({ id }) => id),
     ).toEqual(["website"]);
+  });
+
+  test("keeps every startable project in the New task picker during an empty search", () => {
+    const view = deriveHomeView({
+      layout,
+      terminals: {},
+      rows: [
+        row("site-task", "website", "Website", "running", "Fix the site"),
+        row("core-task", "core", "Core", "running", "Check the build"),
+      ],
+      role: "control",
+      connection: "connected",
+      query: "no task matches this",
+    });
+    const choices = deriveStartOptions(undefined, layout, {}, [], undefined).spaceChoices;
+
+    expect(view.rows).toEqual([]);
+    expect(view.projects).toEqual([]);
+    expect(
+      startableHomeProjects(view.projectInventory, choices, layout).map(({ id }) => id),
+    ).toEqual(["website", "core", "empty"]);
+  });
+
+  test("routes a selected Home project to its focused composer", () => {
+    const pushed: unknown[] = [];
+
+    openHomeNewTaskProject({ push: (href) => pushed.push(href) }, "core");
+
+    expect(pushed).toEqual([routes.project("core", "composer")]);
   });
 
   test("dims stale content and hides controls from watch devices", () => {
