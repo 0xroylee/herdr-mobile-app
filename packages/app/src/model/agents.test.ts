@@ -1,9 +1,14 @@
 /// <reference types="bun" />
 
 import { describe, expect, test } from "bun:test";
-import type { HcEvent, Layout, Terminal } from "@herdr-mobile/protocol";
+import {
+  applyEvent,
+  applySnapshot,
+  type HcEvent,
+  type Layout,
+  type Terminal,
+} from "@herdr-mobile/protocol";
 import { deriveAgents } from "./agents.ts";
-import { applyEvent, applySnapshot } from "./terminals.ts";
 
 const terminal = (
   address: string,

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   malformedTaskEntryVariants,
+  malformedTaskOutcomeVariants,
   malformedTasksDocumentVariants,
+  validTaskOutcome,
   validTasksDocument,
 } from "./tasks.fixtures.ts";
 import {
@@ -14,7 +16,7 @@ import {
 } from "./tasks.ts";
 
 describe("parseTasksDoc", () => {
-  test("round-trips the phone, unlinked, from-Herdr, and checked task records", () => {
+  test("round-trips task records with valid done and stopped outcomes", () => {
     expect(parseTasksDoc(validTasksDocument)).toEqual(validTasksDocument);
   });
 
@@ -30,6 +32,26 @@ describe("parseTasksDoc", () => {
       const parsed = parseTasksDoc({ v: 1, tasks: { [good.id]: good, [key]: record } });
       expect(parsed?.tasks).toEqual({ [good.id]: good });
     }
+  });
+
+  test("drops only each malformed outcome and keeps its task record", () => {
+    const record = validTasksDocument.tasks.tk00000000000000000000000000000001;
+    const { outcome: _outcome, ...recordWithoutOutcome } = record;
+
+    for (const outcome of malformedTaskOutcomeVariants) {
+      const parsed = parseTasksDoc({ v: 1, tasks: { [record.id]: { ...record, outcome } } });
+      expect(parsed?.tasks[record.id]).toEqual(recordWithoutOutcome);
+    }
+  });
+
+  test("accepts a 160-character outcome summary", () => {
+    const record = validTasksDocument.tasks.tk00000000000000000000000000000001;
+    const outcome = { ...validTaskOutcome, summary: "😀".repeat(160) };
+
+    expect(
+      parseTasksDoc({ v: 1, tasks: { [record.id]: { ...record, outcome } } })?.tasks[record.id]
+        ?.outcome,
+    ).toEqual(outcome);
   });
 
   test("accepts text at 8 KiB and rejects text above the byte limit", () => {

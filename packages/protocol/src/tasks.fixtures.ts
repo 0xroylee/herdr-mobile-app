@@ -8,6 +8,7 @@ import {
   type TASKS_MAX_RECORDS,
   type TASKS_TARGET_BYTES,
   type TaskOrigin,
+  type TaskOutcome,
   type TaskRecord,
   type TasksDocument,
 } from "./tasks.ts";
@@ -31,6 +32,13 @@ export const validTasksDocument = {
       placement: "core",
       createdAt: now,
       createdBy: { deviceId: "device-1", deviceName: "Phone" },
+      outcome: {
+        state: "done",
+        turn: 2,
+        ended: false,
+        at: now + 6,
+        summary: "Finished the API review.",
+      },
     },
     tk00000000000000000000000000000002: {
       id: "tk00000000000000000000000000000002",
@@ -40,6 +48,13 @@ export const validTasksDocument = {
       folder: "/repo",
       space: { id: "sp1" },
       createdAt: now + 1,
+      outcome: {
+        state: "stopped",
+        turn: 1,
+        ended: true,
+        at: now + 7,
+        exit: { code: 1, signal: null, reason: "exited" },
+      },
     },
     tk00000000000000000000000000000003: {
       id: "tk00000000000000000000000000000003",
@@ -61,6 +76,14 @@ export const validTasksDocument = {
     },
   },
 } satisfies TasksDocument;
+
+export const validTaskOutcome = {
+  state: "done",
+  turn: 2,
+  ended: false,
+  at: now + 6,
+  summary: "Finished the API review.",
+} satisfies TaskOutcome;
 
 export const malformedTasksDocumentVariants: JsonValue[] = [
   null,
@@ -103,6 +126,24 @@ export const malformedTaskEntryVariants: { key: string; record: JsonValue }[] = 
   { key: validPhoneTask.id, record: { ...validPhoneTask, checkedBy: { deviceName: "Phone" } } },
 ];
 
+/** Outcomes that fail one rule while the containing task record remains valid. */
+export const malformedTaskOutcomeVariants: JsonValue[] = [
+  null,
+  { ...validTaskOutcome, state: "running" },
+  { ...validTaskOutcome, turn: -1 },
+  { ...validTaskOutcome, turn: 1.5 },
+  { ...validTaskOutcome, ended: "yes" },
+  { ...validTaskOutcome, at: "now" },
+  { ...validTaskOutcome, at: Number.POSITIVE_INFINITY },
+  { ...validTaskOutcome, summary: 42 },
+  { ...validTaskOutcome, summary: "x".repeat(161) },
+  { ...validTaskOutcome, exit: null },
+  { ...validTaskOutcome, exit: { code: "0", signal: null, reason: null } },
+  { ...validTaskOutcome, exit: { code: 0, signal: "9", reason: null } },
+  { ...validTaskOutcome, exit: { code: 0, signal: null, reason: 9 } },
+  { ...validTaskOutcome, exit: { code: 0, signal: null } },
+];
+
 /** True only when A and B have the same type. */
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -125,6 +166,18 @@ const taskRecordShape: Equals<
     checkedTurn?: number;
     checkedAt?: number;
     checkedBy?: { deviceId: string; deviceName: string };
+    outcome?: TaskOutcome;
+  }
+> = true;
+const taskOutcomeShape: Equals<
+  TaskOutcome,
+  {
+    state: "done" | "stopped";
+    turn: number;
+    ended: boolean;
+    at: number;
+    summary?: string;
+    exit?: { code: number | null; signal: number | null; reason: string | null };
   }
 > = true;
 const tasksDocumentShape: Equals<TasksDocument, { v: 1; tasks: Record<string, TaskRecord> }> = true;
@@ -136,6 +189,7 @@ const tasksTargetBytesShape: Equals<typeof TASKS_TARGET_BYTES, number> = true;
 
 export const exactTaskShapes = [
   taskOriginShape,
+  taskOutcomeShape,
   taskRecordShape,
   tasksDocumentShape,
   taskIdPatternShape,

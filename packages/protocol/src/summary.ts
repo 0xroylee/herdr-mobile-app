@@ -1,4 +1,4 @@
-import type { Status } from "@herdr-mobile/protocol";
+import type { Status } from "./generated/hc-api.ts";
 import { summarizeClaude } from "./summary/claude.ts";
 import { summarizeCodex } from "./summary/codex.ts";
 

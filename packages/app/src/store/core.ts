@@ -1,6 +1,14 @@
-import type { HcEvent, Layout, Status, TasksDocument, Terminal } from "@herdr-mobile/protocol";
+import {
+  applyEvent,
+  applySnapshot,
+  type HcEvent,
+  type Layout,
+  type Status,
+  type TasksDocument,
+  type Terminal,
+  type TerminalTable,
+} from "@herdr-mobile/protocol";
 import { create } from "zustand";
-import { applyEvent, applySnapshot, type TerminalTable } from "../model/terminals.ts";
 
 export type ConnectionState =
   | "connecting"
