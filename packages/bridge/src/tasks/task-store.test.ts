@@ -33,6 +33,7 @@ class FakeCore {
   lists = 0;
   sets: Array<{ version: number; value: TasksDocument }> = [];
   conflicts = 0;
+  getFailure: Error | undefined;
   setFailure: Error | undefined;
 
   readonly call: TaskCoreCaller = async (method, params) => {
@@ -40,6 +41,7 @@ class FakeCore {
     if (method === "doc.get") {
       this.gets += 1;
       expect(params).toEqual({ name: TASKS_DOC_NAME });
+      if (this.getFailure) throw this.getFailure;
       return {
         value: structuredClone(this.docValue === undefined ? this.document : this.docValue),
         version: this.version,
@@ -223,6 +225,66 @@ describe("TaskStore", () => {
     expect(snapshots[0]?.tasks[created.id]).toBeUndefined();
     expect(snapshots[1]?.tasks[externalId]?.text).toBe("External task");
     expect(snapshots[1]?.tasks[created.id]).toEqual(created);
+  });
+
+  test("refreshes a changed document and notifies after replacing its memory", async () => {
+    const core = new FakeCore();
+    const store = await TaskStore.open(core.call, new FakeClock());
+    const externalId = `tk${"c".repeat(32)}`;
+    const snapshots: TasksDocument[] = [];
+    store.onChange(() => snapshots.push(store.snapshot()));
+    core.version = 4;
+    core.document = {
+      v: 1,
+      tasks: { [externalId]: record(externalId, { text: "External task" }) },
+    };
+
+    await store.refresh();
+
+    expect(core.calls.at(-1)).toBe("doc.get");
+    expect(store.snapshot().tasks[externalId]?.text).toBe("External task");
+    expect(snapshots).toEqual([store.snapshot()]);
+
+    await store.create({
+      text: "Local task",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(core.sets.at(-1)?.version).toBe(4);
+  });
+
+  test("refreshes a new version without notifying when task data is unchanged", async () => {
+    const { core, store } = await opened();
+    const changes: TasksDocument[] = [];
+    store.onChange(() => changes.push(store.snapshot()));
+    core.version = 9;
+
+    await store.refresh();
+
+    expect(changes).toEqual([]);
+    await store.create({
+      text: "Uses refreshed version",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(core.sets.at(-1)?.version).toBe(9);
+  });
+
+  test("leaves memory and version unchanged when refresh fails", async () => {
+    const { core, store } = await opened();
+    const before = store.snapshot();
+    core.getFailure = new Error("read failed");
+
+    await expect(store.refresh()).rejects.toMatchObject({ code: "core_unavailable" });
+
+    expect(store.snapshot()).toEqual(before);
+    core.getFailure = undefined;
+    await store.create({
+      text: "Uses original version",
+      run: { kind: "program", id: "claude" },
+      folder: "/repo",
+    });
+    expect(core.sets.at(-1)?.version).toBe(0);
   });
 
   test("opens the core document and returns isolated snapshots", async () => {
