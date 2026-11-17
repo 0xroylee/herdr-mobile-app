@@ -216,6 +216,22 @@ export class TaskStore {
     return () => this.listeners.delete(listener);
   }
 
+  /** Refreshes the cached document from the core in the same order as writes. */
+  refresh(): Promise<void> {
+    return this.enqueue(async () => {
+      let current: ReadDocument;
+      try {
+        current = await TaskStore.read(this.caller);
+      } catch (error) {
+        throw normalizeCoreError(error);
+      }
+      const changed = serialize(this.document ?? emptyDocument()) !== serialize(current.document);
+      this.document = current.document;
+      this.version = current.version;
+      if (changed) this.notifyChange();
+    });
+  }
+
   recordOutcomes(changes: Readonly<Record<string, TaskOutcome | undefined>>): Promise<void> {
     return this.enqueue(async () => {
       await this.write((document) => {

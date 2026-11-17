@@ -4,9 +4,10 @@
  *
  * Options may come from a JSON object named by `HERDR_FAKE_AGENT_CONFIG`, then be overridden
  * by environment variables:
- *   mode: "done" | "blocked" (`HERDR_FAKE_AGENT_MODE`, default "done")
+ *   mode: "done" | "blocked" | "crash" (`HERDR_FAKE_AGENT_MODE`, default "done")
  *   delayMs: milliseconds between status changes (`HERDR_FAKE_AGENT_DELAY_MS`, default 400)
  *   exitCode: process exit code (`HERDR_FAKE_AGENT_EXIT_CODE`, default 0)
+ *   holdMs: milliseconds to stay alive after reporting done (`HERDR_FAKE_AGENT_HOLD_MS`, default 0)
  *   msg: optional done message printed to the terminal (`HERDR_FAKE_AGENT_MSG`)
  *   lastLine: canned final screen line (`HERDR_FAKE_AGENT_LAST_LINE`)
  *   question: blocked menu question (`HERDR_FAKE_AGENT_QUESTION`)
@@ -18,9 +19,10 @@
 import { readFile } from "node:fs/promises";
 
 export interface FakeAgentOptions {
-  mode: "done" | "blocked";
+  mode: "done" | "blocked" | "crash";
   delayMs: number;
   exitCode: number;
+  holdMs: number;
   msg?: string;
   lastLine: string;
   question: string;
@@ -37,6 +39,7 @@ const DEFAULT_OPTIONS: FakeAgentOptions = {
   mode: "done",
   delayMs: 400,
   exitCode: 0,
+  holdMs: 0,
   lastLine: "Fake agent finished the task.",
   question: "May I continue with this change?",
   choices: ["Yes", "No"],
@@ -56,8 +59,11 @@ function parseInteger(value: string | undefined, fallback: number, name: string)
 function normalizeFileOptions(value: unknown): Partial<FakeAgentOptions> {
   if (!isRecord(value)) throw new Error("fake-agent config must be a JSON object");
   const result: Partial<FakeAgentOptions> = {};
-  if (value.mode === "done" || value.mode === "blocked") result.mode = value.mode;
-  else if (value.mode !== undefined) throw new Error("mode must be done or blocked");
+  if (value.mode === "done" || value.mode === "blocked" || value.mode === "crash") {
+    result.mode = value.mode;
+  } else if (value.mode !== undefined) {
+    throw new Error("mode must be done, blocked or crash");
+  }
   if (typeof value.delayMs === "number" && Number.isSafeInteger(value.delayMs)) {
     result.delayMs = value.delayMs;
   } else if (value.delayMs !== undefined) {
@@ -67,6 +73,11 @@ function normalizeFileOptions(value: unknown): Partial<FakeAgentOptions> {
     result.exitCode = value.exitCode;
   } else if (value.exitCode !== undefined) {
     throw new Error("exitCode must be an integer");
+  }
+  if (typeof value.holdMs === "number" && Number.isSafeInteger(value.holdMs)) {
+    result.holdMs = value.holdMs;
+  } else if (value.holdMs !== undefined) {
+    throw new Error("holdMs must be an integer");
   }
   for (const key of ["msg", "lastLine", "question"] as const) {
     const field = value[key];
@@ -92,7 +103,9 @@ export async function readFakeAgentOptions(
   }
 
   const mode = env.HERDR_FAKE_AGENT_MODE ?? fileOptions.mode ?? DEFAULT_OPTIONS.mode;
-  if (mode !== "done" && mode !== "blocked") throw new Error("mode must be done or blocked");
+  if (mode !== "done" && mode !== "blocked" && mode !== "crash") {
+    throw new Error("mode must be done, blocked or crash");
+  }
   const delayMs = parseInteger(
     env.HERDR_FAKE_AGENT_DELAY_MS,
     fileOptions.delayMs ?? DEFAULT_OPTIONS.delayMs,
@@ -101,9 +114,16 @@ export async function readFakeAgentOptions(
   if (delayMs < 0 || delayMs > 60_000) throw new Error("delayMs must be between 0 and 60000");
   const exitCode = parseInteger(
     env.HERDR_FAKE_AGENT_EXIT_CODE,
-    fileOptions.exitCode ?? DEFAULT_OPTIONS.exitCode,
+    fileOptions.exitCode ?? (mode === "crash" ? 1 : DEFAULT_OPTIONS.exitCode),
     "exitCode",
   );
+  if (mode === "crash" && exitCode === 0) throw new Error("crash mode exitCode must be non-zero");
+  const holdMs = parseInteger(
+    env.HERDR_FAKE_AGENT_HOLD_MS,
+    fileOptions.holdMs ?? DEFAULT_OPTIONS.holdMs,
+    "holdMs",
+  );
+  if (holdMs < 0 || holdMs > 60_000) throw new Error("holdMs must be between 0 and 60000");
   const choices = env.HERDR_FAKE_AGENT_CHOICES
     ? env.HERDR_FAKE_AGENT_CHOICES.split("|").filter(Boolean)
     : (fileOptions.choices ?? DEFAULT_OPTIONS.choices);
@@ -111,6 +131,7 @@ export async function readFakeAgentOptions(
     mode,
     delayMs,
     exitCode,
+    holdMs,
     lastLine: env.HERDR_FAKE_AGENT_LAST_LINE ?? fileOptions.lastLine ?? DEFAULT_OPTIONS.lastLine,
     question: env.HERDR_FAKE_AGENT_QUESTION ?? fileOptions.question ?? DEFAULT_OPTIONS.question,
     choices,
@@ -139,6 +160,12 @@ export async function runFakeAgent(
   io.write(`${JSON.stringify(argv)}\r\n`);
   report(io, "working");
   await io.delay(options.delayMs);
+  if (options.mode === "crash") {
+    if (options.exitCode === 0) throw new Error("crash mode exitCode must be non-zero");
+    if (options.msg !== undefined) io.write(`${options.msg}\r\n`);
+    io.write(`${options.lastLine}\r\n`);
+    return options.exitCode;
+  }
   if (options.mode === "blocked") {
     printMenu(io, options);
     report(io, "blocked");
@@ -149,6 +176,7 @@ export async function runFakeAgent(
   if (options.msg !== undefined) io.write(`${options.msg}\r\n`);
   io.write(`${options.lastLine}\r\n`);
   report(io, "done");
+  await io.delay(options.holdMs);
   return options.exitCode;
 }
 
