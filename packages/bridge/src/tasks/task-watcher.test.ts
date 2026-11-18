@@ -14,19 +14,16 @@ import { claudeDoneScreen, codexDoneScreen } from "../../../protocol/src/summary
 import type { Clock } from "../prototype/deadline.ts";
 import type { CoreConnectionStatus } from "./core-connection.ts";
 import { type TaskCoreCaller, TaskStore, TaskStoreError } from "./task-store.ts";
-import {
-  desiredOutcome,
-  type TaskTransition,
-  TaskWatcher,
-  type TaskWatcherLogger,
-  type TrackedTask,
-  transitionOf,
-} from "./task-watcher.ts";
+import { type TaskTransition, TaskWatcher, type TaskWatcherLogger } from "./task-watcher.ts";
 
 class FakeClock implements Clock {
-  nowValue = 100_000;
+  nowValue: number;
   nextId = 0;
   readonly timers = new Map<number, { at: number; callback: () => void }>();
+
+  constructor(now = 100_000) {
+    this.nowValue = now;
+  }
 
   now(): number {
     return this.nowValue;
@@ -43,7 +40,11 @@ class FakeClock implements Clock {
   }
 
   async advance(ms: number): Promise<void> {
-    const target = this.nowValue + ms;
+    await this.advanceTo(this.nowValue + ms);
+  }
+
+  async advanceTo(target: number): Promise<void> {
+    if (target < this.nowValue) throw new Error("fake clock cannot move backwards");
     for (;;) {
       const next = [...this.timers.entries()]
         .filter(([, timer]) => timer.at <= target)
@@ -61,7 +62,7 @@ class FakeClock implements Clock {
 }
 
 async function drain(): Promise<void> {
-  for (let index = 0; index < 24; index += 1) await Promise.resolve();
+  for (let index = 0; index < 32; index += 1) await Promise.resolve();
 }
 
 class FakeCore {
@@ -69,7 +70,7 @@ class FakeCore {
   version = 3;
   lists = 0;
   conflicts = 0;
-  readFailure: Error | undefined;
+  writeError: Error | undefined;
   listTerminals: Terminal[] = [];
   readonly calls: HcMethod[] = [];
   readonly sets: Array<{ version: number; value: TasksDocument }> = [];
@@ -77,7 +78,6 @@ class FakeCore {
   readonly call: TaskCoreCaller = async (method, params) => {
     this.calls.push(method as HcMethod);
     if (method === "doc.get") {
-      if (this.readFailure) throw this.readFailure;
       expect(params).toEqual({ name: "herdr-mobile.tasks" });
       return { value: structuredClone(this.document), version: this.version };
     }
@@ -85,9 +85,10 @@ class FakeCore {
       this.lists += 1;
       return { terminals: structuredClone(this.listTerminals) };
     }
-    if (method !== "doc.set") throw new Error(`unexpected core method ${method}`);
+    if (method !== "doc.set") throw new Error("unexpected core method");
     const input = params as { version: number; value: TasksDocument };
     this.sets.push({ version: input.version, value: structuredClone(input.value) });
+    if (this.writeError !== undefined) throw this.writeError;
     if (this.conflicts > 0) {
       this.conflicts -= 1;
       this.version += 1;
@@ -116,7 +117,7 @@ class FakeConnection {
   stops = 0;
   resumes = 0;
   readonly calls: Array<{ method: HcMethod; params: unknown }> = [];
-  readHandler: (() => Promise<unknown>) | undefined;
+  readHandler: ((address: string) => Promise<unknown>) | undefined;
 
   start(): void {
     this.starts += 1;
@@ -137,11 +138,15 @@ class FakeConnection {
 
   async call(method: HcMethod, params: unknown): Promise<unknown> {
     this.calls.push({ method, params });
-    if (method === "terminal.read" && this.readHandler) return this.readHandler();
-    if (method === "terminal.read") {
-      return { complete: true, how: "screen", text: "Finished successfully." };
-    }
-    throw new Error(`unexpected watcher call ${method}`);
+    if (method !== "terminal.read") throw new Error("unexpected watcher call");
+    const address = (params as { terminal: string }).terminal;
+    return (
+      this.readHandler?.(address) ?? {
+        complete: true,
+        how: "screen",
+        text: "Finished successfully.",
+      }
+    );
   }
 }
 
@@ -161,7 +166,8 @@ class FakeLogger implements TaskWatcherLogger {
   }
 }
 
-const id = (digit: string): string => `tk${digit.repeat(32)}`;
+const id = (digit: string): string =>
+  `tk${(Number.parseInt(digit, 36) % 16).toString(16).repeat(32)}`;
 
 function taskRecord(key: string, changes: Partial<TaskRecord> = {}): TaskRecord {
   const record: TaskRecord = {
@@ -195,7 +201,7 @@ function terminal(address = "t1", changes: Partial<Terminal> = {}): Terminal {
     state: "live",
     status: { state: "working" },
     status_ms: 99_900,
-    turn: 1,
+    turn: 0,
     ...changes,
   };
 }
@@ -208,212 +214,354 @@ interface Harness {
   store: TaskStore;
   transitions: TaskTransition[];
   watcher: TaskWatcher;
-  releaseRefresh?: () => void;
+  releaseRefresh(): Promise<void>;
 }
 
 async function harness(
-  tasks: TaskRecord[] = [],
-  options: { deferRefresh?: boolean } = {},
+  records: TaskRecord[] = [],
+  options: { deferRefresh?: boolean; now?: number } = {},
 ): Promise<Harness> {
-  const clock = new FakeClock();
+  const clock = new FakeClock(options.now);
   const core = new FakeCore();
-  core.document = { v: 1, tasks: Object.fromEntries(tasks.map((record) => [record.id, record])) };
+  core.document = { v: 1, tasks: Object.fromEntries(records.map((record) => [record.id, record])) };
   const connection = new FakeConnection();
   const logger = new FakeLogger();
   let watcher: TaskWatcher | undefined;
   const store = TaskStore.create(core.call, clock, {
     liveTerminals: () => watcher?.liveTerminals(),
   });
-  let releaseRefresh: (() => void) | undefined;
+  const releaseQueue: Array<() => void> = [];
   if (options.deferRefresh) {
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const originalRefresh = store.refresh.bind(store);
-    store.refresh = async () => {
-      await gate;
-      await originalRefresh();
-    };
-    releaseRefresh = () => release?.();
+    const refresh = store.refresh.bind(store);
+    store.refresh = () =>
+      new Promise<void>((resolve, reject) => {
+        releaseQueue.push(() => {
+          void refresh().then(resolve, reject);
+        });
+      });
   }
   watcher = new TaskWatcher({ connection, store, clock, logger });
   const transitions: TaskTransition[] = [];
   watcher.onTransition((transition) => transitions.push(transition));
   watcher.start();
   await drain();
-  return { clock, core, connection, logger, store, transitions, watcher, releaseRefresh };
-}
-
-function trackedTask(changes: Partial<TrackedTask> = {}): TrackedTask {
   return {
-    address: "t1",
-    terminal: terminal(),
-    inTable: true,
-    task: taskRecord(id("9")),
-    status: { state: "working" },
-    statusTurn: 1,
-    reported: true,
-    ended: false,
-    eventSinceSnapshot: false,
-    eventSupersededOutcome: false,
-    createdAt: 100_000,
-    ...changes,
+    clock,
+    core,
+    connection,
+    logger,
+    store,
+    transitions,
+    watcher,
+    async releaseRefresh() {
+      releaseQueue.shift()?.();
+      await drain();
+    },
   };
 }
 
-function snapshot(watcher: TaskWatcher, terminals: Terminal[]): void {
-  watcher.onSnapshot({ seq: 1, terminals });
+function snapshot(h: Harness, terminals: Terminal[]): void {
+  h.watcher.onSnapshot({ seq: 1, terminals });
 }
 
-function event(
-  watcher: TaskWatcher,
-  type: string,
-  address: string | undefined,
-  data: unknown,
-): void {
-  watcher.onEvent({
+function emit(h: Harness, type: string, address: string, data: unknown): void {
+  h.watcher.onEvent({
     seq: 2,
     type,
-    ...(address === undefined ? {} : { terminal: address }),
+    terminal: address,
     data: data as HcEvent["data"],
   });
 }
 
-function statusEvent(watcher: TaskWatcher, address: string, status: Status | null): void {
-  event(watcher, "status", address, { status, records: {}, reported: true });
+function status(h: Harness, address: string, value: Status | null): void {
+  emit(h, "status", address, { status: value, records: {}, reported: true });
 }
 
-describe("TaskWatcher derivations", () => {
-  test.each([
-    {
-      label: "working live terminal",
-      tracked: trackedTask(),
-      outcome: undefined,
-      transition: undefined,
-    },
-    {
-      label: "attributed done completion",
-      tracked: trackedTask({
-        status: { state: "done", msg: "Finished." },
-        completion: {
-          generation: 1,
-          status: { state: "done", msg: "Finished." },
-          message: "Finished.",
-          turn: 1,
-          pending: false,
-          attributedAt: 100_010,
-          source: "event",
-        },
-      }),
-      outcome: { state: "done", turn: 1, ended: false, at: 100_010, summary: "Finished." },
-      transition: { kind: "done", turn: 1 },
-    },
-    {
-      label: "pending done completion",
-      tracked: trackedTask({
-        status: { state: "done", msg: "Finished." },
-        completion: {
-          generation: 1,
-          status: { state: "done", msg: "Finished." },
-          message: "Finished.",
-          turn: 0,
-          pending: true,
-          source: "event",
-        },
-      }),
-      outcome: undefined,
-      transition: undefined,
-    },
-    {
-      label: "ended without done evidence",
-      tracked: trackedTask({
-        terminal: terminal("t1", {
-          state: "finished",
-          reason: "exited",
-          exit_code: 7,
-          status: { state: "working" },
-        }),
-        status: { state: "working" },
-        ended: true,
-        endedAt: 100_020,
-      }),
-      outcome: {
-        state: "stopped",
-        turn: 1,
-        ended: true,
-        at: 100_020,
-        exit: { code: 7, signal: null, reason: "exited" },
-      },
-      transition: { kind: "stopped", turn: 1 },
-    },
-    {
-      label: "needs-you status",
-      tracked: trackedTask({ status: { state: "blocked", msg: "Choose." } }),
-      outcome: undefined,
-      transition: { kind: "needs-you", turn: 1 },
-    },
-  ])("derives $label from one tracked record", ({ tracked, outcome, transition }) => {
-    expect(desiredOutcome(tracked)).toEqual(outcome);
-    expect(transitionOf(tracked)).toEqual(transition);
-  });
-});
+function turn(h: Harness, address: string, value: number): void {
+  emit(h, "turn", address, { turn: value });
+}
 
-describe("TaskWatcher", () => {
-  test("refreshes existing records on bridge restart and stores a status summary", async () => {
+function finished(h: Harness, address: string, code: number | null, keep = false): void {
+  emit(h, keep ? "lost" : "finished", address, {
+    reason: code === null ? "signaled" : "exited",
+    exit_code: code,
+    signal: null,
+    ...(keep ? {} : { finished_ms: h.clock.now() }),
+  });
+}
+
+async function settle(_h: Harness): Promise<void> {
+  await drain();
+  await drain();
+}
+
+async function writeAfter(h: Harness, ms = 300): Promise<void> {
+  await h.clock.advance(ms);
+  await settle(h);
+}
+
+describe("TaskWatcher order-independent transitions and outcomes", () => {
+  test("attributes a done status to the turn the core reports next", async () => {
     const record = taskRecord(id("1"));
     const h = await harness([record]);
-    expect(h.store.snapshot().tasks[record.id]).toEqual(record);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toBeUndefined();
-    expect(h.core.sets).toHaveLength(0);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "Task finished." } })]);
-    await drain();
-    await h.clock.advance(300);
+    snapshot(h, [terminal()]);
+    await settle(h);
+
+    status(h, "t1", { state: "done", msg: "Task finished." });
+    turn(h, "t1", 1);
+    expect(h.transitions.map(({ kind, turn: value }) => [kind, value])).toEqual([["done", 1]]);
+    await writeAfter(h);
+    finished(h, "t1", 7);
+    await writeAfter(h);
 
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "done",
       turn: 1,
-      ended: false,
+      ended: true,
       summary: "Task finished.",
     });
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
-    expect(h.core.sets).toHaveLength(1);
+    expect(h.transitions).toHaveLength(1);
   });
 
-  test("does not reopen a matching settled done outcome without a summary", async () => {
-    const record = taskRecord(id("1"), {
+  test("an observed working status at the persisted done turn supersedes persisted done", async () => {
+    const record = taskRecord(id("2"), {
+      outcome: { state: "done", turn: 1, ended: false, at: 90_000, summary: "Old result." },
+    });
+    const h = await harness([record]);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "working" } })]);
+    await settle(h);
+    finished(h, "t1", 7);
+    await writeAfter(h);
+
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
+      state: "stopped",
+      turn: 1,
+      exit: { code: 7, reason: "exited" },
+    });
+  });
+
+  test("settles the summary without a read when the program becomes a kept shell", async () => {
+    const record = taskRecord(id("3"));
+    const h = await harness([record]);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(h);
+    finished(h, "t1", 0, true);
+    await settle(h);
+    await h.clock.advance(1_000);
+    await writeAfter(h);
+
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
+      state: "done",
+      turn: 1,
+      ended: true,
+    });
+  });
+
+  test("keeps the done message when lost arrives before the flush", async () => {
+    const record = taskRecord(id("4"));
+    const h = await harness([record]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done", msg: "Captured before exit." });
+    turn(h, "t1", 1);
+    finished(h, "t1", 7, true);
+    await writeAfter(h);
+
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
+      state: "done",
+      turn: 1,
+      ended: true,
+      summary: "Captured before exit.",
+    });
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
+  });
+
+  test("keeps event dedupe memory when the refresh settles late", async () => {
+    const record = taskRecord(id("5"));
+    const h = await harness([record], { deferRefresh: true });
+    snapshot(h, [terminal()]);
+    status(h, "t1", { state: "done", msg: "One transition." });
+    turn(h, "t1", 1);
+    expect(h.transitions).toHaveLength(1);
+
+    await settle(h);
+    await h.releaseRefresh();
+    await settle(h);
+    await writeAfter(h);
+    expect(h.transitions).toHaveLength(1);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("One transition.");
+  });
+
+  test("does not read or write for a matching persisted done without a summary", async () => {
+    const record = taskRecord(id("6"), {
       outcome: { state: "done", turn: 1, ended: false, at: 99_000 },
     });
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(10_000);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(h);
+    await h.clock.advance(1_000);
 
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
     expect(h.core.sets).toHaveLength(0);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toEqual(record.outcome);
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
+  });
+
+  test("retries once two seconds after failure and never reads at the cap", async () => {
+    const record = taskRecord(id("7"));
+    const h = await harness([record]);
+    let reads = 0;
+    h.connection.readHandler = async () => {
+      reads += 1;
+      if (reads === 1) throw new Error("first read failed");
+      return { complete: true, text: "Final response." };
+    };
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(h);
+    await h.clock.advance(750);
+    await settle(h);
+    expect(reads).toBe(1);
+    await h.clock.advance(2_000);
+    await settle(h);
+    await writeAfter(h);
+    expect(reads).toBe(2);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("Final response.");
+
+    const capped = await harness([taskRecord(id("8"))]);
+    let cappedReads = 0;
+    capped.connection.readHandler = () => {
+      cappedReads += 1;
+      return new Promise((_, reject) => {
+        capped.clock.setTimeout(() => reject(new Error("late failure")), 250);
+      });
+    };
+    snapshot(capped, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(capped);
+    await capped.clock.advance(750);
+    await capped.clock.advance(250);
+    await capped.clock.advance(2_000);
+    await settle(capped);
+    expect(cappedReads).toBe(1);
+  });
+
+  test("reads the codex summary with the codex foreground", async () => {
+    const record = taskRecord(id("9"));
+    const h = await harness([record]);
+    h.connection.readHandler = async () => ({ complete: true, text: codexDoneScreen.join("\n") });
+    snapshot(h, [
+      terminal("t1", {
+        argv: ["claude"],
+        foreground: { pid: 24, name: "codex", argv: ["codex"], cwd: "/repo" },
+        turn: 1,
+        status: { state: "done" },
+      }),
+    ]);
+    await settle(h);
+    await h.clock.advance(750);
+    await settle(h);
+    await writeAfter(h);
+
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe(
+      "The focused model tests pass, with no protocol changes needed.",
+    );
+  });
+
+  test("reads the claude summary with the claude foreground", async () => {
+    const record = taskRecord(id("9"));
+    const h = await harness([record]);
+    h.connection.readHandler = async () => ({ complete: true, text: claudeDoneScreen.join("\n") });
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(h);
+    await h.clock.advance(750);
+    await settle(h);
+    await writeAfter(h);
+
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe(
+      "All 27 focused tests pass, and workspace typecheck is clean.",
+    );
+  });
+
+  test("emits one done at the completed turn for status then turn", async () => {
+    const h = await harness([taskRecord(id("a"))]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done", msg: "Completed turn one." });
+    turn(h, "t1", 1);
+
+    expect(h.transitions.map(({ kind, turn: value, summary }) => [kind, value, summary])).toEqual([
+      ["done", 1, "Completed turn one."],
+    ]);
+  });
+
+  test("keeps needs-you memory through a snapshot restating blocked at turn one", async () => {
+    const h = await harness([taskRecord(id("b"))]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "blocked", msg: "First question." });
+    turn(h, "t1", 1);
+    snapshot(h, [
+      terminal("t1", { turn: 1, status: { state: "blocked", msg: "First question." } }),
+    ]);
+
+    expect(h.transitions.map(({ kind, turn: value }) => [kind, value])).toEqual([["needs-you", 1]]);
+  });
+
+  test("a second question after new work is a new turn and emits again", async () => {
+    const h = await harness([taskRecord(id("b"))]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "blocked", msg: "First question." });
+    turn(h, "t1", 1);
+    snapshot(h, [
+      terminal("t1", { turn: 1, status: { state: "blocked", msg: "First question." } }),
+    ]);
+    expect(h.transitions.map(({ kind, turn: value }) => [kind, value])).toEqual([["needs-you", 1]]);
+
+    status(h, "t1", { state: "working" });
+    status(h, "t1", { state: "blocked", msg: "Second question." });
+    turn(h, "t1", 2);
+    expect(h.transitions.map(({ kind, turn: value, question }) => [kind, value, question])).toEqual(
+      [
+        ["needs-you", 1, "First question."],
+        ["needs-you", 2, "Second question."],
+      ],
+    );
+  });
+
+  test("re-marks silently when a late refresh restores persisted done; later labels emit nothing", async () => {
+    const record = taskRecord(id("c"), {
+      outcome: { state: "done", turn: 1, ended: false, at: 99_000 },
+    });
+    const h = await harness([record], { deferRefresh: true });
+    snapshot(h, [terminal()]);
+    status(h, "t1", { state: "done", msg: "Delivered once." });
+    turn(h, "t1", 1);
+    await h.releaseRefresh();
+    await settle(h);
+    emit(h, "labels", "t1", { labels: { note: "changed" } });
+
+    expect(h.transitions.map(({ kind, turn: value }) => [kind, value])).toEqual([["done", 1]]);
   });
 
   test.each([undefined, "Outdated summary."])(
-    "writes a new same-turn done message without reading after a settled summary of %s",
+    "writes a new same-turn done message without a read when the old summary is %s",
     async (previousSummary) => {
-      const outcome = {
-        state: "done" as const,
-        turn: 1,
-        ended: false,
-        at: 99_000,
-        ...(previousSummary === undefined ? {} : { summary: previousSummary }),
-      };
-      const record = taskRecord(id("1"), { outcome });
+      const record = taskRecord(id("d"), {
+        outcome: {
+          state: "done",
+          turn: 1,
+          ended: false,
+          at: 99_000,
+          ...(previousSummary === undefined ? {} : { summary: previousSummary }),
+        },
+      });
       const h = await harness([record]);
-      snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-      await drain();
-      await h.clock.advance(1_000);
-      expect(h.core.sets).toHaveLength(0);
-
-      statusEvent(h.watcher, "t1", { state: "done", msg: "New same-turn message." });
-      await drain();
-      await h.clock.advance(300);
+      snapshot(h, [terminal()]);
+      await settle(h);
+      status(h, "t1", { state: "done", msg: "New same-turn message." });
+      turn(h, "t1", 1);
+      await writeAfter(h);
 
       expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
         state: "done",
@@ -421,169 +569,91 @@ describe("TaskWatcher", () => {
         summary: "New same-turn message.",
       });
       expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
-      expect(h.core.sets).toHaveLength(1);
     },
   );
 
-  test("keeps transition dedupe memory when snapshot refresh finishes after events", async () => {
-    const h = await harness();
-    let releaseRefresh: (() => void) | undefined;
-    const refreshGate = new Promise<void>((resolve) => {
-      releaseRefresh = resolve;
-    });
-    const originalRefresh = h.store.refresh.bind(h.store);
-    h.store.refresh = async () => {
-      await refreshGate;
-      await originalRefresh();
-    };
-
-    snapshot(h.watcher, [terminal("t1", { status: { state: "working" } })]);
-    await drain();
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Choose one." });
-    statusEvent(h.watcher, "t1", { state: "working" });
-    await drain();
-    releaseRefresh?.();
-    await drain();
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Choose one." });
-    await drain();
-
-    expect(h.transitions.filter((transition) => transition.kind === "needs-you")).toHaveLength(1);
-  });
-
-  test("keeps needs-you dedupe through a missed snapshot", async () => {
-    const h = await harness();
-    snapshot(h.watcher, [terminal("t1", { status: { state: "working" } })]);
-    await drain();
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Choose one." });
-    statusEvent(h.watcher, "t1", { state: "working" });
-    await drain();
-
-    event(h.watcher, "missed", undefined, {
-      seq: 9,
-      terminals: [terminal("t1", { status: { state: "working" } })],
-    });
-    await drain();
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Choose one." });
-    await drain();
-
-    expect(h.transitions.map(({ kind, turn }) => [kind, turn])).toEqual([["needs-you", 1]]);
-  });
-
-  test("does not emit a historical transition when delayed refresh restores the baseline", async () => {
-    const record = taskRecord(id("f"), {
-      outcome: { state: "done", turn: 1, ended: true, at: 99_000 },
+  test("metadata before a late refresh does not supersede a persisted done", async () => {
+    const record = taskRecord(id("e"), {
+      outcome: { state: "done", turn: 1, ended: true, at: 99_000, summary: "Saved." },
     });
     const h = await harness([record], { deferRefresh: true });
-    snapshot(h.watcher, [
-      terminal("t1", {
-        state: "finished",
-        reason: "exited",
-        exit_code: 7,
-        status: null,
-      }),
+    snapshot(h, [
+      terminal("t1", { state: "finished", pid: null, status: null, turn: 1, exit_code: 0 }),
     ]);
-    await drain();
-    expect(h.transitions).toHaveLength(0);
+    await settle(h);
+    emit(h, "title", "t1", { title: "Renamed" });
+    await h.releaseRefresh();
+    await settle(h);
 
-    h.releaseRefresh?.();
-    await drain();
-    expect(h.transitions).toHaveLength(0);
-    event(h.watcher, "labels", "t1", { labels: { note: "refreshed" } });
-    await drain();
-
-    expect(h.transitions).toHaveLength(0);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toEqual(record.outcome);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("Saved.");
+    expect(h.core.sets).toHaveLength(0);
   });
 
-  test.each([
-    ["claude", claudeDoneScreen],
-    ["codex", codexDoneScreen],
-  ] as const)("reads the %s summary after the 750 ms settle delay", async (program, rows) => {
-    const record = taskRecord(id(program === "claude" ? "2" : "3"), {
-      run: { kind: "program", id: program },
+  test("a snapshot of the ended terminal does not resurrect a superseded done", async () => {
+    const record = taskRecord(id("f"), {
+      outcome: { state: "done", turn: 1, ended: false, at: 99_000, summary: "Old." },
     });
     const h = await harness([record]);
-    const screenRows = program === "codex" ? [...rows, "", "• Adapter check: Codex."] : rows;
-    h.connection.readHandler = async () => ({
-      complete: true,
-      how: "screen",
-      text: screenRows.join("\n"),
-    });
-    snapshot(h.watcher, [
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "working" } })]);
+    await settle(h);
+    finished(h, "t1", 7);
+    snapshot(h, [
       terminal("t1", {
-        argv: [program],
-        foreground: {
-          pid: 23,
-          name: program,
-          argv: [program],
-          cwd: "/repo",
-        },
-        status: { state: "done" },
+        state: "finished",
+        turn: 1,
+        status: null,
+        exit_code: 7,
+        reason: "exited",
+        finished_ms: 100_100,
       }),
     ]);
-    await drain();
-    await h.clock.advance(749);
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
-    await h.clock.advance(1);
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
-    await drain();
-    await h.clock.advance(300);
+    await writeAfter(h);
 
-    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe(
-      program === "claude"
-        ? "All 27 focused tests pass, and workspace typecheck is clean."
-        : "Adapter check: Codex.",
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
+      state: "stopped",
+      turn: 1,
+      exit: { code: 7 },
+    });
+  });
+
+  test("emits one needs-you at the completed turn", async () => {
+    const h = await harness();
+    snapshot(h, [terminal()]);
+    status(h, "t1", { state: "blocked", msg: "Approve the change?" });
+    turn(h, "t1", 1);
+
+    expect(h.transitions.map(({ kind, turn: value, question }) => [kind, value, question])).toEqual(
+      [["needs-you", 1, "Approve the change?"]],
     );
   });
 
-  test("associates a done status with the turn that follows it", async () => {
-    const record = taskRecord(id("b"));
+  test("writes a new done message delivered by snapshot", async () => {
+    const record = taskRecord(id("g"), {
+      outcome: { state: "done", turn: 1, ended: false, at: 99_000, summary: "Outdated." },
+    });
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
-
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Completed turn one." });
-    expect(h.transitions).toHaveLength(0);
-    event(h.watcher, "missed", undefined, {
-      seq: 3,
-      terminals: [
-        terminal("t1", { turn: 0, status: { state: "done", msg: "Completed turn one." } }),
-      ],
-    });
-    await drain();
-    expect(h.transitions).toHaveLength(0);
-    event(h.watcher, "turn", "t1", { turn: 1 });
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      summary: "Completed turn one.",
-    });
-    expect(h.transitions.map(({ kind, turn, summary }) => [kind, turn, summary])).toEqual([
-      ["done", 1, "Completed turn one."],
+    snapshot(h, [
+      terminal("t1", { turn: 1, status: { state: "done", msg: "New snapshot message." } }),
     ]);
+    await settle(h);
+    await writeAfter(h);
+
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("New snapshot message.");
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
   });
 
-  test("keeps a snapshot-observed working-to-done change pending for its turn event", async () => {
-    const record = taskRecord(id("b"));
+  test("a snapshot restating done needs no turn event", async () => {
+    const record = taskRecord(id("h"));
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
-
-    snapshot(h.watcher, [
-      terminal("t1", { turn: 0, status: { state: "done", msg: "Snapshot then turn." } }),
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done", msg: "Snapshot then turn." });
+    snapshot(h, [
+      terminal("t1", { turn: 1, status: { state: "done", msg: "Snapshot then turn." } }),
     ]);
-    await drain();
-    expect(h.transitions).toHaveLength(0);
-    event(h.watcher, "turn", "t1", { turn: 1 });
-    await drain();
-    await h.clock.advance(300);
+    await writeAfter(h);
 
-    expect(h.transitions.map(({ kind, turn, summary }) => [kind, turn, summary])).toEqual([
-      ["done", 1, "Snapshot then turn."],
-    ]);
+    expect(h.transitions.map(({ kind, turn: value }) => [kind, value])).toEqual([["done", 1]]);
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "done",
       turn: 1,
@@ -591,422 +661,75 @@ describe("TaskWatcher", () => {
     });
   });
 
-  test("attributes turn-before-status to the already reported turn", async () => {
-    const record = taskRecord(id("0"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
+  test("metadata after a silent snapshot completion emits nothing", async () => {
+    const h = await harness([taskRecord(id("i"))]);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done", msg: "Quiet." } })]);
+    await settle(h);
+    emit(h, "labels", "t1", { labels: { color: "blue" } });
 
-    event(h.watcher, "turn", "t1", { turn: 1 });
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Turn first, status second." });
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.transitions.map(({ kind, turn }) => [kind, turn])).toEqual([["done", 1]]);
-    expect(h.transitions[0]?.summary).toBe("Turn first, status second.");
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      summary: "Turn first, status second.",
-    });
-  });
-
-  test("attributes done to the current turn after 500 ms when no turn event arrives", async () => {
-    const record = taskRecord(id("0"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
-
-    statusEvent(h.watcher, "t1", { state: "done", msg: "No turn event." });
-    await drain();
-    await h.clock.advance(499);
     expect(h.transitions).toHaveLength(0);
-    expect(h.core.sets).toHaveLength(0);
-    await h.clock.advance(1);
-    await h.clock.advance(300);
-
-    expect(h.transitions.map(({ kind, turn }) => [kind, turn])).toEqual([["done", 0]]);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 0,
-      summary: "No turn event.",
-    });
   });
 
-  test("attributes a pending completion when the terminal ends before the turn event", async () => {
-    const record = taskRecord(id("0"));
+  test.each([
+    [
+      "ended idle with non-zero exit",
+      terminal("t1", { state: "finished", turn: 1, status: null, exit_code: 7 }),
+      7,
+      "stopped",
+    ],
+    [
+      "idle then zero exit",
+      terminal("t1", { state: "finished", turn: 1, status: null, exit_code: 0 }),
+      0,
+      "done",
+    ],
+  ] as const)("classifies %s", async (_label, view, code, expected) => {
+    const record = taskRecord(id("j"));
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
-
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Finished before its turn report." });
-    expect(h.transitions).toHaveLength(0);
-    event(h.watcher, "lost", "t1", { reason: "exited", exit_code: 7, signal: null });
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.transitions.map(({ kind, turn, summary }) => [kind, turn, summary])).toEqual([
-      ["done", 0, "Finished before its turn report."],
-    ]);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 0,
-      ended: true,
-      summary: "Finished before its turn report.",
-    });
+    snapshot(h, [view]);
+    await settle(h);
+    if (expected === "done") await h.clock.advance(750);
+    await writeAfter(h);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.state).toBe(expected);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.exit?.code).toBe(
+      expected === "done" ? undefined : code,
+    );
   });
 
-  test("keeps status-then-turn done evidence when the terminal later exits non-zero", async () => {
-    const record = taskRecord(id("c"));
+  test("live idle at turn one then exit seven is stopped", async () => {
+    const record = taskRecord(id("j"));
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { turn: 0, status: { state: "working" } })]);
-    await drain();
-
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Completed before exit." });
-    event(h.watcher, "turn", "t1", { turn: 1 });
-    event(h.watcher, "finished", "t1", {
-      reason: "exited",
-      exit_code: 7,
-      signal: null,
-      finished_ms: h.clock.now(),
-    });
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      ended: true,
-      summary: "Completed before exit.",
-    });
-  });
-
-  test("a newer working observation supersedes persisted done evidence", async () => {
-    const record = taskRecord(id("d"), {
-      outcome: { state: "done", turn: 1, ended: false, at: 99_000, summary: "Old result." },
-    });
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "Old result." } })]);
-    await drain();
-
-    statusEvent(h.watcher, "t1", { state: "working" });
-    event(h.watcher, "finished", "t1", {
-      reason: "exited",
-      exit_code: 7,
-      signal: null,
-      finished_ms: h.clock.now(),
-    });
-    await drain();
-    await h.clock.advance(300);
-
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "idle" } })]);
+    await settle(h);
+    finished(h, "t1", 7);
+    await writeAfter(h);
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "stopped",
       turn: 1,
-      ended: true,
-      exit: { code: 7, reason: "exited" },
+      exit: { code: 7 },
     });
-    expect(h.transitions.at(-1)?.kind).toBe("stopped");
   });
 
-  test("stores stopped details for a non-zero terminal and stopped for a missing terminal", async () => {
-    const exited = taskRecord(id("4"), { terminal: "t-exited" });
-    const missing = taskRecord(id("5"), { terminal: "t-missing" });
-    const h = await harness([exited, missing]);
-    snapshot(h.watcher, [
-      terminal("t-exited", { state: "finished", reason: "exited", exit_code: 7, status: null }),
-    ]);
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[exited.id]?.outcome).toMatchObject({
-      state: "stopped",
-      turn: 1,
-      ended: true,
-      exit: { code: 7, signal: null, reason: "exited" },
-    });
-    expect(h.store.snapshot().tasks[missing.id]?.outcome).toMatchObject({
-      state: "stopped",
-      turn: 0,
-      ended: true,
-    });
-    expect(h.store.snapshot().tasks[missing.id]?.outcome).not.toHaveProperty("exit");
-  });
-
-  test("does not write outcomes for running or blocked tasks", async () => {
-    const running = taskRecord(id("6"), { terminal: "t-running" });
-    const blocked = taskRecord(id("7"), { terminal: "t-blocked" });
-    const h = await harness([running, blocked]);
-    snapshot(h.watcher, [
-      terminal("t-running", { status: { state: "working" } }),
-      terminal("t-blocked", { status: { state: "blocked", msg: "Need your choice" } }),
-    ]);
-    await drain();
-    await h.clock.advance(1_000);
-
-    expect(h.store.snapshot().tasks[running.id]?.outcome).toBeUndefined();
-    expect(h.store.snapshot().tasks[blocked.id]?.outcome).toBeUndefined();
-    expect(h.core.sets).toHaveLength(0);
-  });
-
-  test("uses successful exit as done evidence and avoids reading a kept shell", async () => {
-    const exited = taskRecord(id("8"), { terminal: "t-exit" });
-    const kept = taskRecord(id("9"), {
-      terminal: "t-kept",
-      outcome: { state: "done", turn: 1, ended: false, at: 99_000, summary: "Saved summary." },
-    });
-    const h = await harness([exited, kept]);
-    snapshot(h.watcher, [
-      terminal("t-exit", { state: "finished", reason: "exited", exit_code: 0, status: null }),
-      terminal("t-kept", {
-        state: "live",
-        reason: "exited",
-        exit_code: null,
-        status: { state: "done", msg: "Shell output." },
-      }),
-    ]);
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[kept.id]?.outcome).toMatchObject({
-      state: "done",
-      ended: true,
-      summary: "Saved summary.",
-    });
-    await h.clock.advance(750);
-    await h.clock.advance(300);
-    expect(h.store.snapshot().tasks[exited.id]?.outcome).toMatchObject({
-      state: "done",
-      ended: true,
-    });
-    expect(
-      h.connection.calls
-        .filter((call) => call.method === "terminal.read")
-        .map((call) => (call.params as { terminal: string }).terminal),
-    ).toEqual(["t-exit"]);
-  });
-
-  test("retries a failed summary read once after two seconds and then writes", async () => {
-    const record = taskRecord(id("a"));
+  test("ignores a stale done during a follow-up turn and rewrites after the next done", async () => {
+    const record = taskRecord(id("k"));
     const h = await harness([record]);
-    let reads = 0;
-    h.connection.readHandler = async () => {
-      reads += 1;
-      if (reads === 1) throw new Error("read failed");
-      return { complete: false, how: "screen", text: "Final response." };
-    };
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    expect(reads).toBe(1);
-    await h.clock.advance(1_999);
-    expect(reads).toBe(1);
-    await h.clock.advance(1);
-    expect(reads).toBe(2);
-    await drain();
-    await h.clock.advance(300);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done", msg: "First turn." });
+    turn(h, "t1", 1);
+    await writeAfter(h);
 
-    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("Final response.");
-  });
-
-  test("writes done without a summary after both reads fail", async () => {
-    const record = taskRecord(id("a"));
-    const h = await harness([record]);
-    let reads = 0;
-    h.connection.readHandler = async () => {
-      reads += 1;
-      throw new Error("terminal read unavailable");
-    };
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    await h.clock.advance(2_000);
-    await h.clock.advance(300);
-
-    expect(reads).toBe(2);
+    status(h, "t1", { state: "working" });
+    await writeAfter(h);
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "done",
       turn: 1,
+      summary: "First turn.",
     });
-    expect(h.store.snapshot().tasks[record.id]?.outcome).not.toHaveProperty("summary");
-  });
 
-  test("caps an unresolved summary read at three seconds", async () => {
-    const record = taskRecord(id("b"));
-    const h = await harness([record]);
-    h.connection.readHandler = () => new Promise(() => {});
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    await h.clock.advance(2_250);
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-    });
-    expect(h.store.snapshot().tasks[record.id]?.outcome).not.toHaveProperty("summary");
-  });
-
-  test("does not retry a read when the two-second delay reaches the summary cap", async () => {
-    const record = taskRecord(id("e"));
-    const h = await harness([record]);
-    let reads = 0;
-    let failRead: ((error: Error) => void) | undefined;
-    h.connection.readHandler = () => {
-      reads += 1;
-      return new Promise((_, reject) => {
-        failRead = reject;
-      });
-    };
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    expect(reads).toBe(1);
-    await h.clock.advance(1_250);
-    failRead?.(new Error("read failed at 2 s"));
-    await drain();
-
-    await h.clock.advance(999);
-    expect(reads).toBe(1);
-    await h.clock.advance(1);
-    expect(reads).toBe(1);
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-    });
-    expect(h.store.snapshot().tasks[record.id]?.outcome).not.toHaveProperty("summary");
-    expect(reads).toBe(1);
-  });
-
-  test("cancels a pending screen read when a new status arrives", async () => {
-    const record = taskRecord(id("c"));
-    const h = await harness([record]);
-    h.connection.readHandler = () => new Promise(() => {});
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    statusEvent(h.watcher, "t1", { state: "working" });
-    await drain();
-    await h.clock.advance(2_250);
-
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toBeUndefined();
-  });
-
-  test("preserves done evidence when the terminal is removed before its summary read", async () => {
-    const record = taskRecord(id("c"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(500);
-    event(h.watcher, "removed", "t1", {});
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      ended: true,
-    });
-    expect(h.store.snapshot().tasks[record.id]?.outcome).not.toHaveProperty("summary");
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
-  });
-
-  test("cancels a scheduled summary read when a terminal becomes a kept shell", async () => {
-    const record = taskRecord(id("f"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(100);
-    event(h.watcher, "lost", "t1", {
-      reason: null,
-      exit_code: null,
-      signal: null,
-    });
-    await drain();
-    await h.clock.advance(2_900);
-
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      ended: true,
-    });
-  });
-
-  test("ignores an in-flight screen result after the terminal becomes a kept shell", async () => {
-    const record = taskRecord(id("f"));
-    const h = await harness([record]);
-    let resolveRead: ((value: unknown) => void) | undefined;
-    h.connection.readHandler = () =>
-      new Promise((resolve) => {
-        resolveRead = resolve;
-      });
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done" } })]);
-    await drain();
-    await h.clock.advance(750);
-    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
-
-    event(h.watcher, "lost", "t1", { reason: null, exit_code: null, signal: null });
-    await drain();
-    resolveRead?.({ complete: true, how: "screen", text: "Shell output after the program ended." });
-    await drain();
-    await h.clock.advance(300);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      ended: true,
-    });
-    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBeUndefined();
-  });
-
-  test("keeps a done status message when a kept shell arrives before the write", async () => {
-    const record = taskRecord(id("1"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [
-      terminal("t1", { status: { state: "done", msg: "Saved before shell." } }),
-    ]);
-    await drain();
-    await h.clock.advance(100);
-    event(h.watcher, "lost", "t1", {
-      reason: "exited",
-      exit_code: null,
-      signal: null,
-    });
-    await drain();
-    expect(h.core.sets).toHaveLength(0);
-    await h.clock.advance(200);
-
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
-      state: "done",
-      turn: 1,
-      ended: true,
-      summary: "Saved before shell.",
-    });
-    expect(h.core.sets).toHaveLength(1);
-  });
-
-  test("ignores a stale done status during a follow-up turn and rewrites after the next done", async () => {
-    const record = taskRecord(id("d"));
-    const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "First turn." } })]);
-    await drain();
-    await h.clock.advance(300);
-    const setCount = h.core.sets.length;
-
-    event(h.watcher, "turn", "t1", { turn: 2 });
-    await drain();
-    await h.clock.advance(1_000);
-    expect(h.core.sets).toHaveLength(setCount);
-    expect(h.store.snapshot().tasks[record.id]?.outcome?.turn).toBe(1);
-
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Second turn." });
-    await drain();
-    await h.clock.advance(300);
+    status(h, "t1", { state: "done", msg: "Second turn." });
+    turn(h, "t1", 2);
+    await writeAfter(h);
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "done",
       turn: 2,
@@ -1014,209 +737,289 @@ describe("TaskWatcher", () => {
     });
   });
 
-  test("applies terminal events when a linked record appears later", async () => {
-    const h = await harness();
-    snapshot(h.watcher, [terminal("t1", { status: { state: "working" } })]);
-    await drain();
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Already finished." });
-    await drain();
-    const record = await h.store.create({
-      text: "A late record",
-      terminal: "t1",
-      run: { kind: "program", id: "claude" },
-      folder: "/repo",
-    });
-    await drain();
-    await h.clock.advance(500);
-    await h.clock.advance(300);
+  test("a status change before 750 ms makes zero reads", async () => {
+    const h = await harness([taskRecord(id("k"))]);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(h);
+    status(h, "t1", { state: "working" });
+    await h.clock.advance(1_000);
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
+  });
+
+  test("stop() with scheduled and in-flight reads applies nothing", async () => {
+    const scheduled = await harness([taskRecord(id("l"))]);
+    snapshot(scheduled, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(scheduled);
+    await scheduled.watcher.stop();
+    await scheduled.clock.advance(1_000);
+    expect(
+      scheduled.connection.calls.filter((call) => call.method === "terminal.read"),
+    ).toHaveLength(0);
+    expect(scheduled.core.sets).toHaveLength(0);
+
+    const inflight = await harness([taskRecord(id("m"))]);
+    let resolveRead: ((value: unknown) => void) | undefined;
+    inflight.connection.readHandler = () =>
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      });
+    snapshot(inflight, [terminal("t1", { turn: 1, status: { state: "done" } })]);
+    await settle(inflight);
+    await inflight.clock.advance(750);
+    await settle(inflight);
+    expect(
+      inflight.connection.calls.filter((call) => call.method === "terminal.read"),
+    ).toHaveLength(1);
+    await inflight.watcher.stop();
+    resolveRead?.({ complete: true, text: "Too late." });
+    await settle(inflight);
+    expect(inflight.core.sets).toHaveLength(0);
+  });
+
+  test("ignores a stale read while a newer turn read is in flight", async () => {
+    const record = taskRecord(id("n"));
+    const h = await harness([record]);
+    const pending: Array<(value: unknown) => void> = [];
+    h.connection.readHandler = () =>
+      new Promise((resolve) => {
+        pending.push(resolve);
+      });
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done" });
+    turn(h, "t1", 1);
+    await h.clock.advance(750);
+    await settle(h);
+
+    status(h, "t1", { state: "working" });
+    status(h, "t1", { state: "done" });
+    turn(h, "t1", 2);
+    await h.clock.advance(750);
+    await settle(h);
+    expect(pending).toHaveLength(2);
+    pending[0]?.({ complete: true, text: "Screen from turn one." });
+    await settle(h);
+    pending[1]?.({ complete: true, text: "Screen from turn two." });
+    await settle(h);
+    await writeAfter(h);
 
     expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
       state: "done",
-      summary: "Already finished.",
+      turn: 2,
+      summary: "Screen from turn two.",
     });
   });
 
-  test("links unlinked program tasks on created events and snapshots without double-linking", async () => {
-    const first = taskRecord(id("e"), { terminal: undefined });
-    const second = taskRecord(id("f"), { terminal: undefined });
-    const h = await harness([first, second]);
-    const phoneClaim = await h.store.link(first.id, "t1");
-    snapshot(h.watcher, [terminal("t1"), terminal("t2")]);
-    await drain();
-    expect(h.store.snapshot().tasks[first.id]?.terminal).toBe("t1");
-    expect(h.store.snapshot().tasks[second.id]?.terminal).toBe("t2");
-    expect(phoneClaim.terminal).toBe("t1");
+  test("stores stopped details for a non-zero exit and stopped for a missing terminal", async () => {
+    const exited = taskRecord(id("o"));
+    const missing = taskRecord(id("p"), { terminal: "t2" });
+    const h = await harness([exited, missing]);
+    snapshot(h, [terminal("t1")]);
+    await settle(h);
+    finished(h, "t1", 9);
+    await writeAfter(h);
 
-    await h.store.create({
-      text: "Window task",
-      run: { kind: "program", id: "claude" },
-      folder: "/repo",
+    expect(h.store.snapshot().tasks[exited.id]?.outcome).toMatchObject({
+      state: "stopped",
+      exit: { code: 9, signal: null, reason: "exited" },
     });
-    const createdTerminal = terminal("t3", { created_ms: h.clock.now() });
-    event(h.watcher, "created", "t3", createdTerminal);
-    await drain();
-    const newRecord = Object.values(h.store.snapshot().tasks).find(
-      (candidate) => candidate.terminal === "t3",
-    );
-    expect(newRecord).toBeDefined();
+    expect(h.store.snapshot().tasks[missing.id]?.outcome).toMatchObject({ state: "stopped" });
+  });
+
+  test("does not write outcomes for running or blocked tasks", async () => {
+    const h = await harness([taskRecord(id("q"))]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "blocked", msg: "No document outcome." });
+    turn(h, "t1", 1);
+    await h.clock.advance(1_000);
+
+    expect(h.core.sets).toHaveLength(0);
+    expect(h.transitions[0]?.question).toBe("No document outcome.");
+  });
+
+  test("uses successful exit as done evidence and avoids reading a kept shell", async () => {
+    const exited = taskRecord(id("r"));
+    const kept = taskRecord(id("s"), { terminal: "t-kept" });
+    const h = await harness([exited, kept]);
+    snapshot(h, [
+      terminal("t1", { state: "finished", turn: 1, status: null, exit_code: 0, reason: "exited" }),
+      terminal("t-kept", { turn: 1, status: null, reason: "exited" }),
+    ]);
+    await settle(h);
+    await h.clock.advance(750);
+    await writeAfter(h);
+
+    expect(h.store.snapshot().tasks[exited.id]?.outcome?.state).toBe("done");
+    expect(h.store.snapshot().tasks[kept.id]?.outcome).toMatchObject({
+      state: "stopped",
+      ended: true,
+    });
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(1);
+  });
+
+  test("preserves done evidence when the terminal is removed before its summary read", async () => {
+    const record = taskRecord(id("t"));
+    const h = await harness([record]);
+    snapshot(h, [terminal()]);
+    await settle(h);
+    status(h, "t1", { state: "done", msg: "Kept in memory." });
+    turn(h, "t1", 1);
+    emit(h, "removed", "t1", {});
+    await writeAfter(h);
+
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toMatchObject({
+      state: "done",
+      ended: true,
+      summary: "Kept in memory.",
+    });
+    expect(h.connection.calls.filter((call) => call.method === "terminal.read")).toHaveLength(0);
+  });
+
+  test("matches unlinked records using record.createdAt and ignores already claimed addresses", async () => {
+    const claimed = taskRecord(id("u"), { createdAt: 80_000 });
+    const unlinked = taskRecord(id("v"), { terminal: undefined, createdAt: 80_000 });
+    const h = await harness([claimed, unlinked]);
+    snapshot(h, [terminal("t1", { created_ms: 80_000 }), terminal("t2", { created_ms: 80_000 })]);
+    await settle(h);
+
+    expect(h.store.snapshot().tasks[claimed.id]?.terminal).toBe("t1");
+    expect(h.store.snapshot().tasks[unlinked.id]?.terminal).toBe("t2");
   });
 
   test("swallows a task_linked race while matching an unlinked record", async () => {
-    const record = taskRecord(id("1"), { terminal: undefined });
+    const record = taskRecord(id("w"), { terminal: undefined });
     const h = await harness([record]);
     h.store.link = async () => {
       throw new TaskStoreError("task_linked");
     };
-    snapshot(h.watcher, [terminal("t1")]);
-    await drain();
+    snapshot(h, [terminal("t1")]);
+    await settle(h);
 
-    expect(h.logger.entries.filter((entry) => entry.level === "error")).toHaveLength(0);
+    expect(h.logger.entries.some((entry) => entry.fields?.code === "task_linked")).toBe(false);
     expect(h.store.snapshot().tasks[record.id]?.terminal).toBeUndefined();
   });
 
   test("coalesces multiple dirty outcomes into one document write", async () => {
-    const first = taskRecord(id("2"), { terminal: "t1" });
-    const second = taskRecord(id("3"), { terminal: "t2" });
+    const first = taskRecord(id("x"));
+    const second = taskRecord(id("y"), { terminal: "t2" });
     const h = await harness([first, second]);
-    snapshot(h.watcher, [
-      terminal("t1", { status: { state: "done", msg: "First." } }),
-      terminal("t2", { status: { state: "working" } }),
+    snapshot(h, [
+      terminal("t1", { turn: 1, status: { state: "done", msg: "First." } }),
+      terminal("t2", { turn: 2, status: { state: "done", msg: "Second." } }),
     ]);
-    await drain();
-    await h.clock.advance(100);
-    statusEvent(h.watcher, "t2", { state: "done", msg: "Second." });
-    event(h.watcher, "turn", "t2", { turn: 2 });
-    await drain();
-    await h.clock.advance(199);
-    expect(h.core.sets).toHaveLength(0);
-    await h.clock.advance(1);
+    await settle(h);
+    await writeAfter(h);
 
     expect(h.core.sets).toHaveLength(1);
     expect(h.store.snapshot().tasks[first.id]?.outcome?.summary).toBe("First.");
     expect(h.store.snapshot().tasks[second.id]?.outcome?.summary).toBe("Second.");
   });
 
-  test("retries document conflicts after five seconds and stops after three retries", async () => {
-    const record = taskRecord(id("4"));
+  test("retries document conflicts after five seconds, caps retries, and waits for a change", async () => {
+    const record = taskRecord(id("z"));
     const h = await harness([record]);
     h.core.conflicts = 2;
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "Conflict task." } })]);
-    await drain();
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done", msg: "Conflict task." } })]);
+    await settle(h);
     await h.clock.advance(300);
-    expect(h.store.snapshot().tasks[record.id]?.outcome).toBeUndefined();
+    await settle(h);
     expect(h.core.sets).toHaveLength(2);
     await h.clock.advance(4_999);
     expect(h.core.sets).toHaveLength(2);
     await h.clock.advance(1);
-    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("Conflict task.");
+    await settle(h);
     expect(h.core.sets).toHaveLength(4);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("Conflict task.");
 
-    const stuck = await harness([taskRecord(id("5"))]);
-    stuck.core.conflicts = 20;
-    snapshot(stuck.watcher, [terminal("t1", { status: { state: "done", msg: "Repeated." } })]);
-    await drain();
+    const stuck = await harness([taskRecord(id("1"))]);
+    stuck.core.conflicts = 50;
+    snapshot(stuck, [terminal("t1", { turn: 1, status: { state: "done", msg: "Repeated." } })]);
+    await settle(stuck);
     await stuck.clock.advance(300);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await stuck.clock.advance(5_000);
-    }
-    const attemptsAfterCap = stuck.core.sets.length;
+    await settle(stuck);
     await stuck.clock.advance(15_000);
-    expect(stuck.core.sets).toHaveLength(attemptsAfterCap);
+    const attemptsAfterCap = stuck.core.sets.length;
+    expect(attemptsAfterCap).toBe(8);
     expect(stuck.watcher.status().pendingWrites).toBe(1);
+    stuck.core.conflicts = 0;
+    emit(stuck, "labels", "t1", { labels: { note: "new fact" } });
+    await writeAfter(stuck);
+    expect(stuck.store.snapshot().tasks[id("1")]?.outcome?.summary).toBe("Repeated.");
   });
 
-  test("logs tasks_full without task content and drops the pending flush", async () => {
-    const records: TaskRecord[] = [];
-    for (let index = 0; index < 150; index += 1) {
-      records.push(
-        taskRecord(`tk${index.toString(16).padStart(32, "0")}`, {
-          terminal: undefined,
-          text: "x".repeat(7_900),
-        }),
-      );
-    }
-    const target = taskRecord(id("6"), { text: "PRIVATE TASK TEXT" });
-    records.push(target);
-    const h = await harness(records);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "Private summary" } })]);
-    await drain();
+  test("logs tasks_full without task content and drops the pending flush until a change", async () => {
+    const record = taskRecord(id("2"));
+    const h = await harness([record]);
+    h.core.writeError = new TaskStoreError("tasks_full");
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done", msg: "Private summary" } })]);
+    await settle(h);
     await h.clock.advance(300);
+    await settle(h);
 
     expect(h.watcher.status().pendingWrites).toBe(0);
-    expect(h.store.snapshot().tasks[target.id]?.outcome).toBeUndefined();
+    expect(h.store.snapshot().tasks[record.id]?.outcome).toBeUndefined();
     expect(h.logger.entries.some((entry) => entry.fields?.code === "tasks_full")).toBe(true);
     expect(JSON.stringify(h.logger.entries)).not.toContain("PRIVATE TASK TEXT");
     expect(JSON.stringify(h.logger.entries)).not.toContain("Private summary");
   });
 
-  test("emits transitions once per class and turn, including recordless agents, without text logs", async () => {
-    const record = taskRecord(id("7"));
-    const stopped = taskRecord(id("8"), { terminal: "t-stopped" });
-    const h = await harness([record, stopped]);
-    snapshot(h.watcher, [
-      terminal("t1", { status: { state: "blocked", msg: "Secret question" } }),
-      terminal("t-stopped", { status: { state: "working" } }),
-    ]);
-    await drain();
-    expect(h.transitions).toHaveLength(0);
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Secret question" });
-    statusEvent(h.watcher, "t1", { state: "blocked", msg: "Secret question" });
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Secret summary" });
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Secret summary" });
-    event(h.watcher, "turn", "t1", { turn: 2 });
-    statusEvent(h.watcher, "t1", { state: "done", msg: "Turn two." });
-    event(h.watcher, "removed", "t-stopped", {});
-    const outside = terminal("t-outside", {
-      status: { state: "blocked", msg: "Outside question" },
+  test("contains a throwing sink and keeps task text out of logs", async () => {
+    const h = await harness([taskRecord(id("3"))]);
+    h.watcher.onTransition(() => {
+      throw new Error("sink failed");
     });
-    event(h.watcher, "created", "t-outside", outside);
-    await drain();
+    snapshot(h, [terminal()]);
+    status(h, "t1", { state: "blocked", msg: "PRIVATE QUESTION" });
+    status(h, "t1", { state: "working" });
+    status(h, "t1", { state: "done", msg: "PRIVATE SUMMARY" });
+    turn(h, "t1", 2);
 
-    expect(h.transitions.map((transition) => [transition.address, transition.kind])).toEqual([
-      ["t1", "done"],
-      ["t1", "done"],
-      ["t-stopped", "stopped"],
-      ["t-outside", "needs-you"],
-    ]);
-    expect(h.transitions[0]?.summary).toBe("Secret summary");
-    expect(h.transitions.find((transition) => transition.address === "t-outside")?.question).toBe(
-      "Outside question",
-    );
-    expect(JSON.stringify(h.logger.entries)).not.toContain("Secret question");
-    expect(JSON.stringify(h.logger.entries)).not.toContain("Secret summary");
+    expect(h.transitions.map(({ kind }) => kind)).toEqual(["needs-you", "done"]);
+    expect(JSON.stringify(h.logger.entries)).not.toContain("PRIVATE QUESTION");
+    expect(JSON.stringify(h.logger.entries)).not.toContain("PRIVATE SUMMARY");
     expect(JSON.stringify(h.logger.entries)).not.toContain("PRIVATE TASK TEXT");
+    expect(h.logger.entries.some((entry) => entry.fields?.code === "transition_sink")).toBe(true);
   });
 
   test("ignores remote terminals and reports liveness, counts, and resume forwarding", async () => {
-    const local = taskRecord(id("8"), { terminal: "t-live" });
-    const remote = taskRecord(id("9"), { terminal: "box/t1" });
+    const local = taskRecord(id("4"));
+    const remote = taskRecord(id("5"), { terminal: "box/t7" });
     const h = await harness([local, remote]);
-    snapshot(h.watcher, [
-      terminal("t-live"),
-      terminal("t-kept", { reason: "exited" }),
-      terminal("box/t1", { address: "box/t1", status: { state: "done", msg: "remote" } }),
-    ]);
-    await drain();
+    snapshot(h, [terminal("t1"), terminal("box/t7")]);
+    await settle(h);
+    status(h, "box/t7", { state: "done", msg: "remote" });
 
-    expect([...(h.watcher.liveTerminals() ?? [])]).toEqual(["t-live"]);
-    expect(h.watcher.status()).toMatchObject({ terminals: 3, tracked: 1, state: "live", seq: 1 });
-    expect(h.transitions).toHaveLength(0);
+    expect(h.watcher.status()).toMatchObject({ state: "live", terminals: 1, tracked: 1 });
+    expect([...(h.watcher.liveTerminals() ?? [])]).toEqual(["t1"]);
     h.watcher.resume();
     expect(h.connection.resumes).toBe(1);
     h.connection.state = { ...h.connection.state, state: "backoff" };
     expect(h.watcher.liveTerminals()).toBeUndefined();
+    h.watcher.onConnectionState({ ...h.connection.state, state: "live" });
   });
 
-  test("stops the connection and cancels its pending writes", async () => {
-    const record = taskRecord(id("a"));
+  test("uses the live gate to retry pending writes when the connection returns", async () => {
+    const record = taskRecord(id("6"));
     const h = await harness([record]);
-    snapshot(h.watcher, [terminal("t1", { status: { state: "done", msg: "Soon." } })]);
-    await drain();
+    h.connection.state = { ...h.connection.state, state: "backoff" };
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done", msg: "After reconnect." } })]);
+    await settle(h);
+    await h.clock.advance(300);
+    expect(h.core.sets).toHaveLength(0);
+    h.connection.state = { ...h.connection.state, state: "live" };
+    h.watcher.onConnectionState(h.connection.state);
+    await writeAfter(h);
+    expect(h.store.snapshot().tasks[record.id]?.outcome?.summary).toBe("After reconnect.");
+  });
+
+  test("stop cancels a scheduled outcome flush", async () => {
+    const h = await harness([taskRecord(id("7"))]);
+    snapshot(h, [terminal("t1", { turn: 1, status: { state: "done", msg: "Soon." } })]);
+    await settle(h);
     expect(h.watcher.status().pendingWrites).toBe(1);
-
     await h.watcher.stop();
-    await h.clock.advance(1_000);
-
+    await h.clock.advance(500);
     expect(h.connection.stops).toBe(1);
     expect(h.core.sets).toHaveLength(0);
     expect(h.watcher.status().pendingWrites).toBe(0);
