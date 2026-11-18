@@ -9,6 +9,7 @@ export type DeliveryItem =
   | { type: "event"; now: number; event: HcEvent; revealed?: Terminal }
   | { type: "record"; now: number; address: string; record: TaskRecord | undefined }
   | { type: "refresh"; now: number }
+  | { type: "advance"; now: number }
   | { type: "change"; now: number };
 
 export interface HistoryGroup {
@@ -192,30 +193,65 @@ export function buildDeliveries(history: History): Deliveries {
 
   const equivalent: DeliveryItem[] = [snapshot(0, history.initial)];
   const lastEvent = new Map<string, number>();
+  const firstClass = new Map<string, number>();
+  const firstLifeEnd = new Map<string, number>();
   equivalentGroups.forEach((group, index) => {
-    const address = group.events[0]?.event.terminal;
-    if (address !== undefined) lastEvent.set(address, index);
+    for (const item of group.events) {
+      const address = item.event.terminal;
+      if (address === undefined) continue;
+      lastEvent.set(address, index);
+      const data = item.event.data as unknown as Record<string, unknown>;
+      const status = data.status as Status | null | undefined;
+      const revealsClass =
+        (item.event.type === "status" &&
+          (status?.state === "done" ||
+            status?.state === "blocked" ||
+            status?.state === "error" ||
+            (status?.state === "idle" && (item.revealed?.turn ?? 0) >= 1))) ||
+        item.event.type === "finished" ||
+        item.event.type === "lost" ||
+        item.event.type === "removed";
+      if (revealsClass && !firstClass.has(address)) firstClass.set(address, index);
+      if (
+        (item.event.type === "finished" ||
+          item.event.type === "lost" ||
+          item.event.type === "removed" ||
+          item.event.type === "restarted") &&
+        !firstLifeEnd.has(address)
+      ) {
+        firstLifeEnd.set(address, index);
+      }
+    }
   });
   const arrivals = new Map<number, Array<{ address: string; record: TaskRecord }>>();
   for (const item of linked) {
-    const last = lastEvent.get(item.address) ?? 0;
+    const safeBefore = [
+      firstClass.get(item.address),
+      firstLifeEnd.get(item.address),
+      lastEvent.get(item.address),
+    ].filter((value): value is number => value !== undefined);
+    const latestSafeBoundary = safeBefore.length > 0 ? Math.min(...safeBefore) : 0;
     const boundary =
       history.shape === "late-records"
-        ? int(mulberry32(history.seed + item.record.createdAt), last + 1)
+        ? int(mulberry32(history.seed + item.record.createdAt), latestSafeBoundary + 1)
         : 0;
     const existing = arrivals.get(boundary) ?? [];
     existing.push(item);
     arrivals.set(boundary, existing);
   }
   const restates = new Map<number, number>();
-  const refreshes = new Set<number>();
+  const refreshes = new Map<number, number>();
+  const scheduleRefresh = (boundary: number): void => {
+    refreshes.set(boundary, (refreshes.get(boundary) ?? 0) + 1);
+  };
   if (equivalentGroups.length > 0) {
     const random = mulberry32(history.seed ^ 0x713b9a41);
+    scheduleRefresh(int(random, equivalentGroups.length + 1));
     for (let index = 0; index < Math.min(3, equivalentGroups.length); index += 1) {
       const boundary = 1 + int(random, equivalentGroups.length);
       restates.set(boundary, (restates.get(boundary) ?? 0) + 1);
+      scheduleRefresh(boundary);
     }
-    refreshes.add(int(random, equivalentGroups.length + 1));
   }
   let lastSnapshot = history.initial;
   for (let boundary = 0; boundary <= equivalentGroups.length; boundary += 1) {
@@ -228,7 +264,6 @@ export function buildDeliveries(history: History): Deliveries {
         record: item.record,
       });
     }
-    if (refreshes.has(boundary)) equivalent.push({ type: "refresh", now });
     if (boundary > 0) lastSnapshot = equivalentGroups[boundary - 1]?.terminals ?? lastSnapshot;
     for (let count = restates.get(boundary) ?? 0; count > 0; count -= 1) {
       equivalent.push(snapshot(now, lastSnapshot));
@@ -236,6 +271,7 @@ export function buildDeliveries(history: History): Deliveries {
     if (boundary > 0 && boundary % 3 === 0) equivalent.push({ type: "change", now });
     const group = equivalentGroups[boundary];
     if (group !== undefined) {
+      equivalent.push({ type: "advance", now: group.now });
       for (const event of group.events) {
         equivalent.push({
           type: "event",
@@ -245,14 +281,20 @@ export function buildDeliveries(history: History): Deliveries {
         });
       }
     }
+    for (let count = refreshes.get(boundary) ?? 0; count > 0; count -= 1) {
+      equivalent.push({ type: "refresh", now: Math.max(now, group?.now ?? now) });
+    }
   }
+  equivalent.push({ type: "advance", now: (equivalentGroups.at(-1)?.now ?? 0) + 4_000 });
   const cut = Math.min(history.cut, baseGroups.length);
   const epochState =
     cut === 0 ? history.initial : (baseGroups[cut - 1]?.terminals ?? history.initial);
   const epoch: DeliveryItem[] = [
     snapshot(0, history.initial),
+    { type: "refresh", now: 0 },
     ...records(history, 0),
     snapshot(baseGroups[cut - 1]?.now ?? 0, epochState),
+    { type: "refresh", now: baseGroups[cut - 1]?.now ?? 0 },
     ...events(baseGroups.slice(cut)),
   ];
   return { base, equivalent, epoch };
@@ -521,14 +563,17 @@ function records(history: History, now: number): DeliveryItem[] {
 }
 
 function events(groups: HistoryGroup[]): DeliveryItem[] {
-  return groups.flatMap((group) =>
-    group.events.map((event) => ({
+  const delivery = groups.flatMap((group) => [
+    { type: "advance" as const, now: group.now },
+    ...group.events.map((event) => ({
       type: "event" as const,
       now: group.now,
       event: event.event,
       ...(event.revealed === undefined ? {} : { revealed: event.revealed }),
     })),
-  );
+  ]);
+  delivery.push({ type: "advance", now: (groups.at(-1)?.now ?? 0) + 4_000 });
+  return delivery;
 }
 
 function snapshot(now: number, terminals: Terminal[]): DeliveryItem {
